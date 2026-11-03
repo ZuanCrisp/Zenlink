@@ -145,7 +145,12 @@ function applyState(next) {
     els.tally.dataset.state = "live";
     els.tallyText.textContent = "Live";
   }
-  if (casting) {
+  // AirPlay: the device comes to us, so while waiting keep the how-to visible
+  // instead of the cable checklist.
+  const airplayWaiting = Boolean(device?.airplay) && casting && phase !== "streaming";
+  if (airplayWaiting) {
+    closeConnect();
+  } else if (casting) {
     if (!showingConnect && !player._painted) openConnect(state.device?.name || device?.name);
     if (showingConnect) advanceFlow(PHASE_STEP[phase]);
   } else if (phase === "error" && showingConnect) {
@@ -170,15 +175,15 @@ function renderIdle(device) {
   const NEED = {
     wifi: ["Wi-Fi", "Wi-Fi isn't set up yet",
       "Wireless is chosen. Connect the cable, unlock the device and press Set up Wi-Fi in Settings once, then unplug. The PC and the device must be on the same network. Or switch to Wired."],
-    mode: ["Driver", "Choose a connection mode", "Pick Apple Driver or USB Direct to continue."],
+    mode: ["Driver", "Choose a connection mode", "Pick Apple Driver or ZenLink Studio to continue."],
     removefilter: ["Unsafe driver", "Remove the libusb0 filter first",
       "A libusb0 filter is stacked on Apple's driver. It can crash Windows and hides the device. Open Connection & Drivers and press Remove libusb0 filter, then reconnect the cable."],
-    bind: ["Driver", "Install the USB Direct driver",
-      "USB Direct uses the libusb0 driver on the device, like TikTok LIVE Studio. Open Connection & Drivers and press Install USB Direct driver, then reconnect the cable."],
+    bind: ["Driver", "Install the ZenLink Studio driver",
+      "ZenLink Studio uses the libusb0 driver on the device, like TikTok LIVE Studio. Open Connection & Drivers and press Install ZenLink Studio driver, then reconnect the cable."],
     package: ["Driver", "libusb-win32 isn't installed",
-      "USB Direct uses libusb-win32, which isn't on this PC. Install TikTok LIVE Studio's iOS driver or libusb-win32 once, then press Check drivers."],
+      "ZenLink Studio uses libusb-win32, which isn't on this PC. Install TikTok LIVE Studio's iOS driver or libusb-win32 once, then press Check drivers."],
     restore: ["Driver", "Restore the Apple driver",
-      "The device uses the USB Direct driver, so Apple mode can't see it. Open Connection & Drivers and press Restore Apple driver, then reconnect the cable."],
+      "The device uses the ZenLink Studio driver, so Apple mode can't see it. Open Connection & Drivers and press Restore Apple driver, then reconnect the cable."],
   };
   const need = device && NEED[device.need];
   const idleAction = $("#idle-action");
@@ -206,6 +211,23 @@ function renderIdle(device) {
   }
   els.deviceArt.dataset.state = art;
   els.deviceChip.dataset.state = art;
+  renderAirplayGuide(device);
+}
+
+// ZenLink Studio over Wi-Fi: the device mirrors to us, so show how.
+function renderAirplayGuide(device) {
+  const guide = $("#airplay-guide");
+  const on = Boolean(device?.airplay) && state.phase !== "streaming";
+  guide.hidden = !on;
+  if (!on) return;
+  $("#ag-name").textContent = `“${device.receiver || "ZenLink"}”`;
+  const waiting = CASTING.includes(state.phase);
+  els.idleTitle.textContent = waiting ? "Waiting for your iPhone or iPad" : "Mirror over Wi-Fi with AirPlay";
+  els.idleSub.textContent = waiting ? "ZenLink is visible on your network now. Follow these steps on the device:"
+    : "Press Start casting, then follow these steps on the device:";
+  $("#ag-note").textContent = firewallOk === false
+    ? "ZenLink doesn't appear in the list? Settings → Connection & Drivers → Allow ZenLink on the network."
+    : "No touch control over AirPlay; picture and sound only.";
 }
 
 // ---------------------------------------------------------------- stealth dim & passcode
@@ -310,16 +332,23 @@ const FLOW_TEXT = {
     ["Prepare the device", "Keep it unlocked. The first time, a small developer image is installed."],
     ["Start stream", "Receiving the screen in HEVC"],
   ],
+  airplay: [
+    ["Device connected", "Your iPhone/iPad chose ZenLinkStudio in Screen Mirroring"],
+    ["Secure connection", "AirPlay pairing and FairPlay key exchange"],
+    ["Receive video", "Decrypting the AirPlay stream"],
+    ["Start stream", "Receiving the screen over Wi-Fi"],
+  ],
   usbdirect: [
     ["Detect device", "Found on USB through the libusb0 driver"],
     ["Open the device", "Switching it to its screen-capture mode"],
     ["Check trust", "Keep it unlocked while ZenLink proves this PC is trusted"],
-    ["Start stream", "Receiving the screen over USB Direct"],
+    ["Start stream", "Receiving the screen over ZenLink Studio"],
   ],
 };
 
 function openConnect(name) {
-  const texts = FLOW_TEXT[state.connection?.active] || FLOW_TEXT.apple;
+  const texts = (state.devices || [])[0]?.airplay ? FLOW_TEXT.airplay
+    : FLOW_TEXT[state.connection?.active] || FLOW_TEXT.apple;
   els.flow.forEach((li, i) => {
     const b = li.querySelector("b"), small = li.querySelector("small");
     if (b && texts[i]) b.textContent = texts[i][0];
@@ -399,6 +428,25 @@ function renderHeaderInfo(stats) {
   const name = state.device?.name || (state.devices || [])[0]?.name || "";
   const res = stats ? `${stats.width}×${stats.height}` : "";
   $("#hdr-info").textContent = [name, res].filter(Boolean).join(" · ");
+  renderHeaderStats(stats);
+}
+
+// FPS · video delay · audio delay, colour-coded, beside the device name.
+function renderHeaderStats(stats) {
+  const el = $("#hdr-stats");
+  if (!el) return;
+  const on = settings.hdrStats && stats && state.phase === "streaming";
+  el.hidden = !on;
+  if (!on) return;
+  const audio = stats.audioMs ?? (player.nativeAudio && player._audioLat ? Math.round(player._audioLat) : null);
+  const cell = (label, value, unit, warn, bad) => {
+    const tone = value == null ? "" : value >= bad ? "bad" : value >= warn ? "warn" : "";
+    return `<span class="${tone}">${label} <b>${value ?? "—"}</b>${value == null ? "" : unit}</span>`;
+  };
+  const fpsTone = stats.fps < 25 ? "bad" : stats.fps < 45 ? "warn" : "";
+  el.innerHTML = `<span class="${fpsTone}"><b>${stats.fps}</b> fps</span>`
+    + cell("video", stats.latency, " ms", 60, 150)
+    + cell("audio", audio, " ms", 150, 300);
 }
 
 function renderMetrics(stats) {
@@ -473,8 +521,10 @@ async function startCasting() {
   if (!state.connection?.active) { showChooser(true); return; }
   player.reset();
   castQuality = settings.quality;
-  openConnect((state.devices || [])[0]?.name);
-  advanceFlow(0);
+  if (!(state.devices || [])[0]?.airplay) {
+    openConnect((state.devices || [])[0]?.name);
+    advanceFlow(0);
+  }
   await api("/api/cast/start", { options: castOptions() });
 }
 
@@ -865,7 +915,7 @@ els.stage.addEventListener("dblclick", (e) => {
 const DEFAULTS = {
   quality: "best", touch: true, keyboard: true, gestures: true, scrollSpeed: "100",
   fit: "contain", fitWindow: true, smoothing: "smooth", rotation: "auto", stats: false, dots: true,
-  audioOut: "pc", volume: 100, audioBuffer: "low", lipSync: true, closeToTray: false, ctlMode: "always", autoStart: false, onTop: false, theme: "dark",
+  hdrStats: true, audioOut: "pc", volume: 100, audioBuffer: "low", lipSync: true, closeToTray: false, ctlMode: "always", autoStart: false, onTop: false, theme: "dark",
 };
 // The stats bar is a debugging aid now: hidden unless turned on again.
 if (prefs.get("statsV2", null) === null) { prefs.set("stats", false); prefs.set("statsV2", true); }
@@ -897,6 +947,7 @@ function applySetting(key, value) {
       break;
     case "smoothing": body.dataset.smoothing = value; break;
     case "stats": body.dataset.stats = value ? "on" : "off"; break;
+    case "hdrStats": renderHeaderStats(lastStats); break;
     case "dots": body.dataset.dots = value ? "on" : "off"; break;
     case "rotation": player.setRotation(value); break;
     case "audioOut":
@@ -977,7 +1028,7 @@ function maybeAutoStart() {
 
 // ---------------------------------------------------------------- connection mode & drivers
 
-const MODE_NAME = { apple: "Apple Driver (Standard)", usbdirect: "USB Direct (libusb0)" };
+const MODE_NAME = { apple: "Apple Driver (Standard)", usbdirect: "ZenLink Studio" };
 const chooser = $("#chooser");
 const chooserContinue = $("#chooser-continue");
 const chooserCancel = $("#chooser-cancel");
@@ -1000,7 +1051,7 @@ function syncLinkSegs(link) {
   document.querySelectorAll(".link-seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.link === link)));
 }
 function syncChooser() {
-  $("#chooser-link").hidden = chooserPick !== "apple";
+  $("#chooser-link").hidden = !chooserPick;
   syncLinkSegs(chooserLink);
   chooser.querySelectorAll(".mode-card").forEach((card) => {
     const on = card.dataset.mode === chooserPick;
@@ -1034,7 +1085,7 @@ chooserContinue.addEventListener("click", async () => {
     chooserContinue.disabled = false;
     return;
   }
-  if (chooserPick === "apple" && chooserLink !== state.connection?.link) await api("/api/connection", { link: chooserLink });
+  if (chooserLink !== state.connection?.link) await api("/api/connection", { link: chooserLink });
   const snap = await api("/api/connection", { mode: chooserPick, remember: $("#chooser-remember").checked });
   showChooser(false);
   if (snap.connection?.restartRequired || snap.restartRequired) {
@@ -1042,7 +1093,8 @@ chooserContinue.addEventListener("click", async () => {
       "ZenLink applies the new connection mode after a restart. If the device's driver must change too, Settings → Connection & Drivers does it first.");
   } else {
     const dev = (snap.drivers?.devices || [])[0];
-    const mismatch = dev && (dev.unsafeFilter || (chooserPick === "usbdirect" && dev.mode !== "replaced") ||
+    const airplay = chooserPick === "usbdirect" && chooserLink === "wireless";
+    const mismatch = dev && !airplay && (dev.unsafeFilter || (chooserPick === "usbdirect" && dev.mode !== "replaced") ||
                              (chooserPick === "apple" && dev.mode === "replaced"));
     if (mismatch) {
       openSettings(true);
@@ -1070,11 +1122,16 @@ function renderConnection() {
   $("#quality-row").hidden = usb;
   $("#usb-control-note").hidden = !usb;
   $("#btn-home").hidden = usb;
-  $("#source-tag").textContent = usb ? "USB Direct" : state.device?.wifi || (state.devices || [])[0]?.wifi ? "Wi-Fi" : c.active === "apple" ? "USB" : "iOS";
+  $("#source-tag").textContent = usb ? (c.link === "wireless" ? "Studio · AirPlay" : "Studio · USB") : state.device?.wifi || (state.devices || [])[0]?.wifi ? "Wi-Fi" : c.active === "apple" ? "USB" : "iOS";
   syncControls();
   $("#conn-mode-name").textContent = MODE_NAME[c.active] || "No mode chosen";
   if (chooser.hidden) syncLinkSegs(c.link || "wired");
-  $(".link-row").hidden = c.active !== "apple";
+  $(".link-row").hidden = !c.active;
+  $(".wifi-row").hidden = c.active !== "apple";
+  syncFirewall(c.active === "usbdirect" && c.link === "wireless");
+  $("#link-help").textContent = c.active === "usbdirect"
+    ? "Wired uses the cable and the libusb0 driver. Wireless is AirPlay: on the device open Control Center → Screen Mirroring → ZenLink."
+    : "Wired uses the cable. Wireless casts over Wi-Fi after the one-time setup below.";
   $("#conn-mode-icon").dataset.mode = c.active || "";
   $("#conn-mode-note").textContent = c.restartRequired
     ? `${MODE_NAME[c.pending]} is saved and applies after a restart.`
@@ -1093,7 +1150,7 @@ function renderConnection() {
     unknown: "Unknown driver state",
   };
   $("#d-direct").textContent = dev ? directText[dev.mode] : "—";
-  $("#d-apple").textContent = !dev ? "No device" : dev.mode === "replaced" ? "Not in use (USB Direct driver)" : dev.unsafeFilter ? "In use, with an unsafe libusb0 filter" : dev.appleReady ? `In use (${dev.service})` : dev.service || "Unknown";
+  $("#d-apple").textContent = !dev ? "No device" : dev.mode === "replaced" ? "Not in use (ZenLink Studio driver)" : dev.unsafeFilter ? "In use, with an unsafe libusb0 filter" : dev.appleReady ? `In use (${dev.service})` : dev.service || "Unknown";
   const cap = state.capture;
   $("#d-backend").textContent = cap ? MODE_NAME[cap.backend] : state.phase === "idle" ? "Idle" : state.phase;
   $("#d-codec").textContent = cap?.codec || player.codecName || "—";
@@ -1102,26 +1159,26 @@ function renderConnection() {
   let note = "";
   $("#drv-removefilter").hidden = !(dev && dev.unsafeFilter);
   $("#drv-bind").hidden = !(dev && !dev.unsafeFilter && dev.mode === "apple" && lib.available);
-  $("#drv-bind").textContent = "Switch to USB Direct driver (libusb0)";
+  $("#drv-bind").textContent = "Switch to ZenLink Studio driver (libusb0)";
   $("#drv-restore").textContent = "Switch back to Apple driver";
   $("#drv-zadig").hidden = !(dev && lib.zadig && c.active === "usbdirect" && dev.mode !== "replaced");
   $("#drv-restore").hidden = !(dev && !dev.unsafeFilter && (dev.mode === "replaced" || dev.mode === "unknown"));
   if (dev && dev.unsafeFilter) {
     note = "A libusb0 filter is stacked on Apple's driver. This combination can crash Windows and stops Apple mode from seeing the device. Remove it before anything else.";
   } else if (dev && c.active === "usbdirect" && dev.mode === "apple" && !lib.available) {
-    note = "USB Direct uses libusb-win32, which isn't on this PC. Install TikTok LIVE Studio's iOS driver or libusb-win32 once, then press Check drivers.";
+    note = "ZenLink Studio uses libusb-win32, which isn't on this PC. Install TikTok LIVE Studio's iOS driver or libusb-win32 once, then press Check drivers.";
   } else if (dev && c.active === "usbdirect" && dev.mode === "apple") {
-    note = "USB Direct is chosen: install its driver to use it.";
+    note = "ZenLink Studio is chosen: install its driver to use it.";
   } else if (dev && c.active === "apple" && dev.mode === "replaced") {
-    note = "Apple mode is chosen but the device uses the USB Direct driver: restore the Apple driver to use it.";
+    note = "Apple mode is chosen but the device uses the ZenLink Studio driver: restore the Apple driver to use it.";
   }
   warn.textContent = note;
   warn.hidden = !note;
 }
 
 const DRIVER_CONFIRM = {
-  bind: "Install the USB Direct driver on this device?\n\nLike TikTok LIVE Studio, ZenLink installs the libusb-win32 driver as the device's driver. While it is installed, Apple mode and Apple apps can't see the device; press Restore Apple driver to switch back.\n\nIf there is no driver package for this model yet, ZenLink builds one the way TikTok LIVE Studio and Zadig do: it signs the package with a new self-signed certificate, deletes that certificate's private key, and adds its public part (\"ZenLink USB Direct\") to Windows' trusted certificates so the driver can install.\n\nA backup is saved first, and Apple's driver is put back automatically if the device doesn't start.\n\nWindows will ask for administrator permission. Unplug and reconnect the cable afterwards.",
-  restore: "Restore Apple's driver on this device?\n\nUSB Direct stops working until its driver is installed again. A backup is saved first. Windows will ask for administrator permission. Unplug and reconnect the cable afterwards.",
+  bind: "Install the ZenLink Studio driver on this device?\n\nLike TikTok LIVE Studio, ZenLink installs the libusb-win32 driver as the device's driver. While it is installed, Apple mode and Apple apps can't see the device; press Restore Apple driver to switch back.\n\nIf there is no driver package for this model yet, ZenLink builds one the way TikTok LIVE Studio and Zadig do: it signs the package with a new self-signed certificate, deletes that certificate's private key, and adds its public part (\"ZenLink ZenLink Studio\") to Windows' trusted certificates so the driver can install.\n\nA backup is saved first, and Apple's driver is put back automatically if the device doesn't start.\n\nWindows will ask for administrator permission. Unplug and reconnect the cable afterwards.",
+  restore: "Restore Apple's driver on this device?\n\nZenLink Studio stops working until its driver is installed again. A backup is saved first. Windows will ask for administrator permission. Unplug and reconnect the cable afterwards.",
   removefilter: "Remove the libusb0 filter from this device?\n\nIt is stacked on Apple's driver, which can crash Windows. Apple's driver stays. A backup is saved first. Windows will ask for administrator permission.",
 };
 function showBusy(title, text, actions = null) {
@@ -1176,7 +1233,7 @@ async function driverAction(action) {
       await api("/api/connection", { mode: toUsb ? "usbdirect" : "apple", remember: state.connection?.remember ?? true });
     }
     offerRestart("Driver changed",
-      `${r.message} ZenLink needs a restart to use ${toUsb ? "USB Direct" : "Apple Driver"} mode. Unplug the cable and plug it in again while it restarts.`);
+      `${r.message} ZenLink needs a restart to use ${toUsb ? "ZenLink Studio" : "Apple Driver"} mode. Unplug the cable and plug it in again while it restarts.`);
   } else {
     showBusy("Driver not changed", `${r.message}${r.rolledBack ? " The previous state was restored." : ""}`,
       [["OK", "ghost-btn", () => showBusy(null)]]);
@@ -1293,3 +1350,27 @@ document.getElementById("wifi-setup")?.addEventListener("click", async (e) => {
   window.addEventListener("resize", sync);
   sync();
 }
+
+// ZenLink Studio over Wi-Fi (AirPlay) needs a Windows Firewall rule so the
+// iPhone/iPad can reach ZenLink; Windows often never asks on a Public network.
+var firewallOk = null, firewallChecking = false;  // var: read by renderAirplayGuide before this line runs
+async function syncFirewall(airplay) {
+  const btn = $("#fw-allow");
+  if (!airplay) { btn.hidden = true; return; }
+  if (firewallOk === null && !firewallChecking) {
+    firewallChecking = true;
+    try { firewallOk = (await (await fetch("/api/firewall", { cache: "no-store" })).json()).ok; } catch (_) { firewallOk = false; }
+    firewallChecking = false;
+  }
+  btn.hidden = firewallOk !== false;
+}
+$("#fw-allow").addEventListener("click", async (e) => {
+  e.preventDefault();
+  toast("Approve the Windows permission prompt to let your iPhone/iPad reach ZenLink over Wi-Fi.");
+  const r = await api("/api/firewall/allow", {});
+  firewallOk = Boolean(r.ok);
+  syncFirewall(true);
+  toast(r.ok ? "ZenLink is allowed on the local network. Start casting, then pick ZenLink in Screen Mirroring." : r.message, r.ok ? undefined : "bad");
+});
+
+

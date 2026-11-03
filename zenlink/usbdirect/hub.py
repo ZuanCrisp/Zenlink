@@ -84,7 +84,17 @@ class _Viewer:
 
 
 class MediaHub:
-    def __init__(self) -> None:
+    def __init__(self, sparse_keyframes: bool = False) -> None:
+        # AirPlay sends one keyframe when mirroring starts and practically none
+        # after. Skipping a slow viewer "to the next keyframe" then freezes the
+        # picture for good, so in that mode every frame is delivered, bursts are
+        # absorbed by a deeper queue and the whole stream since the last
+        # keyframe is kept for a viewer that (re)joins.
+        self.sparse_keyframes = sparse_keyframes
+        # ~1 minute at 60 fps (~60 MB): the replay a (re)joining viewer gets.
+        self._max_gop = 3600 if sparse_keyframes else _MAX_GOP
+        # A viewer is only "stuck" once it is a whole replay behind on top.
+        self._max_queue = 2 * self._max_gop if sparse_keyframes else _MAX_QUEUE
         self._lock = threading.Lock()
         self._codec: dict | None = None
         self._hevc = False
@@ -113,7 +123,8 @@ class MediaHub:
             "width": width,
             "height": height,
             "codecName": name,
-            "source": "usbdirect",
+            "source": "airplay" if self.sparse_keyframes else "usbdirect",
+            "keyframesOnRequest": False,
         }
         with self._lock:
             if info == self._codec:
@@ -143,7 +154,7 @@ class MediaHub:
             if key:
                 self._gop = [msg]
                 self.stats["keyframes"] += 1
-            elif self._gop and len(self._gop) < _MAX_GOP:
+            elif self._gop and len(self._gop) < self._max_gop:
                 self._gop.append(msg)
             self.stats["frames"] += 1
             self.stats["bytes"] += len(avcc)
@@ -153,9 +164,17 @@ class MediaHub:
                 if not key:
                     continue
                 v.need_key = False
-            if v.queue.qsize() > _MAX_QUEUE:
-                v.need_key = True  # behind: wait for the next keyframe
-                continue
+            if v.queue.qsize() > self._max_queue:
+                if self.sparse_keyframes:
+                    # Can't skip without a keyframe: end this viewer's stream; the
+                    # player reconnects and is replayed from the last keyframe.
+                    log.warning("video viewer %d frames behind (stuck?): reconnecting it", v.queue.qsize())
+                    self._video.discard(v)
+                    v.put(None)
+                    continue
+                else:
+                    v.need_key = True  # behind: wait for the next keyframe
+                    continue
             v.put(msg)
 
     def push_audio(self, pcm: bytes) -> None:

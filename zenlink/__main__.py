@@ -64,6 +64,12 @@ def main() -> None:
         handlers=[logging.FileHandler(DATA_DIR / "zenlink.log", encoding="utf-8")],
         force=True,  # a library import may have configured logging already (empty log otherwise)
     )
+    import faulthandler
+
+    try:  # a native crash (WebView2, audio driver, decoder) leaves a trace instead of nothing
+        faulthandler.enable(open(DATA_DIR / "crash.log", "a", encoding="utf-8"))  # noqa: SIM115
+    except OSError:
+        pass
     from zenlink import restart
 
     restart.wait_for_port(HOST, PORT)

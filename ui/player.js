@@ -155,9 +155,11 @@ class CastPlayer {
     if (!codec || gen !== this.generation) return;
 
     this.codecName = codec.codec.startsWith("avc") ? "H.264" : "HEVC";
+    this.canRequestKey = codec.keyframesOnRequest;
+    this._reopen = false;
     // The grey-padding check reads pixels back from the GPU: only the Apple
     // (HEVC) path needs it, and only now and then.
-    this.cropDetect = this.codecName === "HEVC";
+    this.cropDetect = this.codecName === "HEVC" && this.canRequestKey;
     this.crop = { w: 0, h: 0 };
     this._openVideoOutput(true);
     const dims = codec.codec.startsWith("avc") ? null : parseHevcSpsDimensions(codec.description);
@@ -242,7 +244,7 @@ class CastPlayer {
           }
           if (isKey) gotKey = true;
           if (!gotKey || needsResync) continue;
-          if (!isKey && this.codecName === "HEVC" && this.decoder.decodeQueueSize > 4) {
+          if (this.canRequestKey && !isKey && this.codecName === "HEVC" && this.decoder.decodeQueueSize > 4) {
             // Apple mode: the decoder is behind, so skip to a fresh keyframe
             // (requested by PLI) instead of building up delay. USB Direct
             // can't request keyframes, so it never skips.
@@ -257,14 +259,38 @@ class CastPlayer {
           try {
             this.decoder.decode(new EncodedVideoChunk({ type: isKey ? "key" : "delta", timestamp: ts, data }));
           } catch (_) {
-            needsResync = true;
+            if (this.canRequestKey) needsResync = true;
+            else this._reopenStream();
           }
         }
       }
     } catch (_) {
       /* stream closed */
     }
+    if (gen === this.generation && !this.canRequestKey && !this._reopen) {
+      // AirPlay: the server ended this stream because the window fell too far
+      // behind; reconnect (it replays from the last keyframe) instead of stopping.
+      this._reopen = true;
+    }
+    if (gen === this.generation && this._reopen) {
+      // No keyframe on request (AirPlay): reconnect; the server replays the
+      // stream from its last keyframe, so the decoder rebuilds the picture.
+      // At most once every 3 s, so a persistent problem can't spin.
+      this._reopen = false;
+      this._diag.rebuilds++;
+      const wait = Math.max(0, 3000 - (performance.now() - (this._lastReopen || 0)));
+      this._lastReopen = performance.now() + wait;
+      if (wait) await new Promise((r) => setTimeout(r, wait));
+      if (gen === this.generation) return this.start();
+      return;
+    }
     if (gen === this.generation) this.onEnded(null);
+  }
+
+  _reopenStream() {
+    if (this._reopen) return;
+    this._reopen = true;
+    try { this.reader && this.reader.cancel(); } catch (_) {}
   }
 
   async _codec(gen) {
@@ -274,7 +300,13 @@ class CastPlayer {
         if (r.ok) {
           const info = await r.json();
           if (info.codec && info.description) {
-            return { codec: info.codec.trim(), description: Uint8Array.from(atob(info.description), (c) => c.charCodeAt(0)) };
+            return {
+              codec: info.codec.trim(),
+              description: Uint8Array.from(atob(info.description), (c) => c.charCodeAt(0)),
+              // Apple mode asks the device for a fresh keyframe (PLI); AirPlay and
+              // ZenLink Studio can't, so they must never wait for one.
+              keyframesOnRequest: info.keyframesOnRequest !== false,
+            };
           }
         }
       } catch (_) {}
@@ -295,6 +327,7 @@ class CastPlayer {
       error: (e) => {
         this._diag.errors++;
         this._diag.lastError = String(e && e.message || e);
+        if (!this.canRequestKey) { this._reopenStream(); return; }
         // Resync on a fresh keyframe from the device.
         if (this._needsResync) this._needsResync();
         fetch("/cast/pli", { method: "POST" }).catch(() => {});

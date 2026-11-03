@@ -1,6 +1,6 @@
 ; ZenLink installer (Inno Setup 6). Built by build_portable_release.ps1.
 #ifndef AppVersion
-  #define AppVersion "2.0.0"
+  #define AppVersion "2.1.0"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\ZenLink"
@@ -43,6 +43,7 @@ Name: "indonesian"; MessagesFile: "compiler:Languages\Indonesian.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "firewall"; Description: "Allow ZenLink on the local network (needed for AirPlay over Wi-Fi; asks for administrator permission)"; GroupDescription: "Network:"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "Start ZenLink.bat,run.bat,Create-Desktop-Shortcut.bat,Uninstall-ZenLink.bat,portable.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -53,15 +54,27 @@ Name: "{group}\Uninstall ZenLink"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\ZenLink"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
 
 [Run]
+; AirPlay (ZenLink Studio over Wi-Fi): the iPhone/iPad must reach ZenLink. Inbound allow, local subnet only.
+Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rule name=""ZenLink (AirPlay)"" & netsh advfirewall firewall add rule name=""ZenLink (AirPlay)"" dir=in action=allow program=""{app}\ZenLink.exe"" enable=yes profile=any remoteip=localsubnet"; Flags: runhidden shellexec waituntilterminated; Verb: runas; Tasks: firewall
+; Apple Driver mode needs Apple Mobile Device Service (Apple Devices or iTunes).
+Filename: "ms-windows-store://pdp/?ProductId=9NP83LWLPZ9K"; Description: "Install Apple Devices from the Microsoft Store (needed for Apple Driver mode)"; Flags: postinstall shellexec skipifsilent unchecked; Check: not AppleServiceInstalled
 Filename: "{app}\ZenLink.exe"; Description: "{cm:LaunchProgram,ZenLink}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/im ZenLink.exe /f"; Flags: runhidden; RunOnceId: "KillZenLink"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""ZenLink (AirPlay)"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; RunOnceId: "DelFirewall"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\ZenLink"
 
 [Code]
+function AppleServiceInstalled(): Boolean;
+var
+  ImagePath: String;
+begin
+  Result := RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\Apple Mobile Device Service', 'ImagePath', ImagePath);
+end;
+
 function InitializeSetup(): Boolean;
 var
   Version: String;

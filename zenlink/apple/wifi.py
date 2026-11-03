@@ -81,16 +81,51 @@ async def _open_ports(host: str, first: int = 49152, last: int = 65535) -> list[
 _port_cache: dict[str, int] = {}
 
 
+def _mdns_ports(host: str, timeout: float = 3.0) -> list[int]:
+    """RemotePairing ports the device at `host` advertises (zeroconf receives
+    Bonjour on Windows where pymobiledevice3's own browser gets nothing)."""
+    import time
+
+    from zeroconf import ServiceBrowser, Zeroconf
+
+    zc = Zeroconf()
+    names: list[str] = []
+
+    class Listener:
+        def add_service(self, _zc, _type, name):
+            names.append(name)
+
+        def update_service(self, *_a):
+            pass
+
+        def remove_service(self, *_a):
+            pass
+
+    try:
+        ServiceBrowser(zc, "_remotepairing._tcp.local.", Listener())
+        time.sleep(timeout)
+        ports = []
+        for name in names:
+            info = zc.get_service_info("_remotepairing._tcp.local.", name, timeout=1500)
+            if info and host in info.parsed_addresses() and info.port:
+                ports.append(info.port)
+        return ports
+    except Exception:  # noqa: BLE001
+        return []
+    finally:
+        zc.close()
+
+
 async def _remotepairing_by_ip(serial: str, host: str):
     from pymobiledevice3.remote.tunnel_service import create_core_device_tunnel_service_using_remotepairing
 
     cached = _port_cache.get(serial)
-    ports = [cached] if cached else await _open_ports(host)
+    ports = [cached] if cached else (await asyncio.to_thread(_mdns_ports, host) or await _open_ports(host))
     for attempt in range(2):
         for port in ports:
             try:
                 service = await asyncio.wait_for(
-                    create_core_device_tunnel_service_using_remotepairing(serial, host, port), 10)
+                    create_core_device_tunnel_service_using_remotepairing(serial, host, port, autopair=False), 10)
             except Exception as error:  # noqa: BLE001 - not the RemotePairing port
                 log.debug("wifi: %s:%s is not RemotePairing (%r)", host, port, error)
                 continue
@@ -99,7 +134,7 @@ async def _remotepairing_by_ip(serial: str, host: str):
             return service
         if attempt == 0 and cached:  # the port changes when the device restarts
             _port_cache.pop(serial, None)
-            ports = await _open_ports(host)
+            ports = await asyncio.to_thread(_mdns_ports, host) or await _open_ports(host)
             cached = None
         else:
             break

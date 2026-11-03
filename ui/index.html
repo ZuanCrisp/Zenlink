@@ -14,6 +14,7 @@
       <span class="wordmark">ZenLink</span>
       <span class="source-tag" id="source-tag" data-no-i18n>iOS</span>
       <span class="hdr-info" id="hdr-info" data-no-i18n></span>
+      <span class="hdr-stats" id="hdr-stats" data-no-i18n hidden></span>
     </div>
     <div class="drag-spacer pywebview-drag-region" aria-hidden="true"></div>
     <div class="topbar-right">
@@ -76,6 +77,15 @@
       <h1 class="idle-title" id="idle-title">Plug in your iPhone or iPad</h1>
       <p class="idle-sub" id="idle-sub">Use a USB cable. Screen and sound come through the cable, the same way TikTok LIVE Studio casts iOS.</p>
       <button type="button" class="btn ghost-btn idle-action" id="idle-action" hidden>Open Connection &amp; Drivers</button>
+      <ol class="airplay-guide" id="airplay-guide" hidden>
+        <li><span class="ag-icon"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1.2"/></svg></span>
+          <b>Same Wi-Fi</b><span>Connect the iPhone/iPad to the same network as this PC.</span></li>
+        <li><span class="ag-icon"><svg viewBox="0 0 24 24"><rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M15 5.5h1.5v1.5"/></svg></span>
+          <b>Open Control Center</b><span>Swipe down from the top-right corner of the screen.</span></li>
+        <li><span class="ag-icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="13" height="10" rx="1.5"/><rect x="8" y="9" width="13" height="10" rx="1.5"/></svg></span>
+          <b>Tap Screen Mirroring</b><span>Choose <em id="ag-name">ZenLink</em>. The picture appears here.</span></li>
+        <li class="ag-note" id="ag-note"></li>
+      </ol>
     </section>
 
     <!-- Connecting: 1-2-3-4 -->
@@ -172,7 +182,7 @@
       <button type="button" class="ctl sm" data-btn="volume-up">Vol +</button>
       <button type="button" class="ctl sm" data-btn="volume-down">Vol −</button>
     </div>
-    <p class="ctl-note" id="ctl-note" hidden>Gestures and buttons need Apple mode. USB Direct carries picture and sound only.</p>
+    <p class="ctl-note" id="ctl-note" hidden>Gestures and buttons need Apple mode. ZenLink Studio carries picture and sound only.</p>
   </div>
 
   <!-- Connection mode chooser: shown before anything connects -->
@@ -196,18 +206,18 @@
         </button>
         <button type="button" class="mode-card" data-mode="usbdirect" role="radio" aria-checked="false">
           <span class="mode-icon"><svg viewBox="0 0 24 24"><path d="M13 2L5 13h6l-1 9 8-11h-6z"/></svg></span>
-          <b>USB Direct <small>for Live Streaming</small></b>
+          <b>ZenLink Studio <small>for Live Streaming</small></b>
           <span class="mode-desc">Best quality for live streaming: high bitrate (measured 12–30 Mbps), up to ~56 fps and very low latency, like TikTok LIVE Studio. Needs the libusb0 driver.</span>
           <ul class="mode-list">
-            <li class="yes">QuickTime capture over USB, like TikTok LIVE Studio (H.264, higher bitrate)</li>
+            <li class="yes">Cable: full native resolution, the device's whole screen (measured 2360×1640 on iPad 11th gen), H.264 at high bitrate like TikTok LIVE Studio</li>
             <li class="no">Picture and sound only: no touch, keyboard, gestures or buttons</li>
             <li class="no">No bitrate setting: the device picks it</li>
-            <li class="no">Switches the device to the libusb0 driver; Apple apps (iTunes, Apple Devices) can't see it until you switch back</li>
-            <li class="no">Cable only (no Wi-Fi)</li>
+            <li class="no">Cable needs the libusb0 driver; Apple apps (iTunes, Apple Devices) can't see the device until you switch back</li>
+            <li class="yes">Cable (USB) or Wi-Fi (AirPlay screen mirroring, no driver needed)</li>
           </ul>
         </button>
       </div>
-      <div class="link-pick" id="chooser-link"><span>Apple Driver connection</span><div class="seg link-seg"><button type="button" data-link="wired">Wired (cable)</button><button type="button" data-link="wireless">Wireless (Wi-Fi)</button></div></div>
+      <div class="link-pick" id="chooser-link"><span>Connection</span><div class="seg link-seg"><button type="button" data-link="wired">Wired (cable)</button><button type="button" data-link="wireless">Wireless (Wi-Fi)</button></div></div>
       <label class="remember"><input type="checkbox" id="chooser-remember"> Remember my choice</label>
       <p class="chooser-note">You can change the mode any time in Settings → Connection &amp; Drivers. Changing it may need an app restart and reconnecting the USB cable.</p>
       <div class="chooser-actions">
@@ -250,7 +260,7 @@
             <div><dt>Apple Mobile Device Service</dt><dd id="d-amds">—</dd></div>
             <div><dt>libusb0</dt><dd id="d-libusb">—</dd></div>
             <div><dt>Device</dt><dd id="d-device">—</dd></div>
-            <div><dt>USB Direct on this device</dt><dd id="d-direct">—</dd></div>
+            <div><dt>ZenLink Studio on this device</dt><dd id="d-direct">—</dd></div>
             <div><dt>Capture backend</dt><dd id="d-backend">—</dd></div>
             <div><dt>Codec</dt><dd id="d-codec">—</dd></div>
             <div><dt>Resolution · FPS</dt><dd id="d-res">—</dd></div>
@@ -258,20 +268,20 @@
           </dl>
           <div class="conn-actions">
             <button type="button" class="btn ghost-btn" id="drv-check">Check drivers</button>
-            <button type="button" class="btn ghost-btn" id="drv-bind" hidden>Install USB Direct driver</button>
+            <button type="button" class="btn ghost-btn" id="drv-bind" hidden>Install ZenLink Studio driver</button>
             <button type="button" class="btn ghost-btn" id="drv-restore" hidden>Restore Apple driver</button>
             <button type="button" class="btn stop" id="drv-removefilter" hidden>Remove libusb0 filter</button>
             <button type="button" class="btn ghost-btn" id="drv-zadig" hidden>Install manually with Zadig</button>
           </div>
-          <div class="row link-row"><label>Apple Driver connection<small>Wired uses the cable. Wireless casts over Wi-Fi after the one-time setup below.</small></label><div class="seg link-seg"><button type="button" data-link="wired">Wired (cable)</button><button type="button" data-link="wireless">Wireless (Wi-Fi)</button></div></div>
+          <div class="row link-row"><label>Connection<small id="link-help">Wired uses the cable. Wireless casts over Wi-Fi.</small><button type="button" class="btn ghost-btn" id="fw-allow" hidden>Allow ZenLink on the network</button></label><div class="seg link-seg"><button type="button" data-link="wired">Wired (cable)</button><button type="button" data-link="wireless">Wireless (Wi-Fi)</button></div></div>
           <div class="row wifi-row"><label>Wireless (Wi-Fi)<small>Apple Driver mode can also cast over Wi-Fi. Set it up once with the cable connected and the device unlocked; then unplug. The PC and the device must be on the same network. Wi-Fi adds a little latency.</small></label><button type="button" class="btn ghost-btn" id="wifi-setup">Set up Wi-Fi</button></div>
           <p class="conn-warn" id="conn-warn" hidden></p>
-          <p class="conn-hint">Each mode uses its own driver on the device: Apple mode the Apple driver, USB Direct the libusb0 driver (installed as the device's driver, never stacked as a filter). Switching asks for administrator permission; then unplug the cable and plug it in again. A new mode applies after ZenLink restarts.</p>
+          <p class="conn-hint">Each mode uses its own driver on the device: Apple mode the Apple driver, ZenLink Studio the libusb0 driver (installed as the device's driver, never stacked as a filter). Switching asks for administrator permission; then unplug the cable and plug it in again. A new mode applies after ZenLink restarts.</p>
         </div>
       </section>
       <section>
         <h3>Video quality</h3>
-        <p class="mode-note" id="usb-quality-note" hidden>USB Direct: the device encodes the picture itself (H.264). There is no bitrate control in this mode; the measured bitrate shows in the bottom bar.</p>
+        <p class="mode-note" id="usb-quality-note" hidden>ZenLink Studio: the device encodes the picture itself (H.264). There is no bitrate control in this mode; the measured bitrate shows in the bottom bar.</p>
         <div class="row stack" id="quality-row"><label>Quality<small>Apple mode: the device's encoder runs at about 4–6 Mbps at most; these presets set a ceiling under it. Applies the next time you start casting.</small></label>
           <div class="quality" data-pref="quality" role="radiogroup">
             <button data-v="best"><b>Best graphics</b><small>Device maximum, same as Xcode</small></button>
@@ -281,7 +291,7 @@
       </section>
       <section>
         <h3>Controls</h3>
-        <p class="mode-note" id="usb-control-note" hidden>USB Direct carries picture and sound only. Touch, keyboard, gestures and buttons work in Apple Driver mode.</p>
+        <p class="mode-note" id="usb-control-note" hidden>ZenLink Studio carries picture and sound only. Touch, keyboard, gestures and buttons work in Apple Driver mode.</p>
         <div class="row"><label>Gesture panel<small>Gestures and buttons beside the picture (Apple Driver mode)</small></label>
           <div class="seg" data-pref="ctlMode"><button data-v="always">Always show</button><button data-v="auto">Auto-hide</button><button data-v="hidden">Hidden</button></div></div>
         <div class="row"><label>Touch with the mouse</label><input type="checkbox" class="switch" data-pref="touch"></div>
@@ -301,6 +311,7 @@
           <div class="seg" data-pref="smoothing"><button data-v="smooth">Smooth</button><button data-v="sharp">Sharp</button></div></div>
         <div class="row"><label>Rotation<small>Auto follows the device. Alt+H switches.</small></label>
           <div class="seg" data-pref="rotation"><button data-v="auto">Auto</button><button data-v="0">0°</button><button data-v="90">90°</button><button data-v="180">180°</button><button data-v="270">270°</button></div></div>
+        <div class="row"><label>Live stats in the header<small>FPS, video delay and audio delay next to the device name while casting</small></label><input type="checkbox" class="switch" data-pref="hdrStats"></div>
         <div class="row"><label>Show stats bar</label><input type="checkbox" class="switch" data-pref="stats"></div>
         <div class="row"><label>Animated background</label><input type="checkbox" class="switch" data-pref="dots"></div>
       </section>

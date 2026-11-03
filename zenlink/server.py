@@ -199,6 +199,24 @@ def build_app(manager: CastManager) -> web.Application:
             asyncio.get_running_loop().call_later(0.5, os._exit, 0)
         return web.json_response({"ok": True})
 
+    @routes.get("/api/firewall")
+    async def firewall_get(_request: web.Request) -> web.Response:
+        from zenlink import firewall
+
+        return web.json_response({"ok": await asyncio.to_thread(firewall.has_rule)})
+
+    @routes.post("/api/firewall/allow")
+    async def firewall_allow(_request: web.Request) -> web.Response:
+        from zenlink import firewall
+
+        if not await asyncio.to_thread(firewall.request_rule):
+            return web.json_response({"ok": False, "message": "Windows didn't allow it (the permission prompt was declined)."})
+        for _ in range(20):
+            if await asyncio.to_thread(firewall.has_rule):
+                return web.json_response({"ok": True})
+            await asyncio.sleep(0.5)
+        return web.json_response({"ok": False, "message": "The firewall rule wasn't added. Try again."})
+
     @routes.post("/api/wifi/prepare")
     async def wifi_prepare(_request: web.Request) -> web.Response:
         return web.json_response(await asyncio.to_thread(manager.prepare_wifi))
@@ -328,8 +346,21 @@ def build_app(manager: CastManager) -> web.Application:
     return app
 
 
+def quiet_resets(loop: asyncio.AbstractEventLoop) -> None:
+    """Windows' proactor logs a full traceback whenever a peer closes a socket
+    abruptly (a window reloading its stream, a phone leaving Wi-Fi). Harmless:
+    drop those, log everything else."""
+    def handler(loop, context) -> None:
+        if isinstance(context.get("exception"), (ConnectionResetError, ConnectionAbortedError, BrokenPipeError)):
+            return
+        loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
+
+
 def serve_forever(manager: CastManager, ready=None) -> None:
     async def main() -> None:
+        quiet_resets(asyncio.get_running_loop())
         runner = web.AppRunner(build_app(manager), access_log=None)
         await runner.setup()
         await web.TCPSite(runner, HOST, PORT).start()

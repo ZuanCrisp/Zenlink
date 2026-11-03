@@ -42,6 +42,12 @@ def _friendly_error(error: Exception) -> str:
     return text
 
 
+def _receiver_name() -> str:
+    from zenlink.airplay.receiver import receiver_name
+
+    return receiver_name()
+
+
 class CastManager:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -51,6 +57,7 @@ class CastManager:
         self._backend: str | None = None
         self._thread: threading.Thread | None = None
         self.hub = None  # MediaHub while a USB Direct session runs
+        self._airplay_paused = False
         self._presence: dict = {"service": True, "devices": [], "takenOver": False}
         self._drivers: dict = {"apple": {}, "libusb0": {}, "devices": []}
         self._drivers_at = 0.0
@@ -99,7 +106,10 @@ class CastManager:
         if session is None:
             return None
         info = {"backend": self._backend}
-        if self._backend == "usbdirect":
+        if self._backend == "usbdirect" and hasattr(session, "receiver"):
+            st = session.stats()
+            info.update(codec="H.264", width=st.get("width"), height=st.get("height"), source="AirPlay (Wi-Fi)")
+        elif self._backend == "usbdirect":
             info.update(getattr(session, "info", {}))
         else:
             info.update(codec="HEVC", source="CoreDevice DisplayService")
@@ -117,7 +127,17 @@ class CastManager:
                 self.refresh_drivers(publish=True)
             if self._session is None and not self.driver_busy:
                 self.refresh_devices()
+                self._auto_airplay()
             time.sleep(2.0)
+
+    def _auto_airplay(self) -> None:
+        """ZenLink Studio over Wi-Fi listens all the time, like TikTok LIVE Studio:
+        the device can pick ZenLinkStudio in Screen Mirroring whenever it wants.
+        Pressing Stop pauses this until Start is pressed again."""
+        if (self.connection.active == "usbdirect" and self.connection.link == "wireless"
+                and self._session is None and not self._airplay_paused
+                and self.state.get("phase") == "idle"):  # after an error, wait for Start
+            self.start({})
 
     def refresh_drivers(self, publish: bool = False) -> dict:
         snap = driver_status.snapshot()
@@ -165,6 +185,15 @@ class CastManager:
                 self._presence = presence
                 self._publish()
             return
+        if mode == "usbdirect" and self.connection.link == "wireless":
+            # Studio over Wi-Fi: ZenLink is an AirPlay receiver; the device comes to us.
+            presence = {"service": True, "takenOver": False, "devices": [{
+                "id": "airplay", "family": "iOS device", "name": "AirPlay (Wi-Fi)", "deviceName": None,
+                "os": None, "ready": True, "wifi": True, "airplay": True, "receiver": _receiver_name()}]}
+            if presence != self._presence:
+                self._presence = presence
+                self._publish()
+            return
         if mode == "usbdirect":
             presence = self._windows_presence()
             if presence != self._presence:
@@ -172,6 +201,7 @@ class CastManager:
                 self._publish()
             return
         presence = apple_devices.connected_devices(self.connection.link)
+        self._auto_wifi(presence.get("devices", []))
         if not presence.get("devices"):
             # Apple's service can't see a device whose driver is wrong for this
             # mode; say what to fix instead of "No device connected".
@@ -192,6 +222,7 @@ class CastManager:
     # ------------------------------------------------------------ casting
 
     def start(self, options: dict | None = None) -> dict:
+        self._airplay_paused = False
         if self._session is not None or self.driver_busy:
             return self.snapshot()
         mode = self.connection.active
@@ -217,7 +248,14 @@ class CastManager:
         self.state["device"] = {"id": target["id"], "name": target["name"], "wifi": bool(target.get("wifi"))}
         self.state["rotation"] = None
 
-        if mode == "usbdirect":
+        if mode == "usbdirect" and target.get("airplay"):
+            from zenlink.airplay.session import AirPlaySession
+            from zenlink.usbdirect.hub import MediaHub
+
+            self.hub = MediaHub(sparse_keyframes=True)
+            session = AirPlaySession(self.hub, self._on_session_state)
+            self.state["device"] = {"id": "airplay", "name": "AirPlay", "wifi": True}
+        elif mode == "usbdirect":
             session = self._usbdirect_session(target)
             if session is None:
                 return self.snapshot()
@@ -232,6 +270,7 @@ class CastManager:
         self._thread = threading.Thread(target=self._run, args=(session,), name=f"cast-{mode}", daemon=True)
         self._set_state("connecting", ("Opening a secure Wi-Fi tunnel to the device" if target.get("wifi")
                                        else "Opening a secure USB tunnel to the device") if mode == "apple"
+                        else "Starting the AirPlay receiver" if target.get("airplay")
                         else "Opening the device through libusb0")
         self._thread.start()
         return self.snapshot()
@@ -263,6 +302,13 @@ class CastManager:
     def stop(self) -> dict:
         session = self._session
         if session is not None:
+            import traceback
+
+            caller = " | ".join(line.strip().replace(chr(10), " ") for line in traceback.format_stack(limit=6)[:-1])
+            log.info("cast: stop requested (%s) by %s", type(session).__name__, caller[-400:])
+        if session is not None and hasattr(session, "receiver"):
+            self._airplay_paused = True  # the user stopped the AirPlay receiver
+        if session is not None:
             session.stop()
             if self._thread is not None:
                 self._thread.join(10)
@@ -271,6 +317,7 @@ class CastManager:
     def _run(self, session) -> None:
         try:
             session.run()
+            log.info("cast: session %s ended", type(session).__name__)
             self._set_state("idle", "Casting stopped")
         except Exception as error:
             log.exception("cast session failed")
@@ -295,6 +342,9 @@ class CastManager:
     def _start_sound(self) -> None:
         if not self.audio_enabled or self._session is None or self.audio.running:
             return
+        # AirPlay over Wi-Fi delivers sound in bursts: keep ~120 ms queued.
+        # The cable modes stay at the lowest latency.
+        self.audio.set_jitter_ms(120 if hasattr(self._session, "receiver") else 0)
         if not self.audio.start():
             return
         if self._backend == "usbdirect" and self.hub is not None:
@@ -337,6 +387,34 @@ class CastManager:
 
     # ------------------------------------------------------------ connection mode
 
+    def _auto_wifi(self, devices: list[dict]) -> None:
+        """Like PhoneLink V1: a trusted device on the cable gets Wi-Fi set up once,
+        so Apple Driver mode can later cast without the cable."""
+        if self._session is not None:
+            return
+        tried = self.__dict__.setdefault("_wifi_auto_tried", {})  # udid -> monotonic time
+        for d in devices:
+            udid = d.get("id")
+            on_cable = not d.get("wifi") and (d.get("ready") or d.get("need") == "wifi")
+            if not udid or not on_cable or time.monotonic() - tried.get(udid, -1e9) < 60:
+                continue
+            tried[udid] = time.monotonic()
+            if apple_devices.wifi_ready(udid):
+                continue
+
+            def run(udid=udid, name=d.get("name")) -> None:
+                from zenlink.apple import wifi
+
+                try:
+                    result = wifi.prepare(udid)
+                    log.info("wifi: automatic setup for %s: %s", name, result)
+                except Exception as error:  # noqa: BLE001 - not trusted yet, locked, iOS < 17 ...
+                    log.info("wifi: automatic setup for %s failed: %s", name, error)
+                    return
+                self.refresh_devices()
+
+            threading.Thread(target=run, name="wifi-auto", daemon=True).start()
+
     def prepare_wifi(self) -> dict:
         """One-time Wi-Fi setup over the cable (Apple Driver mode only)."""
         if self.connection.active != "apple":
@@ -355,6 +433,9 @@ class CastManager:
         return {**result, "device": usb[0]["name"]}
 
     def set_link(self, link: str) -> dict:
+        if self._session is not None:
+            self.stop()  # wired <-> wireless: end the current session first
+        self._airplay_paused = False
         self.connection.set_link(link)
         self.refresh_devices()
         self._publish()

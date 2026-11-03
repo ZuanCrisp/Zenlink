@@ -14,3 +14,7 @@ release/
 packaging/version_info.txt
 *.spec
 build.log
+airplay.json
+allow-airplay.cmd
+native/playfair/*.obj
+crash.log

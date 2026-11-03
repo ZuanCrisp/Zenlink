@@ -1,7 +1,7 @@
 [project]
 name = "zenlink"
-version = "2.0.0"
-description = "Mirror and control an iPhone or iPad on Windows - Apple Driver (cable or Wi-Fi) or USB Direct for live streaming."
+version = "2.1.0"
+description = "Mirror and control an iPhone or iPad on Windows - Apple Driver (cable or Wi-Fi) or ZenLink Studio (cable or AirPlay) for live streaming."
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
@@ -12,6 +12,9 @@ dependencies = [
     "pywebview>=5.3",
     "pymobiledevice3>=11.49",
     "av>=14",
+    "zeroconf>=0.132",
+    "pycryptodome>=3.20",
+    "cryptography>=42",
     "pyusb>=1.2.1",
     "sounddevice>=0.4.6",
     "pystray>=0.19",

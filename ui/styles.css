@@ -763,6 +763,12 @@ input.switch:checked { background: var(--accent) !important; border-color: var(-
 .hdr-info:empty { display: none; }
 .hdr-info::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 8px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 @media (max-width: 760px) { .hdr-info { display: none; } }
+.hdr-stats { margin-left: 12px; display: inline-flex; gap: 10px; font: 500 11px/1 var(--mono); color: var(--text-2); white-space: nowrap; }
+.hdr-stats[hidden] { display: none; }
+.hdr-stats b { font-weight: 600; color: var(--text); }
+.hdr-stats .warn b { color: #ffb020; }
+.hdr-stats .bad b { color: #ff5470; }
+@media (max-width: 900px) { .hdr-stats { display: none; } }
 
 /* ---- gesture panel docked at the side (default while casting in Apple mode) ---- */
 :root { --side-w: 188px; }
@@ -784,3 +790,15 @@ body.ctl-docked #btn-controls { color: var(--accent); }
 /* ---------- wired / wireless pick ---------- */
 .link-pick { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: clamp(8px, 1.6vh, 14px); font-size: 12.5px; color: var(--text-2); }
 .link-pick[hidden] { display: none; }
+
+/* ---------- AirPlay how-to ---------- */
+.airplay-guide { list-style: none; margin: clamp(10px, 2vh, 18px) auto 0; padding: 0; display: grid; gap: 8px; width: min(440px, 100%); text-align: left; }
+.airplay-guide[hidden] { display: none; }
+.airplay-guide li { display: grid; grid-template-columns: 34px 1fr; column-gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 12px; background: color-mix(in srgb, var(--ink) 80%, transparent); counter-increment: ag; }
+.airplay-guide li b { font-size: 13px; color: var(--text); }
+.airplay-guide li span:not(.ag-icon) { grid-column: 2; font-size: 12px; color: var(--text-2); line-height: 1.45; }
+.airplay-guide em { font-style: normal; color: var(--accent-2); font-weight: 600; }
+.ag-icon { grid-row: span 2; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-2); }
+.ag-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.airplay-guide .ag-note { display: block; border: 0; background: none; padding: 2px 4px; font-size: 12px; color: var(--text-3); text-align: center; }
+.airplay-guide .ag-note:empty { display: none; }

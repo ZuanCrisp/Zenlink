@@ -26,6 +26,11 @@ BYTES_PER_FRAME = 4  # s16 stereo
 class NativeAudio:
     def __init__(self) -> None:
         self._lock = threading.Lock()
+        # start()/stop() run on several threads (cast session, UI settings). Two
+        # concurrent starts used to open two streams; the replaced one was freed
+        # while PortAudio still called it -> access violation (app closed).
+        self._control = threading.RLock()
+        self._retired: list = []  # closed streams kept alive: PortAudio may still be finishing a callback
         self._buf = bytearray()
         self._stream = None
         self._started = False
@@ -33,6 +38,7 @@ class NativeAudio:
         self.muted = False
         self.packet = 0          # frames, largest recent packet
         self.margin = 128        # frames
+        self.floor = 0           # frames: minimum margin (Wi-Fi jitter buffer)
         self._calm_since = time.monotonic()
         self.underruns = 0
         self.dropped_ms = 0.0
@@ -50,6 +56,10 @@ class NativeAudio:
     # ------------------------------------------------------------ control
 
     def start(self) -> bool:
+        with self._control:
+            return self._start_locked()
+
+    def _start_locked(self) -> bool:
         if not self.available:
             return False
         if self._stream is not None:
@@ -89,7 +99,9 @@ class NativeAudio:
         return False
 
     def stop(self) -> None:
-        stream, self._stream = self._stream, None
+        with self._control:
+            stream, self._stream = self._stream, None
+            self._retired.append(stream) if stream is not None else None
         if stream is not None:
             try:
                 stream.stop()
@@ -106,8 +118,16 @@ class NativeAudio:
 
     # ------------------------------------------------------------ data
 
+    def set_jitter_ms(self, ms: float) -> None:
+        """Keep at least `ms` of sound queued. 0 for the cable (lowest latency);
+        AirPlay over Wi-Fi needs ~100+ ms because packets arrive in bursts."""
+        with self._lock:
+            self.floor = int(RATE * ms / 1000)
+            self.margin = max(self.margin, self.floor)
+
     def _target(self) -> int:
-        return min(4800, self.packet + self.margin) * BYTES_PER_FRAME
+        cap = max(4800, self.floor + 2400)
+        return min(cap, self.packet + max(self.margin, self.floor)) * BYTES_PER_FRAME
 
     def feed(self, pcm: bytes) -> None:
         if self._stream is None or not pcm:
@@ -138,9 +158,9 @@ class NativeAudio:
                 if self._started:
                     self._started = False
                     self.underruns += 1
-                    self.margin = min(1440, self.margin + 96)
+                    self.margin = min(max(1440, self.floor + 2400), self.margin + (480 if self.floor else 96))
                     self._calm_since = now
-            if now - self._calm_since > 5 and self.margin > 128:
+            if now - self._calm_since > 5 and self.margin > max(128, self.floor):
                 self.margin -= 48
                 self._calm_since = now
         if data is None or self.muted or self.volume <= 0:
