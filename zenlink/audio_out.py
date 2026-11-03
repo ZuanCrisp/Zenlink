@@ -56,8 +56,16 @@ class NativeAudio:
     # ------------------------------------------------------------ control
 
     def start(self) -> bool:
+        # Open the stream on a fresh thread: WASAPI needs to set up COM itself,
+        # and the caller's thread (a cast session, the UI server) may already
+        # carry COM state from other libraries. In the packaged app that made
+        # WASAPI fail and fall back to MME (91 ms instead of ~23 ms).
         with self._control:
-            return self._start_locked()
+            result: list[bool] = []
+            t = threading.Thread(target=lambda: result.append(self._start_locked()), name="audio-open", daemon=True)
+            t.start()
+            t.join(10)
+            return bool(result and result[0])
 
     def _start_locked(self) -> bool:
         if not self.available:
@@ -89,11 +97,13 @@ class NativeAudio:
                 )
                 stream.start()
             except Exception as error:  # noqa: BLE001
+                log.info("native audio: %s (%s) not usable: %s", device, "auto-convert" if extra else "plain", error)
                 last = error
                 continue
             self._stream = stream
-            log.info("native audio: %s, output latency %.1f ms",
-                     sd.query_devices(stream.device)["name"], stream.latency * 1000)
+            api = sd.query_hostapis(sd.query_devices(stream.device)["hostapi"])["name"]
+            log.info("native audio: %s via %s, output latency %.1f ms",
+                     sd.query_devices(stream.device)["name"], api, stream.latency * 1000)
             return True
         log.warning("native audio could not start: %s", last)
         return False
