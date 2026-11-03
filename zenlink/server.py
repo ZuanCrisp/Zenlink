@@ -27,6 +27,8 @@ from zenlink.drivers import manager as driver_manager
 from zenlink.paths import UI_DIR
 
 SUPPORT_URL = "https://sociabuzz.com/zenvy/tribe"
+CLIENT_KEY: web.AppKey["aiohttp.ClientSession"] = web.AppKey("client")
+OCR_KEY: web.AppKey["OcrSession"] = web.AppKey("ocr")
 log = logging.getLogger(__name__)
 
 HOST = "127.0.0.1"
@@ -134,14 +136,14 @@ def build_app(manager: CastManager) -> web.Application:
     async def ocr_capture(request: web.Request) -> web.Response:
         body = await request.json()
         try:
-            result = await asyncio.to_thread(request.app["ocr"].add_capture, str(body.get("image") or ""))
+            result = await asyncio.to_thread(request.app[OCR_KEY].add_capture, str(body.get("image") or ""))
         except Exception as error:  # noqa: BLE001
             return web.json_response({"ok": False, "message": f"Text recognition failed: {error}"}, status=500)
         return web.json_response(result)
 
     @routes.post("/api/ocr/clear")
     async def ocr_clear(request: web.Request) -> web.Response:
-        return web.json_response(request.app["ocr"].clear())
+        return web.json_response(request.app[OCR_KEY].clear())
 
     @routes.post("/api/keyboard/action")
     async def keyboard_action(request: web.Request) -> web.Response:
@@ -154,7 +156,7 @@ def build_app(manager: CastManager) -> web.Application:
             from zenlink import secret
 
             passcode = secret.get_secret("passcode") if body.get("action") == "wake" else ""
-            ok, message = await keyboard.run(request.app["client"], UPSTREAM, str(body.get("action")),
+            ok, message = await keyboard.run(request.app[CLIENT_KEY], UPSTREAM, str(body.get("action")),
                                              str(body.get("text") or ""), passcode)
         except (aiohttp.ClientError, RuntimeError) as error:
             ok, message = False, f"The device didn't take the shortcut ({error})."
@@ -264,7 +266,7 @@ def build_app(manager: CastManager) -> web.Application:
             url += f"?{request.query_string}"
         body = await request.read() if request.can_read_body else None
         headers = {k: v for k, v in request.headers.items() if k.lower() in ("content-type", "accept")}
-        client: aiohttp.ClientSession = request.app["client"]
+        client: aiohttp.ClientSession = request.app[CLIENT_KEY]
         try:
             upstream = await client.request(request.method, url, data=body, headers=headers)
         except aiohttp.ClientError as error:
@@ -313,13 +315,13 @@ def build_app(manager: CastManager) -> web.Application:
 
     async def client_ctx(app_: web.Application):
         timeout = aiohttp.ClientTimeout(total=None, sock_connect=5, sock_read=None)
-        app_["client"] = aiohttp.ClientSession(timeout=timeout, auto_decompress=False)
+        app_[CLIENT_KEY] = aiohttp.ClientSession(timeout=timeout, auto_decompress=False)
         yield
-        await app_["client"].close()
+        await app_[CLIENT_KEY].close()
 
     from zenlink.ocr import OcrSession
 
-    app["ocr"] = OcrSession()
+    app[OCR_KEY] = OcrSession()
     app.cleanup_ctx.append(client_ctx)
     app.add_routes(routes)
     app.router.add_static("/ui/", UI_DIR, show_index=False)

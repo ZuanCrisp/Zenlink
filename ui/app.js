@@ -168,8 +168,8 @@ function renderIdle(device) {
   if (!els.renameInput.hidden) return;  // don't fight the user while renaming
   els.deviceChipName.textContent = device ? device.name + (device.wifi ? " · Wi-Fi" : "") : "No device connected";
   const NEED = {
-    wifi: ["Wi-Fi", "Not on Wi-Fi yet",
-      "Wireless is chosen. With the cable connected, press Set up Wi-Fi in Settings once; keep the PC and the device on the same network, then unplug. Or switch to Wired."],
+    wifi: ["Wi-Fi", "Wi-Fi isn't set up yet",
+      "Wireless is chosen. Connect the cable, unlock the device and press Set up Wi-Fi in Settings once, then unplug. The PC and the device must be on the same network. Or switch to Wired."],
     mode: ["Driver", "Choose a connection mode", "Pick Apple Driver or USB Direct to continue."],
     removefilter: ["Unsafe driver", "Remove the libusb0 filter first",
       "A libusb0 filter is stacked on Apple's driver. It can crash Windows and hides the device. Open Connection & Drivers and press Remove libusb0 filter, then reconnect the cable."],

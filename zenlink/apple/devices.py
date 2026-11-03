@@ -43,6 +43,48 @@ def _read_info(device: dict) -> dict:
     return info
 
 
+def wifi_ready(udid: str) -> bool:
+    """The one-time Wi-Fi setup wrote a RemotePairing record for this device."""
+    from .wifi import has_remote_record
+
+    try:
+        return has_remote_record(udid)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _add_lan_devices(devices: list[dict]) -> None:
+    """Devices found by IP (lan.py) when Windows gets no Bonjour replies."""
+    from . import lan
+
+    lan.scan_async()
+    for found in lan.devices():
+        udid = found["udid"]
+        cls = str(found.get("deviceClass") or "")
+        family = "iPad" if cls == "iPad" else "iPhone" if cls == "iPhone" else "iOS device"
+        if found.get("productType"):
+            models.remember_product(udid.replace("-", ""), str(found["productType"]))
+        entry = {
+            "id": udid,
+            "family": family,
+            "name": models.model_name(udid.replace("-", ""), family),
+            "deviceName": found.get("name"),
+            "os": found.get("version"),
+            "ready": bool(found.get("paired")),
+            "wifi": True,
+        }
+        if not wifi_ready(udid):
+            entry["need"], entry["ready"] = "wifi", False
+        for i, d in enumerate(devices):
+            if d["id"] == udid:
+                if not d.get("wifi"):
+                    devices[i] = entry  # cable-only entry -> reachable on Wi-Fi
+                break
+        else:
+            devices.append(entry)
+    devices.sort(key=lambda d: not d.get("wifi"))
+
+
 def connected_devices(link: str = "wired") -> dict:
     """{'service': bool, 'devices': [...], 'takenOver': bool}
 
@@ -82,6 +124,8 @@ def connected_devices(link: str = "wired") -> dict:
             entry["need"] = "wifi"
             entry["ready"] = False
         devices.append(entry)
+    if link == "wireless":
+        _add_lan_devices(devices)
     with _lock:  # forget unplugged devices so a re-plug re-reads trust
         for udid in list(_cache):
             if udid not in {d["udid"] for d in all_listed}:
