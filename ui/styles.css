@@ -757,3 +757,26 @@ input.switch:checked { background: var(--accent) !important; border-color: var(-
 @media (max-height: 560px) { .mode-desc { display: none; } }
 @media (max-height: 460px) { .chooser-logo, .chooser-note { display: none; } }
 @media (max-width: 620px) { .chooser-card { overflow: auto; } }
+
+/* ---- header device info ---- */
+.hdr-info { margin-left: 10px; font: 500 11px/1 var(--mono); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32vw; }
+.hdr-info:empty { display: none; }
+.hdr-info::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 8px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+@media (max-width: 760px) { .hdr-info { display: none; } }
+
+/* ---- gesture panel docked at the side (default while casting in Apple mode) ---- */
+:root { --side-w: 188px; }
+.ctl-panel.docked {
+  position: fixed; top: var(--top-h, 48px); bottom: var(--foot-h, 56px); right: 0; width: var(--side-w);
+  z-index: 30; overflow-y: auto; border-radius: 0; border-width: 0 0 0 1px;
+  background: var(--panel); backdrop-filter: none; box-shadow: none;
+  padding: 12px 10px; animation: slide-in .22s var(--ease);
+}
+@keyframes slide-in { from { transform: translateX(16px); opacity: 0; } }
+.ctl-panel.docked .ctl-grid.two { grid-template-columns: 1fr; }
+.ctl-panel.docked .ctl-grid.four { grid-template-columns: 1fr 1fr; }
+.ctl-panel.docked .ctl { height: 36px; justify-content: flex-start; padding: 0 12px; font-size: 12px; }
+.ctl-panel.docked .ctl.sm { justify-content: center; }
+.ctl-panel.docked [data-swipe="right"] { justify-content: space-between; }
+body.ctl-docked .stage { margin-right: var(--side-w); }
+body.ctl-docked #btn-controls { color: var(--accent); }

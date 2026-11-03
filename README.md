@@ -14,12 +14,12 @@
   <a href="https://sociabuzz.com/zenvy/tribe" target="_blank"><img src="https://img.shields.io/badge/♥_Support_on-Sociabuzz-FF4FA3?style=flat-square&logo=buymeacoffee&logoColor=white" alt="Support on Sociabuzz"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-green.svg?style=flat-square" alt="License: GPL-3.0"></a>
   <img src="https://img.shields.io/badge/Verified%20OS-Windows%2011%20(Build%2026200%2C%2064--bit)-0078D4.svg?style=flat-square&logo=windows" alt="Verified OS: Windows 11 build 26200">
-  <img src="https://img.shields.io/badge/Verified%20Device-iPad%20(11th%20gen)-000000.svg?style=flat-square&logo=apple" alt="Verified device: iPad (11th gen)">
+  <img src="https://img.shields.io/badge/Verified%20Device-iPad%20(11th%20gen%2C%20iOS%2027.0.1)-000000.svg?style=flat-square&logo=apple" alt="Verified device: iPad (11th gen), iOS 27.0.1">
   <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/zenvyzenshiro/zenlink?style=flat-square&color=FF4FA3" alt="Latest release"></a>
 </p>
 
 > ### 🛡️ Tested & Verified Environment
-> - 📱 **Device**: **iPad (11th generation)**, physical device
+> - 📱 **Device**: **iPad (11th generation)**, physical device running **iOS 27.0.1**
 > - 💻 **PC**: **Windows 11 Pro**, build 26200, 64-bit
 > - 🚀 **Measured**: USB Direct 52–56 fps at 12–30 Mbps with ~0–1 ms decode time; native sound output ~22 ms (WASAPI)
 

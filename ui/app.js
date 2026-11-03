@@ -131,6 +131,7 @@ function applyState(next) {
   if (fsDev) fsDev.textContent = state.device?.name || device?.name || "ZenLink";
   setTimeout(maybeAutoStart, 0);
   els.metrics.device.textContent = state.device?.name || device?.name || "—";
+  renderHeaderInfo(state.phase === "streaming" ? lastStats : null);
 
   player.setDeviceRotation(state.rotation);
   player.nativeAudio = Boolean(state.nativeAudio);
@@ -389,7 +390,17 @@ function setMetric(el, text) {
   el.classList.add("flash");
 }
 
+// Header: device name and resolution, small, beside "ZenLink · USB / Wi-Fi".
+let lastStats = null;
+function renderHeaderInfo(stats) {
+  lastStats = stats;
+  const name = state.device?.name || (state.devices || [])[0]?.name || "";
+  const res = stats ? `${stats.width}×${stats.height}` : "";
+  $("#hdr-info").textContent = [name, res].filter(Boolean).join(" · ");
+}
+
 function renderMetrics(stats) {
+  renderHeaderInfo(stats);
   const fs = $("#fs-stats");
   if (fs) fs.textContent = stats ? `${stats.width}×${stats.height} · ${stats.fps} fps · ${QUALITY_LABEL[castQuality] || "Best graphics"} ${stats.mbps} Mbps · ${stats.latency ?? "—"} ms` : "";
   const m = els.metrics;
@@ -725,16 +736,29 @@ function openControls(on) {
 // casting in Apple Driver mode, "auto" opens it from the button and hides it on
 // an outside click, "hidden" removes the button (G still toggles it).
 let ctlDocked = false;
+let ctlUserClosed = false;  // the panel button closed the side panel for this cast
 function syncControls() {
   const mode = settings.ctlMode || "always";
   ctlBtn.hidden = mode === "hidden";
-  const dock = mode === "always" && appleInput() && state.phase === "streaming";
+  if (!CASTING.includes(state.phase)) ctlUserClosed = false;
+  // Docked as a side panel while casting in Apple Driver mode.
+  const dock = mode === "always" && appleInput() && CASTING.includes(state.phase) && !ctlUserClosed;
+  if (dock === ctlDocked) return;
   ctlPanel.classList.toggle("docked", dock);
-  if (dock && !ctlDocked) openControls(true);
-  if (!dock && ctlDocked) openControls(false);
+  document.body.classList.toggle("ctl-docked", dock);
+  openControls(dock);
   ctlDocked = dock;
+  requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
 }
-ctlBtn.addEventListener("click", (e) => { e.stopPropagation(); openControls(ctlPanel.hidden); });
+ctlBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  if ((settings.ctlMode || "always") === "always" && appleInput() && CASTING.includes(state.phase)) {
+    ctlUserClosed = ctlDocked;  // toggle the side panel
+    if (!ctlDocked && !ctlPanel.hidden) openControls(false);
+    return syncControls();
+  }
+  openControls(ctlPanel.hidden);
+});
 document.addEventListener("pointerdown", (e) => {
   if (!ctlPanel.hidden && !ctlDocked && !e.target.closest("#ctl-panel, #btn-controls")) openControls(false);
 });
@@ -834,9 +858,11 @@ els.stage.addEventListener("dblclick", (e) => {
 
 const DEFAULTS = {
   quality: "best", touch: true, keyboard: true, gestures: true, scrollSpeed: "100",
-  fit: "contain", fitWindow: true, smoothing: "smooth", rotation: "auto", stats: true, dots: true,
+  fit: "contain", fitWindow: true, smoothing: "smooth", rotation: "auto", stats: false, dots: true,
   audioOut: "pc", volume: 100, audioBuffer: "low", lipSync: true, closeToTray: false, ctlMode: "always", autoStart: false, onTop: false, theme: "dark",
 };
+// The stats bar is a debugging aid now: hidden unless turned on again.
+if (prefs.get("statsV2", null) === null) { prefs.set("stats", false); prefs.set("statsV2", true); }
 // Older builds stored rotation "0" for Auto and a bare bitrate cap.
 if (prefs.get("rotationV2", null) === null) { prefs.set("rotation", "auto"); prefs.set("rotationV2", true); }
 // Only three presets remain (Auto / Custom were removed: the device ignores higher caps).
@@ -1182,7 +1208,7 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     openSettings(settingsEl.hidden);
   } else if ((e.key === "g" || e.key === "G") && !e.ctrlKey && !e.altKey) {
-    openControls(ctlPanel.hidden);
+    ctlBtn.click();
   } else if ((e.key === "m" || e.key === "M") && !e.ctrlKey) {
     els.muteBtn.click();
   } else if (e.key === " " && settingsEl.hidden) {
@@ -1227,3 +1253,17 @@ document.getElementById("wifi-setup")?.addEventListener("click", async (e) => {
     btn.disabled = false;
   }
 });
+
+// Keep the docked side panel between the top bar and the bottom bar.
+{
+  const top = document.querySelector(".topbar"), foot = document.querySelector("footer.controls");
+  const sync = () => {
+    const root = document.documentElement.style;
+    root.setProperty("--top-h", `${top && top.offsetParent !== null ? top.getBoundingClientRect().bottom : 0}px`);
+    root.setProperty("--foot-h", `${foot && foot.offsetParent !== null ? window.innerHeight - foot.getBoundingClientRect().top : 0}px`);
+  };
+  const ro = new ResizeObserver(sync);
+  [top, foot, document.body].forEach((el) => el && ro.observe(el));
+  window.addEventListener("resize", sync);
+  sync();
+}
