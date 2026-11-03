@@ -780,3 +780,7 @@ input.switch:checked { background: var(--accent) !important; border-color: var(-
 .ctl-panel.docked [data-swipe="right"] { justify-content: space-between; }
 body.ctl-docked .stage { margin-right: var(--side-w); }
 body.ctl-docked #btn-controls { color: var(--accent); }
+
+/* ---------- wired / wireless pick ---------- */
+.link-pick { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: clamp(8px, 1.6vh, 14px); font-size: 12.5px; color: var(--text-2); }
+.link-pick[hidden] { display: none; }

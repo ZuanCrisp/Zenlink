@@ -168,6 +168,8 @@ function renderIdle(device) {
   if (!els.renameInput.hidden) return;  // don't fight the user while renaming
   els.deviceChipName.textContent = device ? device.name + (device.wifi ? " · Wi-Fi" : "") : "No device connected";
   const NEED = {
+    wifi: ["Wi-Fi", "Not on Wi-Fi yet",
+      "Wireless is chosen. With the cable connected, press Set up Wi-Fi in Settings once; keep the PC and the device on the same network, then unplug. Or switch to Wired."],
     mode: ["Driver", "Choose a connection mode", "Pick Apple Driver or USB Direct to continue."],
     removefilter: ["Unsafe driver", "Remove the libusb0 filter first",
       "A libusb0 filter is stacked on Apple's driver. It can crash Windows and hides the device. Open Connection & Drivers and press Remove libusb0 filter, then reconnect the cable."],
@@ -989,10 +991,17 @@ function showChooser(on, { cancellable = false } = {}) {
     const c = state.connection || {};
     chooserPick = c.pending || c.active || null;
     $("#chooser-remember").checked = Boolean(c.remember);
+    chooserLink = c.link || "wired";
     syncChooser();
   }
 }
+let chooserLink = "wired";
+function syncLinkSegs(link) {
+  document.querySelectorAll(".link-seg button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.link === link)));
+}
 function syncChooser() {
+  $("#chooser-link").hidden = chooserPick !== "apple";
+  syncLinkSegs(chooserLink);
   chooser.querySelectorAll(".mode-card").forEach((card) => {
     const on = card.dataset.mode === chooserPick;
     card.setAttribute("aria-checked", String(on));
@@ -1005,6 +1014,16 @@ chooser.querySelectorAll(".mode-card").forEach((card) => card.addEventListener("
   syncChooser();
 }));
 chooserCancel.addEventListener("click", () => showChooser(false));
+$("#chooser-link").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+  chooserLink = b.dataset.link;
+  syncLinkSegs(chooserLink);
+}));
+document.querySelectorAll(".link-row .link-seg button").forEach((b) => b.addEventListener("click", async () => {
+  if (CASTING.includes(state.phase)) return toast("Stop casting before switching between wired and wireless.");
+  const snap = await api("/api/connection", { link: b.dataset.link });
+  if (snap.phase !== undefined) applyState(snap);
+  toast(b.dataset.link === "wireless" ? "Wireless: ZenLink casts over Wi-Fi." : "Wired: ZenLink casts over the cable.");
+}));
 chooserContinue.addEventListener("click", async () => {
   if (!chooserPick) return;
   chooserContinue.disabled = true;
@@ -1015,6 +1034,7 @@ chooserContinue.addEventListener("click", async () => {
     chooserContinue.disabled = false;
     return;
   }
+  if (chooserPick === "apple" && chooserLink !== state.connection?.link) await api("/api/connection", { link: chooserLink });
   const snap = await api("/api/connection", { mode: chooserPick, remember: $("#chooser-remember").checked });
   showChooser(false);
   if (snap.connection?.restartRequired || snap.restartRequired) {
@@ -1053,6 +1073,8 @@ function renderConnection() {
   $("#source-tag").textContent = usb ? "USB Direct" : state.device?.wifi || (state.devices || [])[0]?.wifi ? "Wi-Fi" : c.active === "apple" ? "USB" : "iOS";
   syncControls();
   $("#conn-mode-name").textContent = MODE_NAME[c.active] || "No mode chosen";
+  if (chooser.hidden) syncLinkSegs(c.link || "wired");
+  $(".link-row").hidden = c.active !== "apple";
   $("#conn-mode-icon").dataset.mode = c.active || "";
   $("#conn-mode-note").textContent = c.restartRequired
     ? `${MODE_NAME[c.pending]} is saved and applies after a restart.`

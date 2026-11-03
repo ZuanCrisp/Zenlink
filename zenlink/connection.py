@@ -27,6 +27,7 @@ from zenlink.paths import DATA_DIR
 log = logging.getLogger(__name__)
 
 MODES = ("apple", "usbdirect")
+LINKS = ("wired", "wireless")
 SETTINGS = DATA_DIR / "settings.json"
 
 
@@ -41,6 +42,8 @@ class ConnectionModeManager:
         # A remembered mode applies straight away; otherwise wait for a choice.
         self.active: str | None = self.saved
         self.pending: str | None = None
+        # Apple Driver mode: cast over the cable ("wired") or Wi-Fi ("wireless").
+        self.link = data.get("appleLink") if data.get("appleLink") in LINKS else "wired"
 
     def _load(self) -> dict:
         try:
@@ -62,6 +65,20 @@ class ConnectionModeManager:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2)
         tmp.replace(self._path)
+
+    def set_link(self, link: str) -> dict:
+        """Wired or wireless (Apple Driver mode). Applies to the next cast."""
+        if link not in LINKS:
+            raise ValueError(f"Unknown link: {link}")
+        with self._lock:
+            self.link = link
+            data = self._load()
+            data["appleLink"] = link
+            tmp = self._path.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, indent=2)
+            tmp.replace(self._path)
+            return self.snapshot()
 
     def choose(self, mode: str, remember: bool) -> dict:
         """Apply the first choice of this run, or queue a change for restart."""
@@ -87,6 +104,7 @@ class ConnectionModeManager:
             "pending": self.pending,
             "saved": self.saved,
             "remember": self.remember,
+            "link": self.link,
             "needsChoice": self.active is None,
             "restartRequired": self.pending is not None,
         }

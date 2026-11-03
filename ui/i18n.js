@@ -117,6 +117,17 @@ const ID = {
   "Switches the device to the libusb0 driver; Apple apps (iTunes, Apple Devices) can't see it until you switch back":
     "Mengganti driver perangkat ke libusb0; aplikasi Apple (iTunes, Apple Devices) tidak melihatnya sampai dikembalikan",
   "Cable only (no Wi-Fi)": "Hanya kabel (tanpa Wi-Fi)",
+  "Apple Driver connection": "Koneksi Apple Driver",
+  "Wired (cable)": "Kabel",
+  "Wireless (Wi-Fi)": "Nirkabel (Wi-Fi)",
+  "Wired uses the cable. Wireless casts over Wi-Fi after the one-time setup below.": "Kabel memakai kabel USB. Nirkabel memakai Wi-Fi setelah setup sekali di bawah.",
+  "Wi-Fi": "Wi-Fi",
+  "Not on Wi-Fi yet": "Belum tersambung Wi-Fi",
+  "Wireless is chosen. With the cable connected, press Set up Wi-Fi in Settings once; keep the PC and the device on the same network, then unplug. Or switch to Wired.": "Mode nirkabel dipilih. Sambungkan kabel, tekan Atur Wi-Fi di Pengaturan sekali, pastikan PC dan perangkat di jaringan yang sama, lalu cabut kabel. Atau pilih Kabel.",
+  "Stop casting before switching between wired and wireless.": "Hentikan casting sebelum pindah kabel/nirkabel.",
+  "Wireless: ZenLink casts over Wi-Fi.": "Nirkabel: ZenLink cast lewat Wi-Fi.",
+  "Wired: ZenLink casts over the cable.": "Kabel: ZenLink cast lewat kabel.",
+  "The device isn't on Wi-Fi yet. Press Set up Wi-Fi in Settings with the cable connected, keep both on the same network, or switch to Wired.": "Perangkat belum tersambung Wi-Fi. Tekan Atur Wi-Fi di Pengaturan saat kabel tersambung, pastikan di jaringan yang sama, atau pilih Kabel.",
   "Remember my choice": "Ingat pilihan saya",
   "You can change the mode any time in Settings → Connection & Drivers. Changing it may need an app restart and reconnecting the USB cable.":
     "Mode koneksi dapat diubah kapan saja melalui Pengaturan → Koneksi & Driver. Mengganti mode mungkin memerlukan restart aplikasi dan mencabut lalu menyambungkan kembali kabel USB.",

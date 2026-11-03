@@ -56,24 +56,37 @@ class NativeAudio:
             return True
         import sounddevice as sd
 
-        try:
-            device = None
-            for index, api in enumerate(sd.query_hostapis()):
-                if "WASAPI" in api["name"]:
-                    device = api["default_output_device"]
-                    break
-            self._stream = sd.RawOutputStream(
-                samplerate=RATE, channels=2, dtype="int16", device=device,
-                latency="low", callback=self._callback,
-            )
-            self._stream.start()
+        # WASAPI first (lowest latency). auto_convert lets Windows resample
+        # when the speaker runs at 44.1 kHz instead of the device's 48 kHz;
+        # without it the stream fails with "Invalid sample rate".
+        attempts = []
+        for api in sd.query_hostapis():
+            if "WASAPI" in api["name"] and api["default_output_device"] >= 0:
+                wasapi = api["default_output_device"]
+                try:
+                    attempts.append((wasapi, sd.WasapiSettings(auto_convert=True)))
+                except TypeError:  # sounddevice < 0.5
+                    pass
+                attempts.append((wasapi, None))
+                break
+        attempts.append((None, None))  # system default output (MME)
+        last = None
+        for device, extra in attempts:
+            try:
+                stream = sd.RawOutputStream(
+                    samplerate=RATE, channels=2, dtype="int16", device=device,
+                    latency="low", callback=self._callback, extra_settings=extra,
+                )
+                stream.start()
+            except Exception as error:  # noqa: BLE001
+                last = error
+                continue
+            self._stream = stream
             log.info("native audio: %s, output latency %.1f ms",
-                     sd.query_devices(self._stream.device)["name"], self._stream.latency * 1000)
+                     sd.query_devices(stream.device)["name"], stream.latency * 1000)
             return True
-        except Exception as error:  # noqa: BLE001
-            log.warning("native audio could not start: %s", error)
-            self._stream = None
-            return False
+        log.warning("native audio could not start: %s", last)
+        return False
 
     def stop(self) -> None:
         stream, self._stream = self._stream, None

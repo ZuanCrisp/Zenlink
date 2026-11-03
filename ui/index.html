@@ -207,6 +207,7 @@
           </ul>
         </button>
       </div>
+      <div class="link-pick" id="chooser-link"><span>Apple Driver connection</span><div class="seg link-seg"><button type="button" data-link="wired">Wired (cable)</button><button type="button" data-link="wireless">Wireless (Wi-Fi)</button></div></div>
       <label class="remember"><input type="checkbox" id="chooser-remember"> Remember my choice</label>
       <p class="chooser-note">You can change the mode any time in Settings → Connection &amp; Drivers. Changing it may need an app restart and reconnecting the USB cable.</p>
       <div class="chooser-actions">
@@ -262,6 +263,7 @@
             <button type="button" class="btn stop" id="drv-removefilter" hidden>Remove libusb0 filter</button>
             <button type="button" class="btn ghost-btn" id="drv-zadig" hidden>Install manually with Zadig</button>
           </div>
+          <div class="row link-row"><label>Apple Driver connection<small>Wired uses the cable. Wireless casts over Wi-Fi after the one-time setup below.</small></label><div class="seg link-seg"><button type="button" data-link="wired">Wired (cable)</button><button type="button" data-link="wireless">Wireless (Wi-Fi)</button></div></div>
           <div class="row wifi-row"><label>Wireless (Wi-Fi)<small>Apple Driver mode can also cast over Wi-Fi. Set it up once with the cable connected and the device unlocked; then unplug. The PC and the device must be on the same network. Wi-Fi adds a little latency.</small></label><button type="button" class="btn ghost-btn" id="wifi-setup">Set up Wi-Fi</button></div>
           <p class="conn-warn" id="conn-warn" hidden></p>
           <p class="conn-hint">Each mode uses its own driver on the device: Apple mode the Apple driver, USB Direct the libusb0 driver (installed as the device's driver, never stacked as a filter). Switching asks for administrator permission; then unplug the cable and plug it in again. A new mode applies after ZenLink restarts.</p>

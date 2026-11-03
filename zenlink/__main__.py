@@ -62,6 +62,7 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[logging.FileHandler(DATA_DIR / "zenlink.log", encoding="utf-8")],
+        force=True,  # a library import may have configured logging already (empty log otherwise)
     )
     from zenlink import restart
 

@@ -43,23 +43,33 @@ def _read_info(device: dict) -> dict:
     return info
 
 
-def connected_devices() -> dict:
-    """{'service': bool, 'devices': [...], 'takenOver': bool}"""
+def connected_devices(link: str = "wired") -> dict:
+    """{'service': bool, 'devices': [...], 'takenOver': bool}
+
+    link "wired": cable connections only. "wireless": the device's Wi-Fi
+    entry; a device seen only on the cable is listed with need="wifi".
+    """
     try:
         listed = usbmuxd.list_devices()
     except usbmuxd.MuxError as error:
         return {"service": False, "error": str(error), "devices": [], "takenOver": _taken_over()}
+    def is_usb(d: dict) -> bool:
+        return str(d.get("connection", "USB")).upper() == "USB"
+
+    all_listed = listed
+    if link == "wireless":
+        net_ids = {d["udid"] for d in listed if not is_usb(d)}
+        listed = [d for d in listed if not is_usb(d) or d["udid"] not in net_ids]
+        listed.sort(key=is_usb)
+    else:
+        listed = [d for d in listed if is_usb(d)]
     devices = []
-    usb_ids = {d["udid"] for d in listed if str(d.get("connection", "USB")).upper() == "USB"}
-    # A cable connection wins; a device only on Wi-Fi is listed with wifi=True.
-    listed = [d for d in listed if str(d.get("connection", "USB")).upper() == "USB" or d["udid"] not in usb_ids]
-    listed.sort(key=lambda d: str(d.get("connection", "USB")).upper() != "USB")
     for d in listed:
-        wifi = str(d.get("connection", "USB")).upper() != "USB"
+        wifi = not is_usb(d)
         info = _read_info(d)
         cls = str(info.get("DeviceClass") or "")
         family = "iPad" if cls == "iPad" else "iPhone" if cls == "iPhone" else "iOS device"
-        devices.append({
+        entry = {
             "id": d["udid"],
             "family": family,
             "name": models.model_name(d["udid"].replace("-", ""), family),
@@ -67,10 +77,14 @@ def connected_devices() -> dict:
             "os": info.get("ProductVersion"),
             "ready": bool(info.get("paired")),
             "wifi": wifi,
-        })
+        }
+        if link == "wireless" and not wifi:
+            entry["need"] = "wifi"
+            entry["ready"] = False
+        devices.append(entry)
     with _lock:  # forget unplugged devices so a re-plug re-reads trust
         for udid in list(_cache):
-            if udid not in {d["udid"] for d in listed}:
+            if udid not in {d["udid"] for d in all_listed}:
                 _cache.pop(udid, None)
     return {"service": True, "devices": devices, "takenOver": not devices and _taken_over()}
 

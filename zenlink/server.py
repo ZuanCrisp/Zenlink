@@ -85,6 +85,8 @@ def build_app(manager: CastManager) -> web.Application:
     async def connection_set(request: web.Request) -> web.Response:
         body = await request.json()
         try:
+            if "link" in body and "mode" not in body:
+                return web.json_response(await asyncio.to_thread(manager.set_link, str(body["link"])))
             snap = await asyncio.to_thread(manager.choose_mode, str(body.get("mode")), bool(body.get("remember")))
         except ValueError as error:
             return web.json_response({"error": str(error)}, status=400)

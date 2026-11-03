@@ -171,7 +171,7 @@ class CastManager:
                 self._presence = presence
                 self._publish()
             return
-        presence = apple_devices.connected_devices()
+        presence = apple_devices.connected_devices(self.connection.link)
         if not presence.get("devices"):
             # Apple's service can't see a device whose driver is wrong for this
             # mode; say what to fix instead of "No device connected".
@@ -207,6 +207,10 @@ class CastManager:
             self._set_state("error", error=msg)
             return self.snapshot()
         target = found[0]
+        if target.get("need") == "wifi":
+            self._set_state("error", error="The device isn't on Wi-Fi yet. Press Set up Wi-Fi in Settings with the "
+                            "cable connected, keep both on the same network, or switch to Wired.")
+            return self.snapshot()
         if not target.get("ready"):
             self._set_state("error", error="Unlock the device and tap Trust, then try again.")
             return self.snapshot()
@@ -339,8 +343,7 @@ class CastManager:
             return {"ok": False, "message": "Wi-Fi needs Apple Driver mode."}
         if self._session is not None:
             return {"ok": False, "message": "Stop casting first."}
-        self.refresh_devices()
-        usb = [d for d in self._presence.get("devices", []) if not d.get("wifi") and d.get("ready")]
+        usb = [d for d in apple_devices.connected_devices("wired").get("devices", []) if d.get("ready")]
         if not usb:
             return {"ok": False, "message": "Connect the device with the cable, unlock it and tap Trust first."}
         from zenlink.apple import wifi
@@ -350,6 +353,12 @@ class CastManager:
         except Exception as error:  # noqa: BLE001
             return {"ok": False, "message": f"Wi-Fi setup failed: {_friendly_error(error)}"}
         return {**result, "device": usb[0]["name"]}
+
+    def set_link(self, link: str) -> dict:
+        self.connection.set_link(link)
+        self.refresh_devices()
+        self._publish()
+        return self.snapshot()
 
     def choose_mode(self, mode: str, remember: bool) -> dict:
         before = self.connection.active
