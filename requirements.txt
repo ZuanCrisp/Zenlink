@@ -1,0 +1,8 @@
+aiohttp>=3.10
+pywebview>=5.3
+pymobiledevice3>=11.49
+av>=14
+pyusb>=1.2.1
+sounddevice>=0.4.6
+pystray>=0.19
+Pillow>=10
