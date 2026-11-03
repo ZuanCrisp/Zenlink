@@ -561,7 +561,9 @@ function devicePoint(u, v) {
   const clamp = (n) => Math.round(Math.min(1, Math.max(0, n)) * 65535);
   return { x: clamp(x), y: clamp(y) };
 }
-const openAppSwitcher = () => swipeOnScreen(0.5, 1, 0.5, 0.58, 16, 18, 500);
+// A double Home press opens the App Switcher (verified on iPadOS 27); an injected
+// swipe-up-and-hold is too slow for iOS to read as that gesture.
+const openAppSwitcher = () => pressHome(2);
 const swipeOnScreen = (u0, v0, u1, v1, steps, dt, holdMs = 0) =>
   stroke(devicePoint(u0, v0), devicePoint(u1, v1), steps, dt, holdMs);
 let lastUV = { u: 0.5, v: 0.5 };
@@ -722,7 +724,6 @@ $("#btn-home")?.addEventListener("click", () => pressHome(1));
 const PANEL_GESTURES = {
   notifications: [0.22, 0, 0.22, 0.62, 12, 16, 0],
   control: [0.92, 0, 0.92, 0.62, 12, 16, 0],
-  switcher: [0.5, 1, 0.5, 0.58, 16, 18, 500],
 };
 const ctlPanel = $("#ctl-panel");
 const ctlBtn = $("#btn-controls");
@@ -741,6 +742,8 @@ function syncControls() {
   const mode = settings.ctlMode || "always";
   ctlBtn.hidden = mode === "hidden";
   if (!CASTING.includes(state.phase)) ctlUserClosed = false;
+  ctlPanel.classList.toggle("disabled", !appleInput());
+  $("#ctl-note").hidden = appleInput();
   // Docked as a side panel while casting in Apple Driver mode.
   const dock = mode === "always" && appleInput() && CASTING.includes(state.phase) && !ctlUserClosed;
   if (dock === ctlDocked) return;
@@ -777,6 +780,7 @@ ctlPanel.querySelectorAll("[data-gesture]").forEach((b) => b.addEventListener("c
   flash(b);
   const g = b.dataset.gesture;
   if (g === "home") return pressHome(1);
+  if (g === "switcher") return openAppSwitcher();
   swipeOnScreen(...PANEL_GESTURES[g]);
 }));
 ctlPanel.querySelectorAll("[data-swipe]").forEach((b) => b.addEventListener("click", () => {
