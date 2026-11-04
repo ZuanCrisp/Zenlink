@@ -42,6 +42,10 @@ $pyiArgs = @(
     "--add-data", "tools${sep}tools",
     "--add-data", "drivers${sep}drivers",
     "--collect-all", "pymobiledevice3",
+    # Package metadata (dist-info) of pymobiledevice3 and everything it
+    # depends on: some read their own version at import (pyimg4 does), and
+    # without it the developer image / tunnel import fails in the exe.
+    "--recursive-copy-metadata", "pymobiledevice3",
     "--collect-all", "pmd_pytcp",
     "--collect-all", "pmd_net_addr",
     "--collect-all", "webview",
@@ -90,6 +94,21 @@ VSVersionInfo(
 if ($LASTEXITCODE) { throw "PyInstaller failed" }
 
 $app = Join-Path $dist "ZenLink"
+
+# Import every device-path module inside the built exe (packaging\launch.py
+# --selftest). A missing module or package metadata fails the build here.
+function Test-FrozenExe([string]$exe) {
+    $report = Join-Path $build ("selftest-" + [IO.Path]::GetFileNameWithoutExtension($exe) + "-" + (Get-Random) + ".json")
+    $p = Start-Process -FilePath $exe -ArgumentList "--selftest", "`"$report`"" -PassThru -Wait
+    if (-not (Test-Path $report)) { throw "Self-test of $exe wrote no report (exit $($p.ExitCode))" }
+    $r = Get-Content $report -Raw | ConvertFrom-Json
+    if (-not $r.ok) {
+        $bad = $r.modules.PSObject.Properties | Where-Object { $_.Value -ne "ok" } | ForEach-Object { "$($_.Name): $($_.Value)" }
+        throw "Self-test of $exe failed:`n$($bad -join "`n")"
+    }
+    Write-Host "    self-test OK: $exe ($(@($r.modules.PSObject.Properties).Count) modules)" -ForegroundColor Green
+}
+Test-FrozenExe (Join-Path $app "ZenLink.exe")
 foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat") {
     Copy-Item $f $app
 }
@@ -106,6 +125,7 @@ for ($i = 0; $i -lt $pyiArgs.Count; $i++) {
 $oneArgs += @("--distpath", (Join-Path $build "onefile-dist"), "--workpath", (Join-Path $build "onefile-work"))
 & $py @oneArgs
 if ($LASTEXITCODE) { throw "PyInstaller (one file) failed" }
+Test-FrozenExe (Join-Path $build "onefile-dist\ZenLink.exe")
 Copy-Item (Join-Path $build "onefile-dist\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
 
 Write-Host "[4/4] Building the installer and the source zip..." -ForegroundColor Magenta

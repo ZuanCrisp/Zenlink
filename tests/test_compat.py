@@ -327,5 +327,31 @@ class HybridServerRouteTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r.status, 503)  # forwarded to the HID server (not running here)
 
 
+class FrozenBuildTests(unittest.TestCase):
+    """The exe once failed Apple mode with "No package metadata was found
+    for pyimg4": pyimg4 reads its own version at import and the build left
+    its dist-info out. The build now copies the metadata and self-tests."""
+
+    root = Path(__file__).resolve().parents[1]
+
+    def test_build_copies_dependency_metadata_and_self_tests(self):
+        script = (self.root / "build_portable_release.ps1").read_text(encoding="utf-8")
+        self.assertIn('"--recursive-copy-metadata", "pymobiledevice3"', script)
+        self.assertEqual(script.count("Test-FrozenExe ("), 2, "both the folder exe and the one-file exe are tested")
+
+    def test_selftest_covers_the_device_paths(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("zl_launch", self.root / "packaging" / "launch.py")
+        launch = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(launch)
+        for name in ("pyimg4", "pymobiledevice3.services.mobile_image_mounter", "zenlink.apple.hybrid",
+                     "zenlink.apple.session", "zenlink.usbdirect.session", "zenlink.airplay.receiver"):
+            self.assertIn(name, launch.SELFTEST_MODULES)
+        out = Path(tempfile.mkdtemp()) / "selftest.json"
+        self.assertEqual(launch.selftest(str(out)), 0, out.read_text(encoding="utf-8"))
+        self.assertTrue(json.loads(out.read_text(encoding="utf-8"))["ok"])
+
+
 if __name__ == "__main__":
     unittest.main()
