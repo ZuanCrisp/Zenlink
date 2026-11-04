@@ -435,7 +435,7 @@ function renderHeaderInfo(stats) {
 function renderHeaderStats(stats) {
   const el = $("#hdr-stats");
   if (!el) return;
-  const on = settings.hdrStats && stats && state.phase === "streaming";
+  const on = settings.stats && stats && state.phase === "streaming";
   el.hidden = !on;
   if (!on) return;
   const audio = stats.audioMs ?? (player.nativeAudio && player._audioLat ? Math.round(player._audioLat) : null);
@@ -915,7 +915,7 @@ els.stage.addEventListener("dblclick", (e) => {
 const DEFAULTS = {
   quality: "best", touch: true, keyboard: true, gestures: true, scrollSpeed: "100",
   fit: "contain", fitWindow: true, smoothing: "smooth", rotation: "auto", stats: false, dots: true,
-  hdrStats: true, audioOut: "pc", volume: 100, audioBuffer: "low", lipSync: true, closeToTray: false, ctlMode: "always", autoStart: false, onTop: false, theme: "dark",
+  audioOut: "pc", volume: 100, audioBuffer: "low", lipSync: true, closeToTray: false, ctlMode: "always", autoStart: false, onTop: false, theme: "dark",
 };
 // The stats bar is a debugging aid now: hidden unless turned on again.
 if (prefs.get("statsV2", null) === null) { prefs.set("stats", false); prefs.set("statsV2", true); }
@@ -946,8 +946,8 @@ function applySetting(key, value) {
       if (key === "quality" && state.phase === "streaming") toast("New quality applies the next time you start casting.");
       break;
     case "smoothing": body.dataset.smoothing = value; break;
-    case "stats": body.dataset.stats = value ? "on" : "off"; break;
-    case "hdrStats": renderHeaderStats(lastStats); break;
+    // The stats live beside the device name in the header; no bottom bar.
+    case "stats": body.dataset.stats = "off"; renderHeaderStats(lastStats); break;
     case "dots": body.dataset.dots = value ? "on" : "off"; break;
     case "rotation": player.setRotation(value); break;
     case "audioOut":
@@ -1041,7 +1041,8 @@ function showChooser(on, { cancellable = false } = {}) {
   if (on) {
     const c = state.connection || {};
     chooserPick = c.pending || c.active || null;
-    $("#chooser-remember").checked = Boolean(c.remember);
+    // First choice: remembered by default (untick to be asked every start).
+    $("#chooser-remember").checked = c.active ? Boolean(c.remember) : true;
     chooserLink = c.link || "wired";
     syncChooser();
   }

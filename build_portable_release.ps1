@@ -53,7 +53,18 @@ $pyiArgs = @(
     "--hidden-import", "clr",
     "--exclude-module", "tkinter",
     "--exclude-module", "matplotlib",
-    "--exclude-module", "IPython"
+    "--exclude-module", "IPython",
+    # Smaller build: Pillow is only used for the tray icon (PNG/ICO).
+    "--exclude-module", "PIL._avif",
+    "--exclude-module", "PIL.AvifImagePlugin",
+    "--exclude-module", "PIL._webp",
+    "--exclude-module", "PIL.WebPImagePlugin",
+    "--exclude-module", "PIL._imagingft",
+    "--exclude-module", "PIL.ImageFont",
+    "--exclude-module", "PIL.ImageQt",
+    "--exclude-module", "PIL.ImageTk",
+    "--exclude-module", "pydoc",
+    "--exclude-module", "lib2to3"
 )
 # Version resource (Author: Zenvy Zenshiro)
 $parts = ($Version.Split(".") + @("0", "0", "0", "0"))[0..3] -join ", "

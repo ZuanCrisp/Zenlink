@@ -52,7 +52,14 @@ class Tray:
             pystray.MenuItem("Quit ZenLink", self._quit),
         )
         self.icon = pystray.Icon("ZenLink", image, "ZenLink", menu)
-        threading.Thread(target=self.icon.run, name="tray", daemon=True).start()
+
+        def run() -> None:
+            try:
+                self.icon.run(setup=lambda icon: (setattr(icon, "visible", True), log.info("tray icon shown")))
+            except Exception:  # noqa: BLE001 - e.g. a missing Pillow image plugin in the packaged app
+                log.exception("tray icon failed")
+
+        threading.Thread(target=run, name="tray", daemon=True).start()
         return True
 
     def stop(self) -> None:

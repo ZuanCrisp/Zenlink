@@ -191,6 +191,12 @@
       <img class="chooser-logo" src="/ui/logo-256.png" alt="" width="56" height="56">
       <h2 id="chooser-title">How should ZenLink connect?</h2>
       <p class="chooser-sub">Choose the USB connection mode. Nothing connects and no driver changes until you continue.</p>
+      <div class="chooser-lang" data-no-i18n>
+        <span>Language / Bahasa:</span>
+        <div class="lang-switch lang-wide" role="group" aria-label="Language / Bahasa">
+          <button type="button" data-lang="id" aria-pressed="true">Indonesia</button><button type="button" data-lang="en" aria-pressed="false">English</button>
+        </div>
+      </div>
       <div class="mode-cards" role="radiogroup" aria-label="USB connection mode">
         <button type="button" class="mode-card" data-mode="apple" role="radio" aria-checked="false">
           <span class="badge">Recommended</span>
@@ -218,7 +224,7 @@
         </button>
       </div>
       <div class="link-pick" id="chooser-link"><span>Connection</span><div class="seg link-seg"><button type="button" data-link="wired">Wired (cable)</button><button type="button" data-link="wireless">Wireless (Wi-Fi)</button></div></div>
-      <label class="remember"><input type="checkbox" id="chooser-remember"> Remember my choice</label>
+      <label class="remember"><input type="checkbox" id="chooser-remember" checked> Remember my choice</label>
       <p class="chooser-note">You can change the mode any time in Settings → Connection &amp; Drivers. Changing it may need an app restart and reconnecting the USB cable.</p>
       <div class="chooser-actions">
         <button type="button" class="btn ghost-btn" id="chooser-cancel" hidden>Cancel</button>
@@ -311,8 +317,7 @@
           <div class="seg" data-pref="smoothing"><button data-v="smooth">Smooth</button><button data-v="sharp">Sharp</button></div></div>
         <div class="row"><label>Rotation<small>Auto follows the device. Alt+H switches.</small></label>
           <div class="seg" data-pref="rotation"><button data-v="auto">Auto</button><button data-v="0">0°</button><button data-v="90">90°</button><button data-v="180">180°</button><button data-v="270">270°</button></div></div>
-        <div class="row"><label>Live stats in the header<small>FPS, video delay and audio delay next to the device name while casting</small></label><input type="checkbox" class="switch" data-pref="hdrStats"></div>
-        <div class="row"><label>Show stats bar</label><input type="checkbox" class="switch" data-pref="stats"></div>
+        <div class="row"><label>Show stats bar<small>FPS, video delay and audio delay next to the device name while casting</small></label><input type="checkbox" class="switch" data-pref="stats"></div>
         <div class="row"><label>Animated background</label><input type="checkbox" class="switch" data-pref="dots"></div>
       </section>
       <section>

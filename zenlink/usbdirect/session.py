@@ -215,7 +215,8 @@ class UsbDirectSession:
             dev = self._wait_reconnect(want_capture=True)
             self._mux_cfg, qt = _configs(dev)
         if qt is None:
-            raise UsbDirectError("The device did not offer its screen-capture configuration. Unlock it and try again.")
+            raise UsbDirectError("The device did not offer its screen-capture configuration. Unlock it and try again. "
+                                 "If it keeps failing, restart the iPhone/iPad.")
         log.info("usb direct: capture mode on (%d configurations, capture config %s)", dev.bNumConfigurations, qt)
 
         # qcast QMirror_Init/Trust: capture configuration, lockdown session over
@@ -369,7 +370,8 @@ class UsbDirectSession:
         if self._stop.is_set():
             raise UsbDirectError("Stopped.")
         raise UsbDirectError(
-            "The device did not come back in screen-capture mode. Unplug it, plug it in again, unlock it and retry."
+            "The device did not come back in screen-capture mode. Restart the iPhone/iPad (turn it off and on), "
+            "plug it in again, unlock it and retry."
             if want_capture else
             "The device did not leave screen-capture mode. Unplug it, plug it in again and retry."
         )
@@ -501,8 +503,8 @@ class UsbDirectSession:
                         continue
                     if received == 0 and retried and now - silent_since > 10.0:
                         raise UsbDirectError(
-                            "The device opened screen capture but sent nothing. Unlock it, keep it on the "
-                            "home screen, then press Start casting again."
+                            "The device opened screen capture but sent nothing. Restart the iPhone/iPad (turn it "
+                            "off and on), unlock it, keep it on the home screen, then press Start casting again."
                         )
                     if not self._pinged:
                         # qcast: one active PING on the first read timeout, never repeated.
