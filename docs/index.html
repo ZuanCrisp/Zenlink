@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZenLink — iPhone & iPad di PC Windows</title>
+<meta name="description" content="Cerminkan, kontrol, dan live-stream iPhone atau iPad di Windows — lewat kabel atau Wi-Fi (AirPlay). Gratis dan open source.">
+<meta property="og:title" content="ZenLink — iPhone & iPad di PC Windows">
+<meta property="og:description" content="Mirror, kontrol, dan live-stream iPhone/iPad di Windows. Kabel atau Wi-Fi. Gratis, open source.">
+<meta property="og:image" content="https://zenvyzenshiro.github.io/zenlink/logo.png">
+<meta name="theme-color" content="#070708">
+<link rel="icon" href="logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #070708; --raise: #0f0f12; --card: #121216; --line: #1f1f26; --line-2: #2a2a33;
+    --text: #f4f4f6; --text-2: #b4b4c0; --text-3: #7c7c8a;
+    --accent: #ff4fa3; --accent-2: #ff7dbc; --accent-soft: rgba(255, 79, 163, .14);
+    --ok: #3ddc84; --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--ink); color: var(--text); font: 16px/1.6 Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: inherit; text-decoration: none; }
+  img { max-width: 100%; display: block; }
+  .wrap { width: min(1120px, 100% - 32px); margin: 0 auto; }
+
+  /* background dots, like the app */
+  body::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(circle at 1px 1px, rgba(255, 79, 163, .22) 1px, transparent 1.6px) 0 0 / 26px 26px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 55% at 50% 18%, #000 25%, transparent 75%);
+            mask-image: radial-gradient(ellipse 70% 55% at 50% 18%, #000 25%, transparent 75%); }
+
+  /* nav */
+  nav { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(14px); background: rgba(7, 7, 8, .72); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; gap: 22px; height: 62px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; }
+  .brand img { width: 30px; height: 30px; border-radius: 8px; }
+  .brand b { background: linear-gradient(90deg, #fff, var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .links { display: flex; gap: 22px; margin-left: 18px; font-size: 14px; color: var(--text-2); }
+  .links a:hover { color: var(--text); }
+  .nav-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .lang { display: inline-flex; border: 1px solid var(--line-2); border-radius: 999px; overflow: hidden; }
+  .lang button { all: unset; cursor: pointer; padding: 5px 11px; font: 600 12px/1 var(--mono); color: var(--text-3); }
+  .lang button[aria-pressed="true"] { background: var(--accent); color: #1a0711; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 9px; border-radius: 999px; font-weight: 600; cursor: pointer; transition: transform .15s, background .15s, border-color .15s; }
+  .btn:active { transform: scale(.98); }
+  .btn-sm { padding: 7px 14px; font-size: 13px; border: 1px solid var(--line-2); }
+  .btn-sm:hover { border-color: var(--accent); }
+  .btn-main { padding: 15px 28px; font-size: 16px; background: linear-gradient(135deg, var(--accent), #e0287f); color: #fff; box-shadow: 0 12px 34px rgba(255, 79, 163, .35); }
+  .btn-main:hover { box-shadow: 0 16px 44px rgba(255, 79, 163, .5); }
+  .btn-ghost { padding: 14px 24px; font-size: 15px; border: 1px solid var(--line-2); background: rgba(255,255,255,.02); }
+  .btn-ghost:hover { border-color: var(--accent); }
+  .btn svg { width: 18px; height: 18px; }
+
+  /* hero */
+  .hero { text-align: center; padding: 72px 0 40px; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border: 1px solid var(--line-2); border-radius: 999px; font-size: 13px; color: var(--text-2); background: rgba(255,255,255,.02); }
+  .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+  h1 { margin: 22px auto 18px; max-width: 900px; font-size: clamp(38px, 7vw, 76px); line-height: 1.03; letter-spacing: -.035em; font-weight: 800; }
+  h1 em { font-style: normal; background: linear-gradient(90deg, var(--accent), #ffb3d6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { max-width: 660px; margin: 0 auto; font-size: clamp(16px, 2vw, 19px); color: var(--text-2); }
+  .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 32px 0 14px; }
+  .meta { font-size: 13.5px; color: var(--text-3); }
+  .meta b { color: var(--text); font-weight: 600; }
+  .count { margin-top: 6px; font-size: 14px; color: var(--text-2); }
+  .count b { font-family: var(--mono); color: var(--accent-2); font-size: 16px; }
+
+  /* screenshot frame */
+  .shot { margin: 46px auto 0; max-width: 1040px; border-radius: 18px; padding: 10px; background: linear-gradient(180deg, #1b1b22, #0d0d11); border: 1px solid var(--line-2);
+    box-shadow: 0 40px 120px rgba(0,0,0,.6), 0 0 0 1px rgba(255,79,163,.08), 0 30px 90px -30px rgba(255, 79, 163, .35); }
+  .shot .bar { display: flex; gap: 6px; padding: 4px 6px 10px; }
+  .shot .bar i { width: 10px; height: 10px; border-radius: 50%; background: #2c2c35; }
+  .shot img { border-radius: 10px; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+
+  /* sections */
+  section { padding: 90px 0 10px; }
+  .eyebrow { font: 600 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent-2); }
+  h2 { margin: 14px 0 12px; font-size: clamp(30px, 4.4vw, 48px); line-height: 1.08; letter-spacing: -.03em; font-weight: 800; }
+  .sub { color: var(--text-2); max-width: 640px; font-size: 17px; }
+  .center { text-align: center; } .center .sub { margin: 0 auto; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin-top: 38px; }
+  .card { padding: 22px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); transition: border-color .2s, transform .2s; }
+  .card:hover { border-color: rgba(255, 79, 163, .45); transform: translateY(-2px); }
+  .ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-2); margin-bottom: 14px; }
+  .ic svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .card h3 { margin: 0 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--text-2); font-size: 14.5px; }
+
+  /* modes */
+  .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 38px; }
+  .mode { padding: 26px; border-radius: 18px; background: var(--card); border: 1px solid var(--line); display: flex; flex-direction: column; }
+  .mode.hot { border-color: rgba(255, 79, 163, .55); background: linear-gradient(170deg, rgba(255,79,163,.12), var(--card) 55%); }
+  .mode .tag { align-self: flex-start; font: 600 11px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; padding: 6px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent-2); }
+  .mode h3 { margin: 16px 0 4px; font-size: 21px; }
+  .mode .how { color: var(--text-3); font-size: 14px; margin-bottom: 16px; }
+  .mode ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; font-size: 14.5px; color: var(--text-2); }
+  .mode li { display: flex; gap: 9px; }
+  .mode li::before { content: "✓"; color: var(--ok); font-weight: 700; }
+  .mode li.no::before { content: "–"; color: var(--text-3); }
+  .stat { margin-top: auto; padding-top: 18px; font: 600 13px/1.4 var(--mono); color: var(--accent-2); }
+
+  /* numbers */
+  .nums { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 38px; }
+  .num { padding: 24px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); }
+  .num b { display: block; font: 700 clamp(26px, 3.4vw, 36px)/1.1 var(--mono); letter-spacing: -.02em; background: linear-gradient(90deg, #fff, var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .num span { display: block; margin-top: 8px; color: var(--text-2); font-size: 14px; }
+
+  /* gallery */
+  .gallery { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 38px; }
+  .gallery figure { margin: 0; border-radius: 16px; overflow: hidden; border: 1px solid var(--line-2); background: var(--card); }
+  .gallery img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
+  .gallery figcaption { padding: 13px 16px; font-size: 14px; color: var(--text-2); border-top: 1px solid var(--line); }
+
+  /* steps */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 38px; counter-reset: s; }
+  .step { padding: 24px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); counter-increment: s; }
+  .step::before { content: counter(s); display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--accent); color: #1a0711; font-weight: 800; margin-bottom: 14px; }
+  .step h3 { margin: 0 0 6px; font-size: 17px; }
+  .step p { margin: 0; color: var(--text-2); font-size: 14.5px; }
+
+  /* faq */
+  .faq { margin-top: 30px; display: grid; gap: 10px; max-width: 820px; }
+  details { border: 1px solid var(--line); border-radius: 14px; background: var(--card); padding: 4px 20px; }
+  summary { cursor: pointer; list-style: none; padding: 15px 0; font-weight: 600; display: flex; justify-content: space-between; gap: 12px; }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "+"; color: var(--accent-2); font-size: 22px; line-height: 1; }
+  details[open] summary::after { content: "–"; }
+  details p { margin: 0 0 16px; color: var(--text-2); font-size: 15px; }
+
+  /* download */
+  .dl { margin: 96px 0 0; padding: 54px 28px; border-radius: 26px; text-align: center; border: 1px solid rgba(255,79,163,.35);
+    background: radial-gradient(ellipse at 50% 0%, rgba(255,79,163,.22), transparent 65%), var(--raise); }
+  .dl .files { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 860px; margin: 30px auto 0; text-align: left; }
+  .file { padding: 18px; border-radius: 14px; border: 1px solid var(--line-2); background: rgba(255,255,255,.02); display: flex; flex-direction: column; gap: 4px; transition: border-color .2s; }
+  .file:hover { border-color: var(--accent); }
+  .file b { font-size: 15px; } .file span { font-size: 13px; color: var(--text-3); }
+  .file small { font: 600 12px/1 var(--mono); color: var(--accent-2); margin-top: 6px; }
+
+  footer { margin-top: 80px; padding: 34px 0 46px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 13.5px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 14px 28px; justify-content: space-between; }
+  footer a:hover { color: var(--text); }
+  .foot-links { display: flex; gap: 20px; flex-wrap: wrap; }
+
+  .reveal { opacity: 0; transform: translateY(18px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } html { scroll-behavior: auto; } }
+
+  @media (max-width: 900px) {
+    .links { display: none; }
+    .modes, .steps { grid-template-columns: 1fr; }
+    .nums { grid-template-columns: 1fr 1fr; }
+    .gallery { grid-template-columns: 1fr; }
+    .dl .files { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) { .nav-right .btn-sm span { display: none; } .hero { padding-top: 48px; } }
+  .gest { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 38px; }
+  .kbd { margin-top: 14px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .kbd-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); font-size: 14px; color: var(--text-2); }
+  .kbd-row kbd { font: 600 12px/1 var(--mono); padding: 6px 9px; border-radius: 7px; background: #1c1c23; border: 1px solid var(--line-2); border-bottom-width: 2px; color: var(--text); white-space: nowrap; }
+  @media (max-width: 900px) { .gest, .kbd { grid-template-columns: 1fr; } }
+</style>
+<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#"><img src="logo.png" alt="" width="30" height="30"><b>ZenLink</b></a>
+    <div class="links">
+      <a href="#fitur" data-id="Fitur" data-en="Features">Fitur</a>
+      <a href="#mode" data-id="Mode" data-en="Modes">Mode</a>
+      <a href="#gesture" data-id="Gesture" data-en="Gestures">Gesture</a>
+      <a href="#faq" data-id="Tanya jawab" data-en="FAQ">Tanya jawab</a>
+      <a href="#unduh" data-id="Unduh" data-en="Download">Unduh</a>
+    </div>
+    <div class="nav-right">
+      <div class="lang" role="group" aria-label="Language / Bahasa">
+        <button type="button" data-lang="id" aria-pressed="true">ID</button><button type="button" data-lang="en" aria-pressed="false">EN</button>
+      </div>
+      <a class="btn btn-sm" href="https://sociabuzz.com/zenvy/tribe" target="_blank" rel="noopener">♥ <span data-id="Dukung" data-en="Support">Dukung</span></a>
+      <a class="btn btn-sm" href="https://github.com/zenvyzenshiro/zenlink" target="_blank" rel="noopener" aria-label="GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 0-.8.4-1.3.7-1.6-2.7-.3-5.5-1.3-5.5-6 0-1.2.5-2.3 1.3-3.1-.2-.4-.6-1.6 0-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.6.2 2.8.1 3.2.8.8 1.3 1.9 1.3 3.1 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5Z"/></svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero wrap">
+  <span class="pill"><i></i><span data-id="Tersedia untuk Windows 10 & 11 · Gratis" data-en="Available for Windows 10 & 11 · Free">Tersedia untuk Windows 10 &amp; 11 · Gratis</span></span>
+  <h1 data-id="Layar iPhone &amp; iPad kamu, <em>hidup di PC.</em>" data-en="Your iPhone &amp; iPad, <em>live on your PC.</em>">Layar iPhone &amp; iPad kamu, <em>hidup di PC.</em></h1>
+  <p class="lead" data-id="ZenLink mencerminkan dan mengontrol iPhone atau iPad di Windows — lewat kabel atau Wi-Fi. Kualitas tinggi untuk live streaming, kontrol penuh untuk kerja sehari-hari."
+     data-en="ZenLink mirrors and controls your iPhone or iPad on Windows — over the cable or Wi-Fi. High quality for live streaming, full control for everyday work.">ZenLink mencerminkan dan mengontrol iPhone atau iPad di Windows — lewat kabel atau Wi-Fi. Kualitas tinggi untuk live streaming, kontrol penuh untuk kerja sehari-hari.</p>
+  <div class="cta">
+    <a class="btn btn-main" id="dl-main" href="https://github.com/zenvyzenshiro/zenlink/releases/latest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16"/></svg>
+      <span data-id="Unduh untuk Windows" data-en="Download for Windows">Unduh untuk Windows</span>
+    </a>
+    <a class="btn btn-ghost" href="https://sociabuzz.com/zenvy/tribe" target="_blank" rel="noopener">♥ <span data-id="Dukung ZenLink" data-en="Support ZenLink">Dukung ZenLink</span></a>
+  </div>
+  <div class="meta"><span data-id="Versi" data-en="Version">Versi</span> <b id="ver">2.2</b> · <span data-id="installer" data-en="installer">installer</span> <b id="size">~56 MB</b> · <span data-id="open source (GPL-3.0)" data-en="open source (GPL-3.0)">open source (GPL-3.0)</span></div>
+  <div class="count"><b id="downloads">—</b> <span data-id="unduhan sejauh ini" data-en="downloads so far">unduhan sejauh ini</span></div>
+
+  <div class="demo reveal">
+    <div class="demo-bar">
+      <div class="seg" role="group" aria-label="Perangkat / Device">
+        <button type="button" data-dev="phone" aria-pressed="true">iPhone 18 Pro Max</button><button type="button" data-dev="tablet" aria-pressed="false">iPad Air</button>
+      </div>
+      <div class="seg" role="group" aria-label="Mode">
+        <button type="button" data-mode="apple" aria-pressed="true">Apple Driver</button><button type="button" data-mode="usb" aria-pressed="false" data-id="Studio · Kabel" data-en="Studio · Cable">Studio · Kabel</button><button type="button" data-mode="airplay" aria-pressed="false">Studio · Wi-Fi</button>
+      </div>
+    </div>
+    <div class="app" id="demo-app">
+      <div class="app-top">
+        <img src="logo.png" alt=""><span class="nm">Zen<b>Link</b></span><span class="src" id="demo-src">APPLE · USB</span>
+        <span class="dev" id="demo-devname">iPhone 18 Pro Max</span>
+        <span class="st"><span><b id="st-fps">60</b> fps</span><span>video <b id="st-video">1</b> ms</span><span>audio <b id="st-audio">23</b> ms</span></span>
+        <span class="right"><span class="tally" data-id="TAYANG" data-en="LIVE">TAYANG</span><span class="stop" data-id="Berhenti" data-en="Stop">Berhenti</span>
+          <span class="gear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg></span></span>
+      </div>
+      <div class="app-body">
+        <div class="stage">
+          <div class="device phone" id="demo-device">
+            <div class="frame"></div>
+            <div class="screen" id="demo-screen">
+              <div class="ios">
+                <div class="wall" id="demo-wall"></div>
+                <div class="island"></div>
+                <div class="status"><span data-clock>09:41</span><span class="bat">5G <i></i></span></div>
+                <div class="home" id="demo-home">
+                  <div class="pages" id="demo-pages"><div class="page" id="demo-page1"></div><div class="page" id="demo-page2"></div></div>
+                  <div class="dots" id="demo-dots"><i class="on"></i><i></i></div>
+                  <div class="dock" id="demo-dock"></div>
+                </div>
+                <div class="appwin" id="demo-appwin"><div class="hd">LIVE</div><div class="feed"><div class="post"></div><div class="post"></div><div class="post"></div><div class="post"></div></div></div>
+                <div class="live"><span class="tag">LIVE</span><span class="viewers">&#9829; 12,4K</span><div class="host"></div>
+                  <div class="chat"><span><b>rani</b> keren banget</span><span><b>dika</b> jernih parah</span><span><b>sasa</b> pakai apa ini?</span></div>
+                  <div class="hearts"><i>&#9829;</i><i>&#9829;</i><i>&#9829;</i></div></div>
+                <div class="dim" id="demo-dim"></div>
+                <div class="ov cc" id="demo-cc">
+                  <div class="tiles"><i class="on"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M6 13a9 9 0 0 1 12 0M12 18h.01"/></svg></i><i class="on"><svg viewBox="0 0 24 24"><path d="M6 8l12 8-6 4V4l6 4-12 8"/></svg></i><i><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></i><i><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></svg></i></div>
+                  <div class="wide"><i></i><span>LIVE · ZenLink</span></div>
+                  <div class="slider" style="--lvl:70%"></div><div class="slider" style="--lvl:45%"></div>
+                </div>
+                <div class="ov nc" id="demo-nc"><div class="time" data-clock>09:41</div>
+                  <div class="card"><i></i><span data-id="<b>Pesan</b> · Siaran dimulai jam 8 ya!" data-en="<b>Messages</b> · Stream starts at 8!"><b>Pesan</b> · Siaran dimulai jam 8 ya!</span></div>
+                  <div class="card"><i></i><span data-id="<b>LIVE</b> · 120 penonton baru" data-en="<b>LIVE</b> · 120 new viewers"><b>LIVE</b> · 120 penonton baru</span></div></div>
+                <div class="ov switcher" id="demo-switcher"><div></div><div></div><div></div></div>
+                <div class="ov vol" id="demo-vol"></div>
+                <div class="ov lock" id="demo-lock"><div class="ld" id="demo-date"></div><div class="lt" data-clock>09:41</div></div>
+                <div class="homebar"></div>
+              </div>
+              <div class="swipe-trail" id="demo-trail"></div>
+              <div class="cursor" id="demo-cursor"><span class="tap"></span><svg viewBox="0 0 24 24"><path d="M5 3l14 8-6 1.5L10 19z" fill="#fff" stroke="#111" stroke-width="1.2" stroke-linejoin="round"/></svg></div>
+            </div>
+          </div>
+          <div class="caption" id="demo-caption" data-id="Klik gesture di panel kanan" data-en="Click a gesture on the right">Klik gesture di panel kanan</div>
+        </div>
+        <aside class="gpanel">
+          <h4 data-id="Gesture" data-en="Gestures">Gesture</h4>
+          <button type="button" data-g="tap"><svg viewBox="0 0 24 24"><path d="M9 11V5a2 2 0 1 1 4 0v6m0-2a2 2 0 1 1 4 0v4a7 7 0 0 1-7 7h-.5a6 6 0 0 1-5.2-3L3 14.5a1.6 1.6 0 0 1 2.7-1.7L9 16"/></svg><span data-id="Sentuh (mouse)" data-en="Tap (mouse)">Sentuh (mouse)</span></button>
+          <button type="button" data-g="home"><svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9H3z"/></svg><span>Home</span></button>
+          <button type="button" data-g="switcher"><svg viewBox="0 0 24 24"><path d="M4 6h7v12H4zM13 6h7v12h-7z"/></svg><span>App Switcher</span></button>
+          <button type="button" data-g="notif"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10 21h4"/></svg><span data-id="Notifikasi" data-en="Notifications">Notifikasi</span></button>
+          <button type="button" data-g="cc"><svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/></svg><span data-id="Pusat Kontrol" data-en="Control Center">Pusat Kontrol</span></button>
+          <div class="row"><button type="button" data-g="next" aria-label="Swipe left">Usap &#8592;</button><button type="button" data-g="prev" aria-label="Swipe right">Usap &#8594;</button></div>
+          <h4 data-id="Tombol" data-en="Buttons">Tombol</h4>
+          <div class="row"><button type="button" data-g="volup">Vol +</button><button type="button" data-g="voldown">Vol &#8722;</button></div>
+          <button type="button" data-g="lock"><svg viewBox="0 0 24 24"><path d="M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4"/></svg><span data-id="Kunci" data-en="Lock">Kunci</span></button>
+          <p class="note" data-id="ZenLink Studio membawa gambar &amp; suara dengan kualitas untuk live streaming. Kontrol ada di mode Apple Driver." data-en="ZenLink Studio carries picture &amp; sound at live-streaming quality. Control lives in Apple Driver mode.">ZenLink Studio membawa gambar &amp; suara dengan kualitas untuk live streaming. Kontrol ada di mode Apple Driver.</p>
+        </aside>
+      </div>
+      <div class="app-foot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7"/></svg><span class="vol"></span>
+        <span class="icons"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="fitur" class="wrap">
+  <div class="center reveal">
+    <div class="eyebrow" data-id="Fitur" data-en="Features">Fitur</div>
+    <h2 data-id="Semua yang kamu butuh, di satu jendela." data-en="Everything you need, in one window.">Semua yang kamu butuh, di satu jendela.</h2>
+    <p class="sub" data-id="Dari live streaming sampai balas chat pakai keyboard PC — ZenLink menyesuaikan cara kamu bekerja." data-en="From live streaming to replying with your PC keyboard — ZenLink fits the way you work.">Dari live streaming sampai balas chat pakai keyboard PC — ZenLink menyesuaikan cara kamu bekerja.</p>
+  </div>
+  <div class="grid">
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M5.5 12.5a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0"/><circle cx="12" cy="19.5" r="1.2"/></svg></div>
+      <h3 data-id="Wi-Fi lewat AirPlay" data-en="Wi-Fi with AirPlay">Wi-Fi lewat AirPlay</h3>
+      <p data-id="Pusat Kontrol → Pencerminan Layar → ZenLinkStudio. Tanpa kabel, tanpa driver." data-en="Control Center → Screen Mirroring → ZenLinkStudio. No cable, no driver.">Pusat Kontrol → Pencerminan Layar → ZenLinkStudio. Tanpa kabel, tanpa driver.</p></div>
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><path d="M13 2 5 13h6l-1 9 8-11h-6z"/></svg></div>
+      <h3 data-id="Kabel untuk live streaming" data-en="Cable for live streaming">Kabel untuk live streaming</h3>
+      <p data-id="Resolusi native penuh dengan bitrate tinggi (12–30 Mbps), cara yang sama dengan TikTok LIVE Studio." data-en="Full native resolution at a high bitrate (12–30 Mbps), the same way TikTok LIVE Studio does it.">Resolusi native penuh dengan bitrate tinggi (12–30 Mbps), cara yang sama dengan TikTok LIVE Studio.</p></div>
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><path d="M9 11V5a2 2 0 1 1 4 0v6m0-2a2 2 0 1 1 4 0v4a7 7 0 0 1-7 7h-.5a6 6 0 0 1-5.2-3L3 14.5a1.6 1.6 0 0 1 2.7-1.7L9 16"/></svg></div>
+      <h3 data-id="Kontrol penuh" data-en="Full control">Kontrol penuh</h3>
+      <p data-id="Mouse jadi sentuhan, ketik dengan keyboard PC, gesture Home, App Switcher, volume dan tombol." data-en="Mouse as touch, type with your PC keyboard, Home and App Switcher gestures, volume and buttons.">Mouse jadi sentuhan, ketik dengan keyboard PC, gesture Home, App Switcher, volume dan tombol.</p></div>
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg></div>
+      <h3 data-id="Suara ikut, sinkron" data-en="Sound, in sync">Suara ikut, sinkron</h3>
+      <p data-id="Suara perangkat keluar di speaker PC dengan lip sync, dan buffer anti-patah untuk Wi-Fi." data-en="Device sound plays on your PC speakers with lip sync, plus a jitter buffer for Wi-Fi.">Suara perangkat keluar di speaker PC dengan lip sync, dan buffer anti-patah untuk Wi-Fi.</p></div>
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><path d="M3 3v18h18M7 15l4-4 3 3 5-6"/></svg></div>
+      <h3 data-id="Statistik live" data-en="Live stats">Statistik live</h3>
+      <p data-id="FPS, delay video dan delay audio langsung di samping nama perangkat — pas untuk streamer." data-en="FPS, video delay and audio delay right next to the device name — handy for streamers.">FPS, delay video dan delay audio langsung di samping nama perangkat — pas untuk streamer.</p></div>
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg></div>
+      <h3 data-id="Salin teks dari layar" data-en="Copy text off the screen">Salin teks dari layar</h3>
+      <p data-id="Alt+C membaca teks di layar perangkat (OCR) ke clipboard PC; Alt+V mengetik isi clipboard ke perangkat." data-en="Alt+C reads the text on the device screen (OCR) into the PC clipboard; Alt+V types the clipboard on the device.">Alt+C membaca teks di layar perangkat (OCR) ke clipboard PC; Alt+V mengetik isi clipboard ke perangkat.</p></div>
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></div>
+      <h3 data-id="Stealth dim" data-en="Stealth dim">Stealth dim</h3>
+      <p data-id="Alt+D meredupkan layar perangkat ke 0% sementara gambar di PC tetap terang." data-en="Alt+D dims the device to 0% while the picture on your PC stays bright.">Alt+D meredupkan layar perangkat ke 0% sementara gambar di PC tetap terang.</p></div>
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9M12 3v9l5 3"/></svg></div>
+      <h3 data-id="Ringan & di tray" data-en="Light, lives in the tray">Ringan &amp; di tray</h3>
+      <p data-id="Tutup ke system tray dengan memori dipangkas; buka lagi kapan saja dari ikon di samping jam." data-en="Close to the system tray with memory trimmed; open it again any time from the icon by the clock.">Tutup ke system tray dengan memori dipangkas; buka lagi kapan saja dari ikon di samping jam.</p></div>
+    <div class="card reveal"><div class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+      <h3 data-id="Data tetap di PC kamu" data-en="Your data stays on your PC">Data tetap di PC kamu</h3>
+      <p data-id="Video, suara, teks dan ketikan tidak pernah keluar dari PC. Tanpa akun, tanpa pelacakan." data-en="Video, sound, text and keystrokes never leave your PC. No accounts, no tracking.">Video, suara, teks dan ketikan tidak pernah keluar dari PC. Tanpa akun, tanpa pelacakan.</p></div>
+  </div>
+</section>
+
+<section id="mode" class="wrap">
+  <div class="center reveal">
+    <div class="eyebrow" data-id="Mode koneksi" data-en="Connection modes">Mode koneksi</div>
+    <h2 data-id="Pilih cara terhubung yang pas." data-en="Pick the connection that fits.">Pilih cara terhubung yang pas.</h2>
+    <p class="sub" data-id="Dua mode, masing-masing lewat kabel atau Wi-Fi. Bisa diganti kapan saja di Pengaturan." data-en="Two modes, each over the cable or Wi-Fi. Switch any time in Settings.">Dua mode, masing-masing lewat kabel atau Wi-Fi. Bisa diganti kapan saja di Pengaturan.</p>
+  </div>
+  <div class="modes">
+    <div class="mode reveal">
+      <span class="tag" data-id="Disarankan" data-en="Recommended">Disarankan</span>
+      <h3>Apple Driver</h3>
+      <div class="how" data-id="Kabel atau Wi-Fi · driver Apple sendiri" data-en="Cable or Wi-Fi · Apple's own driver">Kabel atau Wi-Fi · driver Apple sendiri</div>
+      <ul>
+        <li data-id="Sentuh, keyboard, gesture dan tombol" data-en="Touch, keyboard, gestures and buttons">Sentuh, keyboard, gesture dan tombol</li>
+        <li data-id="Tanpa instal driver tambahan" data-en="No extra driver to install">Tanpa instal driver tambahan</li>
+        <li data-id="Wi-Fi diatur otomatis sekali lewat kabel" data-en="Wi-Fi set up automatically once over the cable">Wi-Fi diatur otomatis sekali lewat kabel</li>
+        <li data-id="HEVC, sekitar 4–6 Mbps (batas perangkat)" data-en="HEVC, about 4–6 Mbps (device limit)">HEVC, sekitar 4–6 Mbps (batas perangkat)</li>
+      </ul>
+      <div class="stat" data-id="Terbaik untuk kerja &amp; kontrol" data-en="Best for work &amp; control">Terbaik untuk kerja &amp; kontrol</div>
+    </div>
+    <div class="mode hot reveal">
+      <span class="tag" data-id="Untuk live streaming" data-en="For live streaming">Untuk live streaming</span>
+      <h3>ZenLink Studio · <span data-id="Kabel" data-en="Cable">Kabel</span></h3>
+      <div class="how" data-id="USB · driver libusb0 (dipasang dengan konfirmasi)" data-en="USB · libusb0 driver (installed after you confirm)">USB · driver libusb0 (dipasang dengan konfirmasi)</div>
+      <ul>
+        <li data-id="Resolusi native penuh layar perangkat" data-en="The device screen's full native resolution">Resolusi native penuh layar perangkat</li>
+        <li data-id="H.264 bitrate tinggi, hingga ~56 fps" data-en="High-bitrate H.264, up to ~56 fps">H.264 bitrate tinggi, hingga ~56 fps</li>
+        <li data-id="Delay sangat rendah" data-en="Very low delay">Delay sangat rendah</li>
+        <li class="no" data-id="Gambar dan suara saja" data-en="Picture and sound only">Gambar dan suara saja</li>
+      </ul>
+      <div class="stat">2360×1640 · 12–30 Mbps</div>
+    </div>
+    <div class="mode reveal">
+      <span class="tag" data-id="Tanpa kabel" data-en="Wireless">Tanpa kabel</span>
+      <h3>ZenLink Studio · Wi-Fi</h3>
+      <div class="how" data-id="AirPlay Screen Mirroring · tanpa driver" data-en="AirPlay Screen Mirroring · no driver">AirPlay Screen Mirroring · tanpa driver</div>
+      <ul>
+        <li data-id="Stream asli perangkat, tanpa encode ulang" data-en="The device's own stream, never re-encoded">Stream asli perangkat, tanpa encode ulang</li>
+        <li data-id="HEVC atau H.264 hingga resolusi native" data-en="HEVC or H.264 up to native resolution">HEVC atau H.264 hingga resolusi native</li>
+        <li data-id="Panduan langsung di layar" data-en="Step-by-step guide on screen">Panduan langsung di layar</li>
+        <li class="no" data-id="Gambar dan suara saja" data-en="Picture and sound only">Gambar dan suara saja</li>
+      </ul>
+      <div class="stat">3108×2160 · ~46 fps · ~16 ms</div>
+    </div>
+  </div>
+</section>
+
+<section class="wrap">
+  <div class="center reveal">
+    <div class="eyebrow" data-id="Terukur, bukan janji" data-en="Measured, not promised">Terukur, bukan janji</div>
+    <h2 data-id="Angka dari perangkat asli." data-en="Numbers from real devices.">Angka dari perangkat asli.</h2>
+    <p class="sub" data-id="Diuji di Windows 11 dengan iPad (gen 11) dan iPhone 17." data-en="Tested on Windows 11 with an iPad (11th gen) and an iPhone 17.">Diuji di Windows 11 dengan iPad (gen 11) dan iPhone 17.</p>
+  </div>
+  <div class="nums">
+    <div class="num reveal"><b>~16 ms</b><span data-id="delay gambar lewat AirPlay" data-en="picture delay over AirPlay">delay gambar lewat AirPlay</span></div>
+    <div class="num reveal"><b>3108×2160</b><span data-id="resolusi AirPlay di iPad" data-en="AirPlay resolution on iPad">resolusi AirPlay di iPad</span></div>
+    <div class="num reveal"><b>30 Mbps</b><span data-id="bitrate maksimum lewat kabel" data-en="peak bitrate over the cable">bitrate maksimum lewat kabel</span></div>
+    <div class="num reveal"><b>~23 ms</b><span data-id="keluaran suara di PC" data-en="sound output on the PC">keluaran suara di PC</span></div>
+  </div>
+</section>
+
+<section id="gesture" class="wrap">
+  <div class="center reveal">
+    <div class="eyebrow" data-id="Gesture &amp; pintasan" data-en="Gestures &amp; shortcuts">Gesture &amp; pintasan</div>
+    <h2 data-id="Mouse jadi jari, keyboard jadi keyboard." data-en="Your mouse is a finger, your keyboard is a keyboard.">Mouse jadi jari, keyboard jadi keyboard.</h2>
+    <p class="sub" data-id="Di mode Apple Driver, semua gesture iPhone/iPad bisa dilakukan dari PC." data-en="In Apple Driver mode, every iPhone/iPad gesture works from the PC.">Di mode Apple Driver, semua gesture iPhone/iPad bisa dilakukan dari PC.</p>
+  </div>
+  <div class="gest">
+    <div class="card reveal"><h3 data-id="Klik = sentuh" data-en="Click = tap">Klik = sentuh</h3><p data-id="Klik, tahan, dan seret dengan mouse seperti jari. Trackpad untuk scroll dan geser halaman." data-en="Click, hold and drag with the mouse like a finger. The trackpad scrolls and swipes pages.">Klik, tahan, dan seret dengan mouse seperti jari. Trackpad untuk scroll dan geser halaman.</p></div>
+    <div class="card reveal"><h3 data-id="Usap dari bawah = Home" data-en="Swipe up = Home">Usap dari bawah = Home</h3><p data-id="Tahan sebentar sebelum dilepas untuk App Switcher, persis seperti di iPhone." data-en="Pause before letting go for the App Switcher, just like on the iPhone.">Tahan sebentar sebelum dilepas untuk App Switcher, persis seperti di iPhone.</p></div>
+    <div class="card reveal"><h3 data-id="Panel gesture" data-en="Gesture panel">Panel gesture</h3><p data-id="Home, App Switcher, Notifikasi, Pusat Kontrol, volume, Siri dan kunci — satu klik di samping gambar." data-en="Home, App Switcher, Notifications, Control Center, volume, Siri and lock — one click beside the picture.">Home, App Switcher, Notifikasi, Pusat Kontrol, volume, Siri dan kunci — satu klik di samping gambar.</p></div>
+  </div>
+  <div class="kbd reveal"><div class="kbd-row"><kbd>Alt + H</kbd><span data-id="Putar gambar" data-en="Rotate the picture">Putar gambar</span></div><div class="kbd-row"><kbd>Alt + C</kbd><span data-id="Salin teks dari layar (OCR)" data-en="Copy text off the screen (OCR)">Salin teks dari layar (OCR)</span></div><div class="kbd-row"><kbd>Alt + V</kbd><span data-id="Ketik isi clipboard ke perangkat" data-en="Type the clipboard on the device">Ketik isi clipboard ke perangkat</span></div><div class="kbd-row"><kbd>Alt + D</kbd><span data-id="Stealth dim: layar perangkat 0%" data-en="Stealth dim: device screen to 0%">Stealth dim: layar perangkat 0%</span></div><div class="kbd-row"><kbd>Alt + U</kbd><span data-id="Bangunkan &amp; buka kunci" data-en="Wake &amp; unlock">Bangunkan &amp; buka kunci</span></div><div class="kbd-row"><kbd>Alt + L</kbd><span data-id="Kunci perangkat" data-en="Lock the device">Kunci perangkat</span></div><div class="kbd-row"><kbd>Alt + &#8592;</kbd><span data-id="Kembali" data-en="Go back">Kembali</span></div><div class="kbd-row"><kbd>G</kbd><span data-id="Buka/tutup panel gesture" data-en="Show/hide the gesture panel">Buka/tutup panel gesture</span></div><div class="kbd-row"><kbd>F11</kbd><span data-id="Layar penuh" data-en="Full screen">Layar penuh</span></div></div>
+</section>
+
+<section class="wrap">
+  <div class="center reveal">
+    <div class="eyebrow" data-id="Mulai" data-en="Get started">Mulai</div>
+    <h2 data-id="Tersambung dalam satu menit." data-en="Connected in a minute.">Tersambung dalam satu menit.</h2>
+  </div>
+  <div class="steps">
+    <div class="step reveal"><h3 data-id="Unduh &amp; buka" data-en="Download &amp; open">Unduh &amp; buka</h3>
+      <p data-id="Pasang installer atau jalankan versi portable. Saat pertama dibuka, ZenLink menyiapkan semua yang dibutuhkan." data-en="Run the installer or the portable exe. On first start ZenLink sets up everything it needs.">Pasang installer atau jalankan versi portable. Saat pertama dibuka, ZenLink menyiapkan semua yang dibutuhkan.</p></div>
+    <div class="step reveal"><h3 data-id="Pilih mode" data-en="Choose a mode">Pilih mode</h3>
+      <p data-id="Apple Driver untuk kontrol, ZenLink Studio untuk live streaming — kabel atau Wi-Fi." data-en="Apple Driver for control, ZenLink Studio for live streaming — cable or Wi-Fi.">Apple Driver untuk kontrol, ZenLink Studio untuk live streaming — kabel atau Wi-Fi.</p></div>
+    <div class="step reveal"><h3 data-id="Mulai mirroring" data-en="Start mirroring">Mulai mirroring</h3>
+      <p data-id="Colok kabel lalu tekan Mulai, atau pilih ZenLinkStudio di Pencerminan Layar." data-en="Plug in and press Start, or pick ZenLinkStudio in Screen Mirroring.">Colok kabel lalu tekan Mulai, atau pilih ZenLinkStudio di Pencerminan Layar.</p></div>
+  </div>
+</section>
+
+<section id="faq" class="wrap">
+  <div class="reveal">
+    <div class="eyebrow" data-id="Tanya jawab" data-en="Good to know">Tanya jawab</div>
+    <h2 data-id="Yang sering ditanyakan." data-en="Common questions.">Yang sering ditanyakan.</h2>
+  </div>
+  <div class="faq">
+    <details class="reveal"><summary data-id="Apakah ZenLink gratis?" data-en="Is ZenLink free?">Apakah ZenLink gratis?</summary>
+      <p data-id="Ya. ZenLink gratis dan open source (GPL-3.0). Kalau terbantu, kamu bisa mendukung lewat Sociabuzz." data-en="Yes. ZenLink is free and open source (GPL-3.0). If it helps you, you can support it on Sociabuzz.">Ya. ZenLink gratis dan open source (GPL-3.0). Kalau terbantu, kamu bisa mendukung lewat Sociabuzz.</p></details>
+    <details class="reveal"><summary data-id="Perangkat dan versi iOS apa yang didukung?" data-en="Which devices and iOS versions work?">Perangkat dan versi iOS apa yang didukung?</summary>
+      <p data-id="iPhone dan iPad. Mode Apple Driver butuh iOS 17 atau lebih baru dengan Developer Mode; ZenLink Studio (kabel atau AirPlay) tidak butuh Developer Mode." data-en="iPhone and iPad. Apple Driver mode needs iOS 17 or newer with Developer Mode; ZenLink Studio (cable or AirPlay) doesn't need Developer Mode.">iPhone dan iPad. Mode Apple Driver butuh iOS 17 atau lebih baru dengan Developer Mode; ZenLink Studio (kabel atau AirPlay) tidak butuh Developer Mode.</p></details>
+    <details class="reveal"><summary data-id="Kenapa ZenLink minta izin firewall?" data-en="Why does ZenLink ask for firewall permission?">Kenapa ZenLink minta izin firewall?</summary>
+      <p data-id="Untuk AirPlay, iPhone/iPad harus bisa menjangkau ZenLink di jaringan lokal. Izinnya hanya untuk subnet lokal dan kamu yang menyetujuinya." data-en="For AirPlay, the iPhone/iPad has to reach ZenLink on your local network. The rule is limited to the local subnet and you approve it.">Untuk AirPlay, iPhone/iPad harus bisa menjangkau ZenLink di jaringan lokal. Izinnya hanya untuk subnet lokal dan kamu yang menyetujuinya.</p></details>
+    <details class="reveal"><summary data-id="iPhone tersambung tapi layar tidak muncul lewat kabel?" data-en="Plugged in but no picture over the cable?">iPhone tersambung tapi layar tidak muncul lewat kabel?</summary>
+      <p data-id="Restart iPhone/iPad (matikan lalu nyalakan), buka kuncinya, lalu tekan Mulai mirroring lagi. ZenLink juga akan menyarankan ini." data-en="Restart the iPhone/iPad (turn it off and on), unlock it, then press Start again. ZenLink suggests this too.">Restart iPhone/iPad (matikan lalu nyalakan), buka kuncinya, lalu tekan Mulai mirroring lagi. ZenLink juga akan menyarankan ini.</p></details>
+    <details class="reveal"><summary data-id="Apakah data saya dikirim ke internet?" data-en="Does any of my data go online?">Apakah data saya dikirim ke internet?</summary>
+      <p data-id="Tidak. Semua berjalan di PC kamu. Tidak ada akun dan tidak ada pelacakan." data-en="No. Everything runs on your PC. No accounts and no tracking.">Tidak. Semua berjalan di PC kamu. Tidak ada akun dan tidak ada pelacakan.</p></details>
+  </div>
+</section>
+
+<section id="unduh" class="wrap">
+  <div class="dl reveal">
+    <div class="eyebrow" data-id="Unduh" data-en="Download">Unduh</div>
+    <h2 data-id="Siap mencoba ZenLink?" data-en="Ready to try ZenLink?">Siap mencoba ZenLink?</h2>
+    <p class="sub" style="margin:0 auto" data-id="Windows 10 (1809+) atau 11, 64-bit." data-en="Windows 10 (1809+) or 11, 64-bit.">Windows 10 (1809+) atau 11, 64-bit.</p>
+    <div class="files">
+      <a class="file" id="f-setup" href="https://github.com/zenvyzenshiro/zenlink/releases/latest"><b>Installer</b><span data-id="Disarankan · pintasan Start Menu" data-en="Recommended · Start Menu shortcut">Disarankan · pintasan Start Menu</span><small>Setup.exe</small></a>
+      <a class="file" id="f-portable" href="https://github.com/zenvyzenshiro/zenlink/releases/latest"><b>Portable</b><span data-id="Satu file, tanpa instalasi" data-en="One file, nothing to install">Satu file, tanpa instalasi</span><small>Portable.exe</small></a>
+      <a class="file" id="f-source" href="https://github.com/zenvyzenshiro/zenlink/releases/latest"><b>Source</b><span data-id="Kode sumber, untuk developer" data-en="Source code, for developers">Kode sumber, untuk developer</span><small>Portable-Source.zip</small></a>
+    </div>
+    <div class="count" style="margin-top:22px"><b class="dl-total">—</b> <span data-id="unduhan sejauh ini" data-en="downloads so far">unduhan sejauh ini</span></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div><span data-id="Dibuat oleh" data-en="Made by">Dibuat oleh</span> <a href="https://github.com/zenvyzenshiro" target="_blank" rel="noopener"><b style="color:var(--text)">Zenvy Zenshiro</b></a> · GPL-3.0 · <span data-id="Tidak berafiliasi dengan Apple atau TikTok." data-en="Not affiliated with Apple or TikTok.">Tidak berafiliasi dengan Apple atau TikTok.</span></div>
+    <div class="foot-links">
+      <a href="https://github.com/zenvyzenshiro/zenlink" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/zenvyzenshiro/zenlink/releases" target="_blank" rel="noopener" data-id="Rilis" data-en="Releases">Rilis</a>
+      <a href="https://github.com/zenvyzenshiro/zenlink/issues" target="_blank" rel="noopener" data-id="Lapor masalah" data-en="Report a problem">Lapor masalah</a>
+      <a href="https://sociabuzz.com/zenvy/tribe" target="_blank" rel="noopener">Sociabuzz</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Language: Indonesian by default, remembered per browser.
+  const KEY = "zenlink.site.lang";
+  function setLang(lang) {
+    document.documentElement.lang = lang;
+    document.querySelectorAll("[data-id]").forEach((el) => { el.innerHTML = el.dataset[lang] ?? el.dataset.id; });
+    document.querySelectorAll(".lang button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
+    try { localStorage.setItem(KEY, lang); } catch (_) {}
+    document.dispatchEvent(new Event("zenlink:lang"));
+  }
+  document.querySelectorAll(".lang button").forEach((b) => b.addEventListener("click", () => setLang(b.dataset.lang)));
+  let saved = "id";  // Indonesian by default; the choice is remembered
+  try { saved = localStorage.getItem(KEY) || "id"; } catch (_) {}
+  setLang(saved);
+
+  // Reveal on scroll.
+  const io = new IntersectionObserver((entries) => entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { threshold: .12 });
+  document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+
+  // Live version, file links and download total from GitHub.
+  const repo = "zenvyzenshiro/zenlink";
+  const fmt = (n) => n.toLocaleString(document.documentElement.lang === "en" ? "en-US" : "id-ID");
+  fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`)
+    .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+    .then((releases) => {
+      let total = 0;
+      releases.forEach((rel) => rel.assets.forEach((a) => { total += a.download_count; }));
+      document.querySelectorAll("#downloads, .dl-total").forEach((el) => { el.textContent = fmt(total); });
+      const latest = releases.find((r) => !r.draft && !r.prerelease);
+      if (!latest) return;
+      document.getElementById("ver").textContent = latest.tag_name.replace(/^v/, "");
+      const pick = (re) => latest.assets.find((a) => re.test(a.name));
+      const setup = pick(/Setup\.exe$/i), portable = pick(/Portable\.exe$/i), source = pick(/Source\.zip$/i);
+      if (setup) {
+        document.getElementById("dl-main").href = setup.browser_download_url;
+        document.getElementById("f-setup").href = setup.browser_download_url;
+        document.getElementById("size").textContent = `~${Math.round(setup.size / 1048576)} MB`;
+      }
+      if (portable) document.getElementById("f-portable").href = portable.browser_download_url;
+      if (source) document.getElementById("f-source").href = source.browser_download_url;
+    })
+    .catch(() => {});
+</script>
+<script src="demo.js"></script>
+</body>
+</html>

@@ -212,6 +212,8 @@ const ID = {
   "The device opened screen capture but sent nothing. Restart the iPhone/iPad (turn it off and on), unlock it, keep it on the home screen, then press Start casting again.": "Perangkat membuka tangkap layar tapi tidak mengirim apa pun. Restart iPhone/iPad (matikan lalu nyalakan), buka kuncinya, biarkan di layar utama, lalu tekan Mulai mirroring lagi.",
   "The device did not come back in screen-capture mode. Restart the iPhone/iPad (turn it off and on), plug it in again, unlock it and retry.": "Perangkat tidak kembali ke mode tangkap layar. Restart iPhone/iPad (matikan lalu nyalakan), colok lagi, buka kuncinya lalu coba lagi.",
   "The device did not offer its screen-capture configuration. Unlock it and try again. If it keeps failing, restart the iPhone/iPad.": "Perangkat tidak menyediakan konfigurasi tangkap layar. Buka kuncinya lalu coba lagi. Kalau masih gagal, restart iPhone/iPad.",
+  "ZenLink Studio: the device encodes the picture itself. There is no bitrate control in this mode; turn on Show stats bar to see FPS and delay beside the device name.": "ZenLink Studio: perangkat sendiri yang mengenkode gambar. Tidak ada pengaturan bitrate di mode ini; nyalakan Tampilkan bar statistik untuk melihat FPS dan delay di samping nama perangkat.",
+  "No device": "Tidak ada perangkat",
   "Remember my choice": "Ingat pilihan saya",
   "You can change the mode any time in Settings → Connection & Drivers. Changing it may need an app restart and reconnecting the USB cable.":
     "Mode koneksi dapat diubah kapan saja melalui Pengaturan → Koneksi & Driver. Mengganti mode mungkin memerlukan restart aplikasi dan mencabut lalu menyambungkan kembali kabel USB.",
