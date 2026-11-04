@@ -337,7 +337,7 @@
       <div class="app-body">
         <div class="stage">
           <div class="device phone" id="demo-device">
-            <div class="frame"></div>
+            <div class="frame"></div><span class="hw act"></span><span class="hw vu"></span><span class="hw vd"></span><span class="hw pw"></span><span class="hw camc"></span>
             <div class="screen" id="demo-screen">
               <div class="ios">
                 <div class="wall" id="demo-wall"></div>
@@ -356,12 +356,12 @@
                 <div class="ov cc" id="demo-cc">
                   <div class="tiles"><i class="on"><svg viewBox="0 0 24 24"><path d="M2 9a15 15 0 0 1 20 0M6 13a9 9 0 0 1 12 0M12 18h.01"/></svg></i><i class="on"><svg viewBox="0 0 24 24"><path d="M6 8l12 8-6 4V4l6 4-12 8"/></svg></i><i><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"/></svg></i><i><svg viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></svg></i></div>
                   <div class="wide"><i></i><span>LIVE · ZenLink</span></div>
-                  <div class="slider" style="--lvl:70%"></div><div class="slider" style="--lvl:45%"></div>
+                  <div class="slider" style="--lvl:70%"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></div><div class="slider" style="--lvl:45%"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7"/></svg></div>
                 </div>
                 <div class="ov nc" id="demo-nc"><div class="time" data-clock>09:41</div>
                   <div class="card"><i></i><span data-id="<b>Pesan</b> · Siaran dimulai jam 8 ya!" data-en="<b>Messages</b> · Stream starts at 8!"><b>Pesan</b> · Siaran dimulai jam 8 ya!</span></div>
                   <div class="card"><i></i><span data-id="<b>LIVE</b> · 120 penonton baru" data-en="<b>LIVE</b> · 120 new viewers"><b>LIVE</b> · 120 penonton baru</span></div></div>
-                <div class="ov switcher" id="demo-switcher"><div></div><div></div><div></div></div>
+                <div class="ov switcher" id="demo-switcher"><div class="sw c1"><div class="lbl"><i style="background:linear-gradient(145deg,#3ddc84,#1f9d57)"></i><span data-id="Pesan" data-en="Messages">Pesan</span></div><div class="win"><b>&nbsp;</b><s></s><s></s><s></s></div></div><div class="sw c2"><div class="lbl"><i style="background:linear-gradient(145deg,#ff4fa3,#c2185b)"></i>LIVE</div><div class="win"><b>LIVE</b><s></s><s></s><s></s></div></div><div class="sw c3"><div class="lbl"><i style="background:linear-gradient(145deg,#b48cff,#6b3fd6)"></i><span data-id="Musik" data-en="Music">Musik</span></div><div class="win"><b>&nbsp;</b><s></s><s></s><s></s></div></div></div>
                 <div class="ov vol" id="demo-vol"></div>
                 <div class="ov lock" id="demo-lock"><div class="ld" id="demo-date"></div><div class="lt" data-clock>09:41</div></div>
                 <div class="homebar"></div>
@@ -696,12 +696,44 @@
     document.querySelectorAll("[data-ph-id]").forEach((el) => { el.placeholder = lang === "en" ? el.dataset.phEn : el.dataset.phId; });
     document.querySelectorAll(".lang button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
     try { localStorage.setItem(KEY, lang); } catch (_) {}
-    if (lastTotal !== null) showTotal(lastTotal);
+    document.querySelectorAll(".dl-total").forEach((el) => { if (shownVal.has(el)) el.textContent = fmt(shownVal.get(el)); });
     document.dispatchEvent(new Event("zenlink:lang"));
   }
+  // Download total: counts up from 0 the first time it scrolls into view, then
+  // rolls to the new number whenever GitHub reports more downloads.
   let lastTotal = null;
+  const shownVal = new Map();
+  const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function animateTo(el, to) {
+    const from = shownVal.has(el) ? shownVal.get(el) : 0;
+    shownVal.set(el, to);
+    if (calm || from === to) { el.textContent = fmt(to); return; }
+    const t0 = performance.now(), dur = from === 0 ? 1800 : 900;
+    const step = (t) => {
+      if (shownVal.get(el) !== to) return;  // a newer number took over
+      const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = fmt(Math.round(from + (to - from) * e));
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    // Background tabs pause animation frames: land on the number anyway.
+    setTimeout(() => { if (shownVal.get(el) === to) el.textContent = fmt(to); }, dur + 150);
+  }
   const fmt = (n) => n.toLocaleString(document.documentElement.lang === "en" ? "en-US" : "id-ID");
-  function showTotal(n) { lastTotal = n; document.querySelectorAll(".dl-total").forEach((el) => { el.textContent = fmt(n); }); }
+  const onScreen = (el) => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; };
+  function showTotal(n) {
+    lastTotal = n;
+    document.querySelectorAll(".dl-total").forEach((el) => {
+      if (!el.dataset.seen && onScreen(el)) { el.dataset.seen = "1"; countIO.unobserve(el); }
+      if (el.dataset.seen) animateTo(el, n);
+    });
+  }
+  const countIO = new IntersectionObserver((entries) => entries.forEach((e) => {
+    if (!e.isIntersecting) return;
+    e.target.dataset.seen = "1"; countIO.unobserve(e.target);
+    if (lastTotal !== null) animateTo(e.target, lastTotal);
+  }), { threshold: .6 });
+  document.querySelectorAll(".dl-total").forEach((el) => countIO.observe(el));
   document.querySelectorAll(".lang button").forEach((b) => b.addEventListener("click", () => setLang(b.dataset.lang)));
   let saved = "id";
   try { saved = localStorage.getItem(KEY) || "id"; } catch (_) {}
@@ -723,30 +755,39 @@
 
   // Live version, file links, SHA-256 and download total from GitHub.
   const repo = "zenvyzenshiro/zenlink";
-  fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`)
-    .then((r) => r.ok ? r.json() : Promise.reject(r.status))
-    .then((releases) => {
-      let total = 0;
-      releases.forEach((rel) => rel.assets.forEach((a) => { total += a.download_count; }));
-      showTotal(total);
-      const latest = releases.find((r) => !r.draft && !r.prerelease);
-      if (!latest) return;
-      document.querySelectorAll(".ver").forEach((el) => { el.textContent = latest.tag_name.replace(/^v/, ""); });
-      const pick = (re) => latest.assets.find((a) => re.test(a.name));
-      const setup = pick(/Setup\.exe$/i), portable = pick(/Portable\.exe$/i), source = pick(/Source\.zip$/i);
-      if (setup) {
-        document.getElementById("f-setup").href = setup.browser_download_url;
-        document.querySelectorAll(".size").forEach((el) => { el.textContent = `${Math.round(setup.size / 1048576)} MB`; });
-        if (/^sha256:/.test(setup.digest || "")) {
-          document.getElementById("hash-name").textContent = setup.name;
-          document.getElementById("hash").textContent = setup.digest.slice(7);
-          document.getElementById("hash-wrap").hidden = false;
+  // Refreshed every 5 minutes and when the tab comes back (GitHub allows
+  // 60 unauthenticated requests per hour).
+  let loadedAt = 0;
+  function load() {
+    loadedAt = Date.now();
+    return fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`)
+      .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+      .then((releases) => {
+        let total = 0;
+        releases.forEach((rel) => rel.assets.forEach((a) => { total += a.download_count; }));
+        showTotal(total);
+        const latest = releases.find((r) => !r.draft && !r.prerelease);
+        if (!latest) return;
+        document.querySelectorAll(".ver").forEach((el) => { el.textContent = latest.tag_name.replace(/^v/, ""); });
+        const pick = (re) => latest.assets.find((a) => re.test(a.name));
+        const setup = pick(/Setup\.exe$/i), portable = pick(/Portable\.exe$/i), source = pick(/Source\.zip$/i);
+        if (setup) {
+          document.getElementById("f-setup").href = setup.browser_download_url;
+          document.querySelectorAll(".size").forEach((el) => { el.textContent = `${Math.round(setup.size / 1048576)} MB`; });
+          if (/^sha256:/.test(setup.digest || "")) {
+            document.getElementById("hash-name").textContent = setup.name;
+            document.getElementById("hash").textContent = setup.digest.slice(7);
+            document.getElementById("hash-wrap").hidden = false;
+          }
         }
-      }
-      if (portable) document.getElementById("f-portable").href = portable.browser_download_url;
-      if (source) document.getElementById("f-source").href = source.browser_download_url;
-    })
-    .catch(() => {});
+        if (portable) document.getElementById("f-portable").href = portable.browser_download_url;
+        if (source) document.getElementById("f-source").href = source.browser_download_url;
+      })
+      .catch(() => {});
+  }
+  load();
+  setInterval(() => { if (!document.hidden) load(); }, 5 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - loadedAt > 60 * 1000) load(); });
 </script>
 <script src="demo.js"></script>
 </body>

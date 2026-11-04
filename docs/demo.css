@@ -59,9 +59,24 @@
 .device.tablet { width: 84%; aspect-ratio: 2360 / 1640; max-height: 86%; }
 .frame { position: absolute; inset: -9px; border-radius: 62px; background: linear-gradient(145deg, #3a3a42, #17171c 40%, #2c2c33); box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.08); }
 .device.tablet .frame { inset: -14px; border-radius: 34px; }
-.screen { position: absolute; inset: 0; border-radius: 54px; overflow: hidden; background: #000; isolation: isolate; container-type: size; }
-.device.tablet .screen { border-radius: 22px; }
-.island { position: absolute; top: 1.6%; left: 50%; transform: translateX(-50%); width: 31%; height: 3.6%; border-radius: 999px; background: #000; z-index: 30; }
+/* iPhone 18 Pro front: burgundy aluminium edge, thin black bezel, side buttons */
+.device.phone .frame { inset: -11px; border-radius: 64px;
+  background: linear-gradient(90deg, #2a0f17 0%, #6b2a3a 6%, #3a1520 14%, #2a0f17 50%, #3a1520 86%, #6b2a3a 94%, #2a0f17 100%);
+  box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px #1a080d, inset 0 0 0 1px rgba(255,190,205,.18); }
+.device.phone .frame::before { content: ""; position: absolute; inset: 3.5px; border-radius: 60.5px; background: #050506; box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+.hw { display: none; position: absolute; width: 4px; border-radius: 2px; background: linear-gradient(90deg, #4a1c28, #7a3446 60%, #3a1520); }
+.device.phone .hw { display: block; }
+.hw.act, .hw.vu, .hw.vd { left: -14px; border-radius: 2px 0 0 2px; }
+.hw.pw, .hw.camc { right: -14px; border-radius: 0 2px 2px 0; }
+.hw.act { top: 16%; height: 4.2%; }
+.hw.vu { top: 23.5%; height: 7.5%; }
+.hw.vd { top: 32.5%; height: 7.5%; }
+.hw.pw { top: 25%; height: 11%; }
+.hw.camc { top: 60%; height: 7%; width: 3px; right: -13px; background: linear-gradient(90deg, #3a1520, #5a2433); }
+.screen { position: absolute; inset: 0; border-radius: 54px; overflow: hidden; clip-path: inset(0 round 54px); background: #000; isolation: isolate; container-type: size; }
+.device.tablet .screen { border-radius: 22px; clip-path: inset(0 round 22px); }
+.island { position: absolute; top: 1.5%; left: 50%; transform: translateX(-50%); width: 27%; height: 3.4%; border-radius: 999px; background: #000; z-index: 30; }
+.island::after { content: ""; position: absolute; right: 12%; top: 50%; width: 1.4cqmin; min-width: 5px; aspect-ratio: 1; transform: translateY(-50%); border-radius: 50%; background: radial-gradient(circle at 35% 35%, #2a2a4a, #08080f 70%); }
 .device.tablet .island { display: none; }
 
 /* iOS-like content, sized from the screen (container units) */
@@ -140,7 +155,8 @@
 .cc .tiles i { aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.16); display: grid; place-items: center; }
 .cc .tiles i.on { background: #ff4fa3; }
 .cc .tiles i svg { width: 52%; height: 52%; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.cc .slider { position: relative; overflow: hidden; }
+.cc .slider { position: relative; overflow: hidden; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px; }
+.cc .slider svg { position: relative; z-index: 1; width: 7cqmin; min-width: 14px; height: auto; fill: none; stroke: #55555e; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .cc .slider::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--lvl, 60%); background: rgba(255,255,255,.88); transition: height .35s; }
 .cc .wide { grid-column: span 2; display: flex; align-items: center; gap: 8px; font-size: max(8px, 2.6cqmin); min-height: 0 !important; }
 .cc .wide i { width: 12cqmin; aspect-ratio: 1; border-radius: 10px; background: linear-gradient(135deg, #ff4fa3, #7b5cff); flex: none; }
@@ -156,13 +172,27 @@
 .nc .card i { width: 8cqmin; aspect-ratio: 1; border-radius: 8px; flex: none; background: linear-gradient(135deg, #3ddc84, #1f9d57); }
 .nc .card:nth-child(3) i { background: linear-gradient(135deg, #ff4fa3, #c2185b); }
 
-.switcher { inset: 0; z-index: 13; display: flex; align-items: center; justify-content: center; gap: 4%; opacity: 0; background: rgba(0,0,0,.35); backdrop-filter: blur(14px); }
+.switcher { inset: 0; z-index: 13; display: flex; align-items: center; justify-content: center; gap: 5%; opacity: 0; background: rgba(0,0,0,.35); backdrop-filter: blur(14px); }
 .switcher.show { opacity: 1; }
-.switcher div { width: 62%; height: 64%; border-radius: 24px; background: linear-gradient(160deg, #241a2c, #121218); box-shadow: 0 20px 50px rgba(0,0,0,.5); flex: none; transform: scale(.9); transition: transform .45s; }
-.device.tablet .switcher div { width: 34%; height: 60%; }
-.switcher.show div { transform: none; }
-.switcher div:nth-child(1) { background: linear-gradient(160deg, #ff4fa3, #7b2a5a); }
-.switcher div:nth-child(3) { background: linear-gradient(160deg, #7b5cff, #2b2160); }
+.switcher .sw { position: relative; flex: none; width: 58%; height: 60%; display: flex; flex-direction: column; transform: scale(.9); transition: transform .45s; }
+.switcher.show .card { transform: none; }
+.switcher .lbl { display: flex; align-items: center; gap: 6px; margin: 0 0 6px 4px; font-size: max(8px, 2.7cqmin); font-weight: 600; white-space: nowrap; }
+.switcher .lbl i { width: 6.5cqmin; min-width: 12px; aspect-ratio: 1; border-radius: 24%; flex: none; }
+.switcher .win { flex: 1; border-radius: 22px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,.5); background: #0e0e12; padding: 10% 8% 0; display: grid; align-content: start; gap: 5%; }
+.switcher .win b { font-size: max(9px, 3.6cqmin); }
+.switcher .win s { display: block; height: 3.2cqh; border-radius: 8px; background: rgba(255,255,255,.12); text-decoration: none; }
+.switcher .win s:nth-child(odd) { width: 70%; }
+.switcher .sw.c1 .win { background: linear-gradient(170deg, #ff4fa3, #7b2a5a); }
+.switcher .sw.c3 .win { background: linear-gradient(170deg, #7b5cff, #2b2160); }
+.switcher .sw.c2 .win s { height: 9cqh; background: linear-gradient(120deg, #241a2c, #1a1a22); }
+/* iPhone: a carousel, the side apps peek in from the edges */
+.device.phone .switcher .sw { position: absolute; top: 19%; }
+.device.phone .switcher .sw.c1 { left: -48%; }
+.device.phone .switcher .sw.c2 { left: 21%; }
+.device.phone .switcher .sw.c3 { left: 90%; }
+/* iPad: three whole windows side by side */
+.device.tablet .switcher { gap: 3%; }
+.device.tablet .switcher .sw { width: 28%; height: 62%; }
 
 .vol { left: 3%; top: 26%; width: 3.2%; min-width: 9px; height: 26%; border-radius: 999px; background: rgba(40,40,48,.75); backdrop-filter: blur(10px); opacity: 0; overflow: hidden; }
 .vol.show { opacity: 1; }
@@ -190,7 +220,7 @@
   .stage { height: 460px; }
   .gpanel { border-left: 0; border-top: 1px solid #1c1c22; display: grid; grid-template-columns: repeat(3, 1fr); }
   .gpanel h4, .gpanel .note { grid-column: 1 / -1; }
-  .gpanel .row { grid-column: span 3; grid-template-columns: repeat(4, 1fr); }
+  .gpanel .row { grid-column: span 3; grid-template-columns: repeat(2, 1fr); }
   .app-top .st, .app-top .src, .app-top .stop { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {

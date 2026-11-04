@@ -17,6 +17,7 @@
     tap: { id: "Klik mouse = sentuhan di layar", en: "Mouse click = a tap on the screen" },
     type: { id: "Ketik dengan keyboard PC", en: "Type with your PC keyboard" },
     studio: { id: "Gambar & suara saja — kualitas untuk live", en: "Picture & sound only — quality for live" },
+    closed: { id: "Tekan lagi = tutup (Home)", en: "Press again = close (Home)" },
   };
 
   // --- app icons -------------------------------------------------------
@@ -121,10 +122,18 @@
     lock() { clearAll(); say("lock"); ov("lock").classList.add("show"); },
   };
 
-  // panel buttons
+  // panel buttons; App Switcher, Notifications and Control Center toggle like
+  // in the app: a second press closes what the first one opened.
+  const TOGGLES = { switcher: "switcher", notif: "nc", cc: "cc" };
   document.querySelectorAll("[data-g]").forEach((b) => b.addEventListener("click", () => {
+    app.dataset.touched = "1";
     stopAuto();
     const g = b.dataset.g;
+    if (TOGGLES[g] && ov(TOGGLES[g]).classList.contains("show")) {
+      clearAll(); say("closed"); swipeUp();
+      document.querySelectorAll("[data-g]").forEach((x) => x.classList.remove("on"));
+      return;
+    }
     document.querySelectorAll("[data-g]").forEach((x) => x.classList.toggle("on", x === b));
     if (g === "volup") return run.volume(true);
     if (g === "voldown") return run.volume(false);
