@@ -11,6 +11,8 @@ USB Direct: served from an in-process MediaHub), so the player is shared.
 
 from __future__ import annotations
 
+import re
+
 import json
 import logging
 import threading
@@ -28,9 +30,30 @@ log = logging.getLogger(__name__)
 Listener = Callable[[str], None]
 
 
+# Apple's screen-streaming service (dtremotedisplayd) only sends frames on iOS 27
+# and later; older versions accept the request but the picture stays black.
+APPLE_MIN_IOS = 27
+
+
+def _ios_too_old(version: str | None) -> bool:
+    try:
+        return int(str(version).split(".")[0]) < APPLE_MIN_IOS
+    except (TypeError, ValueError):
+        return False
+
+
+def _old_ios_message(version: str) -> str:
+    return (f"Apple Driver mode needs iOS {APPLE_MIN_IOS} or later; this device runs iOS {version}. "
+            "On iOS 18 to 26, use ZenLink Studio over the cable or Wi-Fi (AirPlay): "
+            "Settings > Connection & Drivers.")
+
+
 def _friendly_error(error: Exception) -> str:
     text = str(error)
     low = text.lower()
+    old = re.search(r"needs iOS [\d.]+ or later; this device runs iOS ([\d.]+)", text)
+    if old:
+        return _old_ios_message(old.group(1))
     if "developer mode" in low or "libusb0" in low or "settings >" in low:
         return text
     if "pair" in low or "trust" in low:
@@ -263,6 +286,9 @@ class CastManager:
         else:
             from zenlink.apple import session as apple_session
 
+            if _ios_too_old(target.get("os")):
+                self._set_state("error", error=_old_ios_message(str(target.get("os"))))
+                return self.snapshot()
             options = {**(options or {}), "wifi": bool(target.get("wifi"))}
             session = apple_session.AppleCastSession(target["id"], self._on_session_state, options, self._on_rotation)
         self._session = session

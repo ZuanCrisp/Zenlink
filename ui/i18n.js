@@ -108,6 +108,8 @@ const ID = {
   "HEVC, device-limited to about 4–6 Mbps": "HEVC, dibatasi perangkat sekitar 4–6 Mbps",
   "Mouse touch, keyboard, gestures and buttons": "Sentuh dengan mouse, keyboard, gestur dan tombol",
   "Apple's own driver, nothing to install": "Driver Apple sendiri, tanpa instalasi",
+  "Needs iOS 27 or later (on older iOS the screen stays black)": "Butuh iOS 27 atau lebih baru (di iOS lama layar tetap hitam)",
+  "Works on iOS 18 to 26 too": "Juga jalan di iOS 18 sampai 26",
   "Cable or Wi-Fi (after a one-time setup with the cable)": "Kabel atau Wi-Fi (setelah atur sekali lewat kabel)",
   "QuickTime capture over USB, like TikTok LIVE Studio (H.264, higher bitrate)":
     "Capture QuickTime lewat USB, seperti TikTok LIVE Studio (H.264, bitrate lebih tinggi)",
@@ -361,6 +363,8 @@ const ID = {
 
 // Text that includes a name or number.
 const ID_PATTERNS = [
+  [/^Apple Driver mode needs iOS (\d+) or later; this device runs iOS ([\d.]+)\. On iOS 18 to 26, use ZenLink Studio over the cable or Wi-Fi \(AirPlay\): Settings > Connection & Drivers\.$/,
+    "Mode Apple Driver butuh iOS $1 atau lebih baru; perangkat ini iOS $2. Untuk iOS 18 sampai 26, pakai ZenLink Studio lewat kabel atau Wi-Fi (AirPlay): Pengaturan > Koneksi & Driver."],
   [/^(.+) is ready$/, "$1 siap"],
   [/^(.+) · Wi-Fi$/, "$1 · Wi-Fi"],
   [/^(.+) is saved and applies after a restart\.$/, "$1 tersimpan dan berlaku setelah restart."],

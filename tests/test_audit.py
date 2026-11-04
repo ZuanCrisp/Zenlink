@@ -564,5 +564,19 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await c.get("/")).status, 200)
 
 
+
+class OldIosTests(unittest.TestCase):
+    def test_apple_mode_needs_ios_27_with_a_clear_message(self):
+        from zenlink.castmanager import _friendly_error, _ios_too_old
+
+        self.assertTrue(_ios_too_old("26.1"))
+        self.assertTrue(_ios_too_old("18.6"))
+        self.assertFalse(_ios_too_old("27.0"))
+        self.assertFalse(_ios_too_old(None))
+        msg = _friendly_error(Exception("Screen streaming needs iOS 27.0 or later; this device runs iOS 26.1"))
+        self.assertIn("iOS 26.1", msg)
+        self.assertIn("ZenLink Studio", msg)
+
+
 if __name__ == "__main__":
     unittest.main()

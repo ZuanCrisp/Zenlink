@@ -146,11 +146,34 @@ try {
         Find-Inf { param($b) $b -match "Provider Name:\s+Apple" -and $b -match "Original Name:\s+(appleusb\.inf|usbaapl64\.inf|usbaapl\.inf)" }
     }
     function Bind([string]$inf) {
-        $reboot = $false
-        $ok = [PlNewDev]::UpdateDriverForPlugAndPlayDevices([IntPtr]::Zero, $hwid, (Join-Path $env:WINDIR "INF\$inf"), 1, [ref]$reboot)
-        if ($reboot) { $script:result.reboot = $true }
-        if (-not $ok) { return [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
-        return 0
+        $path = Join-Path $env:WINDIR "INF\$inf"
+        $once = {
+            $reboot = $false
+            $ok = [PlNewDev]::UpdateDriverForPlugAndPlayDevices([IntPtr]::Zero, $hwid, $path, 1, [ref]$reboot)
+            if ($reboot) { $script:result.reboot = $true }
+            if ($ok) { 0 } else { [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+        }
+        $code = & $once
+        if ($code -eq 259) { $code = Invoke-WithAppleServicePaused $once }  # device held open, see bind
+        return $code
+    }
+    # Runs $work with Apple Mobile Device Service stopped, then starts every
+    # service it stopped again, whatever happened.
+    function Invoke-WithAppleServicePaused([scriptblock]$work) {
+        $paused = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "Apple Mobile Device*" -and $_.Status -eq "Running" })
+        foreach ($svc in $paused) {
+            Step "pausing $($svc.DisplayName) so Windows can switch the driver"
+            Stop-Service -Name $svc.Name -Force -ErrorAction SilentlyContinue
+        }
+        try {
+            Start-Sleep -Milliseconds 1500
+            return (& $work)
+        } finally {
+            foreach ($svc in $paused) {
+                Start-Service -Name $svc.Name -ErrorAction SilentlyContinue
+                Step "started $($svc.DisplayName) again"
+            }
+        }
     }
     function Remove-ZenLinkCert([string]$thumb) {
         foreach ($store in "Root", "TrustedPublisher", "My") {
@@ -344,11 +367,23 @@ ServiceBinary = %12%\libusb0.sys
                 $inf = Split-Path -Leaf $infPath
             }
             Remove-LibusbFilters $before
-            $reboot = $false
-            $ok = [PlNewDev]::UpdateDriverForPlugAndPlayDevices([IntPtr]::Zero, $hwid, $infPath, 1, [ref]$reboot)
-            if ($reboot) { $result.reboot = $true }
-            $code = if ($ok) { 0 } else { [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+            $install = {
+                $reboot = $false
+                $ok = [PlNewDev]::UpdateDriverForPlugAndPlayDevices([IntPtr]::Zero, $hwid, $infPath, 1, [ref]$reboot)
+                if ($reboot) { $script:result.reboot = $true }
+                if ($ok) { 0 } else { [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+            }
+            $code = & $install
+            if ($code -eq 259) {
+                # 259: Windows could not remove the device because a program still
+                # has it open (usually Apple Mobile Device Service). Pause Apple's
+                # service for this one change, retry, and always start it again.
+                $code = Invoke-WithAppleServicePaused $install
+            }
             if ($code -ne 0 -and $addedCert) { Remove-ZenLinkCert $addedCert; Step "removed the certificate added for this attempt" }
+            if ($code -eq 259) {
+                throw "Windows could not switch the driver because another program has the device open (error 259). Close Apple Devices, iTunes and Phone Link, unplug the cable, plug it in again and retry. The device keeps Apple's driver."
+            }
             if ($code -ne 0) {
                 # Filters stay removed: a libusb0 filter is never put back.
                 throw "Windows could not install the libusb-win32 driver (error $code). The device keeps Apple's driver."
