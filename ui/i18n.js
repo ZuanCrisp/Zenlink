@@ -30,6 +30,12 @@ const ID = {
     "Pakai kabel USB. Layar dan suara lewat kabel, sama seperti TikTok LIVE Studio.",
   "Use a USB cable, unlock the device and tap Trust when it asks. Set up Wi-Fi once to cast without the cable.":
     "Pakai kabel USB, buka kunci perangkat, lalu ketuk Percayai. Atur Wi-Fi sekali agar bisa tanpa kabel.",
+  "Windows could not switch the driver because another program has the device open (error 259). Close Apple Devices, iTunes and Phone Link, unplug the cable, plug it in again and retry. The device keeps Apple's driver.": "Windows tidak bisa mengganti driver karena ada program lain yang sedang memakai perangkat (error 259). Tutup Apple Devices, iTunes dan Phone Link, cabut kabel, colok lagi lalu coba lagi. Perangkat tetap memakai driver Apple.",
+  "Windows could not switch the driver because another program has the device open (error 259). Close TikTok LIVE Studio and other capture apps, unplug the cable, plug it in again and retry.": "Windows tidak bisa mengganti driver karena ada program lain yang sedang memakai perangkat (error 259). Tutup TikTok LIVE Studio dan aplikasi capture lain, cabut kabel, colok lagi lalu coba lagi.",
+  "The driver is installed, but Windows needs a restart to finish. Restart Windows, then plug the device in again.": "Driver sudah terpasang, tapi Windows perlu restart untuk menyelesaikannya. Restart Windows, lalu colok perangkat lagi.",
+  "Apple's driver is installed, but Windows needs a restart to finish. Restart Windows, then plug the device in again.": "Driver Apple sudah terpasang, tapi Windows perlu restart untuk menyelesaikannya. Restart Windows, lalu colok perangkat lagi.",
+  "The device did not start with the libusb-win32 driver, and Apple's driver could not be put back automatically. Unplug the cable, plug it in again and press Restore Apple driver.": "Perangkat tidak mau jalan dengan driver libusb-win32, dan driver Apple tidak bisa dipasang kembali otomatis. Cabut kabel, colok lagi lalu tekan Kembali ke driver Apple.",
+  "Windows did not delete the temporary signing key; nothing was installed.": "Windows tidak menghapus kunci tanda tangan sementara; tidak ada yang dipasang.",
   "Open Connection & Drivers": "Buka Koneksi & Driver",
   "Choose mode": "Pilih mode",
   "Tap Trust": "Ketuk Percayai",

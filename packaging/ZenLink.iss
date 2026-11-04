@@ -1,6 +1,6 @@
 ; ZenLink installer (Inno Setup 6). Built by build_portable_release.ps1.
 #ifndef AppVersion
-  #define AppVersion "2.2"
+  #define AppVersion "2.2.1"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\ZenLink"

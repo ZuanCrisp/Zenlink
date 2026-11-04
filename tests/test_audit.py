@@ -578,5 +578,59 @@ class OldIosTests(unittest.TestCase):
         self.assertIn("ZenLink Studio", msg)
 
 
+
+class DriverSwitchTests(unittest.TestCase):
+    SCRIPT = Path(__file__).resolve().parent.parent / "tools" / "usb_filter.ps1"
+
+    def code_lines(self):
+        return [l for l in self.SCRIPT.read_text(encoding="utf-8-sig").splitlines() if not l.strip().startswith("#")]
+
+    def test_delete_key_is_never_piped(self):
+        # v2.2 bug: "A parameter cannot be found that matches parameter name
+        # 'DeleteKey'" - the dynamic parameter only binds with a direct cert path.
+        for line in self.code_lines():
+            if "-DeleteKey" in line:
+                self.assertNotIn("|", line.split("-DeleteKey")[0], line)
+                self.assertIn("-Path", line, line)
+
+    def test_no_translated_pnputil_text_is_parsed(self):
+        text = "\n".join(self.code_lines())
+        self.assertNotIn("Published Name", text)
+        self.assertNotIn("Provider Name", text)
+        status_py = (self.SCRIPT.parent.parent / "zenlink" / "drivers" / "status.py").read_text(encoding="utf-8")
+        self.assertNotIn("/enum-devices", status_py)
+        self.assertNotIn("/enum-drivers", status_py)
+
+    def test_libusb_packages_read_from_inf_files(self):
+        import os
+        import tempfile
+        from unittest import mock
+
+        from zenlink.drivers import status
+
+        with tempfile.TemporaryDirectory() as root:
+            inf = os.path.join(root, "INF")
+            os.mkdir(inf)
+            # libwdi writes UTF-16; a model line commented out must not count.
+            Path(inf, "oem10.inf").write_text(
+                '[Strings]\nDeviceID = "VID_05AC&PID_12A8"\n[x]\nAddService = libusb0, 2, s\n', encoding="utf-16")
+            Path(inf, "oem11.inf").write_text(
+                ";DeviceID = VID_05AC&PID_12AB\nAddService = libusb0, 2, s\n", encoding="utf-8")
+            Path(inf, "oem12.inf").write_text(  # Apple's own package: not libusb
+                "%d%=AppleUSB_CCGPDriverInstall, USB\VID_05ac&PID_12ab\n", encoding="utf-8")
+            Path(inf, "oem13.inf").write_text(  # an interface (&MI_) package is not the parent
+                "USB\VID_05AC&PID_12AB&MI_00\nAddService = libusb0, 2, s\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"WINDIR": root}):
+                self.assertEqual(status.libusb0_packages(), {"12A8": "oem10.inf"})
+
+    def test_device_presence_does_not_need_pnputil(self):
+        from unittest import mock
+
+        from zenlink.drivers import status
+
+        with mock.patch("subprocess.run", side_effect=AssertionError("pnputil must not be used")):
+            status._connected_instances()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,8 +1,9 @@
 """Read-only view of the USB driver stack for connected iPhones/iPads.
 
-Nothing here changes the system: it reads the Windows device list
-(`pnputil /enum-devices /connected`), the device registry keys and the
-service registry. Safe to poll while a capture session owns the device.
+Nothing here changes the system: it reads the device registry keys, asks the
+Configuration Manager API which devices are present, and reads the published
+INF files and the service registry. pnputil's text output is never parsed
+(Windows translates it). Safe to poll while a capture session owns the device.
 
 Terms used throughout ZenLink:
 
@@ -74,26 +75,58 @@ def _enum_key(instance: str) -> dict:
         return {"service": "", "upper": [], "lower": [], "desc": "", "driver": ""}
 
 
+# Present devices come from the registry plus the Configuration Manager API.
+# pnputil's text output is translated on non-English Windows ("Instance ID",
+# "Status"), so it is never parsed.
+_CR_SUCCESS = 0
+_DN_STARTED = 0x00000008
+_CANDIDATE = re.compile(r"^VID_05AC&PID_12[0-9A-F]{2}(&MI_[0-9A-F]{2})?$", re.IGNORECASE)
+
+
+def _devnode_status(instance: str) -> str | None:
+    """"Started", "Problem (code N)" or "Stopped" for a connected device; None when absent."""
+    import ctypes
+    from ctypes import wintypes
+
+    cfg = ctypes.WinDLL("cfgmgr32")
+    devinst = wintypes.DWORD()
+    # CM_LOCATE_DEVNODE_NORMAL (0) only finds devices that are present.
+    if cfg.CM_Locate_DevNodeW(ctypes.byref(devinst), ctypes.c_wchar_p(instance), 0) != _CR_SUCCESS:
+        return None
+    status, problem = wintypes.ULONG(), wintypes.ULONG()
+    if cfg.CM_Get_DevNode_Status(ctypes.byref(status), ctypes.byref(problem), devinst, 0) != _CR_SUCCESS:
+        return "Unknown"
+    if problem.value:
+        return f"Problem (code {problem.value})"
+    return "Started" if status.value & _DN_STARTED else "Stopped"
+
+
+def _subkeys(key) -> list[str]:
+    names, index = [], 0
+    while True:
+        try:
+            names.append(winreg.EnumKey(key, index))
+        except OSError:
+            return names
+        index += 1
+
+
 def _connected_instances() -> list[tuple[str, str]]:
     """(instance id, status) of connected Apple USB device nodes."""
-    try:
-        out = subprocess.run(
-            ["pnputil", "/enum-devices", "/connected"],
-            capture_output=True, text=True, timeout=10, creationflags=_NO_WINDOW,
-        ).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return []
     found: list[tuple[str, str]] = []
-    instance = None
-    for line in out.splitlines():
-        label, _, value = line.partition(":")
-        label, value = label.strip().lower(), value.strip()
-        if label == "instance id":
-            instance = value if value.upper().startswith("USB\\VID_05AC&PID_12") else None
-            if instance:
-                found.append((instance, ""))
-        elif label == "status" and instance and found and found[-1][0] == instance:
-            found[-1] = (instance, value)
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Enum\USB") as usb:
+            for hwid in _subkeys(usb):
+                if not _CANDIDATE.match(hwid):
+                    continue
+                with winreg.OpenKey(usb, hwid) as dev:
+                    for serial in _subkeys(dev):
+                        instance = rf"USB\{hwid}\{serial}"
+                        state = _devnode_status(instance)
+                        if state is not None:
+                            found.append((instance, state))
+    except OSError:
+        return []
     return found
 
 
@@ -145,30 +178,28 @@ def libusb0_packages() -> dict[str, str]:
 
     TikTok LIVE Studio's installer (libwdi) and Zadig generate one package per
     device model (e.g. ``VID_05AC&PID_12A8`` for iPhone), so an iPad needs its
-    own. Read-only: parses ``pnputil /enum-drivers`` and the INF files."""
+    own. Read-only: reads the published ``%WINDIR%\\INF\\oem*.inf`` files directly,
+    because pnputil's text output is translated on non-English Windows."""
+    inf_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "INF")
     try:
-        out = subprocess.run(["pnputil", "/enum-drivers"], capture_output=True, text=True, timeout=15,
-                             creationflags=_NO_WINDOW).stdout
-    except (OSError, subprocess.TimeoutExpired):
+        names = sorted(n for n in os.listdir(inf_dir) if re.fullmatch(r"oem\d+\.inf", n, re.IGNORECASE))
+    except OSError:
         return {}
     found: dict[str, str] = {}
-    for block in re.split(r"\n\s*\n", out):
-        if "libusb-win32" not in block:
-            continue
-        m = re.search(r"Published Name:\s+(\S+\.inf)", block, re.IGNORECASE)
-        if not m:
-            continue
-        path = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "INF", m.group(1))
+    for name in names:
         try:
-            with open(path, "rb") as fh:
+            with open(os.path.join(inf_dir, name), "rb") as fh:
                 raw = fh.read()
         except OSError:
             continue
         # INF files are ANSI/UTF-8 or UTF-16 (libwdi writes UTF-16).
         utf16 = raw[:2] in (b"\xff\xfe", b"\xfe\xff") or raw[1:2] == b"\x00"
         text = raw.decode("utf-16" if utf16 else "utf-8", errors="ignore")
-        for pid in re.findall(r"VID_05AC&PID_([0-9A-F]{4})", text, re.IGNORECASE):
-            found.setdefault(pid.upper(), m.group(1))
+        text = re.sub(r";[^\r\n]*", "", text)  # INF comments never count
+        if not re.search(r"AddService\s*=\s*\"?libusb0\b", text, re.IGNORECASE):
+            continue
+        for pid in re.findall(r"VID_05AC&PID_([0-9A-F]{4})(?![0-9A-F&])", text, re.IGNORECASE):
+            found.setdefault(pid.upper(), name)
     return found
 
 

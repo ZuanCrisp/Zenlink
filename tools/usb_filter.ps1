@@ -28,9 +28,14 @@
        when the bind failed)
   The result is written as JSON to -ResultPath.
 
-  The libusb-win32 package itself is never created or downloaded here: it
-  must already be in the Windows driver store for this device model (TikTok
-  LIVE Studio's iOS driver installer or Zadig create one per model).
+  The libusb-win32 package for this device model is taken from the driver
+  store (TikTok LIVE Studio's iOS driver, Zadig or an earlier ZenLink
+  install); when there is none, one is built from the bundled, validly
+  signed libusb-win32 files and signed with a one-time certificate whose
+  private key is deleted right away. Nothing is downloaded.
+
+  Driver packages are found by reading the INF files, never by parsing
+  pnputil's text, which Windows translates.
 #>
 param(
     [Parameter(Mandatory)][ValidateSet("bind", "restore", "removefilter")][string]$Action,
@@ -122,29 +127,32 @@ try {
             }
         }
     }
-    function Find-Inf([scriptblock]$match) {
-        $text = (pnputil /enum-drivers) -join "`n"
-        foreach ($block in ($text -split "`n\s*`n")) {
-            if (& $match $block) {
-                if ($block -match "Published Name:\s+(\S+\.inf)") { return $Matches[1] }
-            }
+    # Driver packages are found by reading the published INF files themselves.
+    # pnputil's text ("Published Name:", "Provider Name:") is translated on
+    # non-English Windows, so it is never parsed.
+    # INF text without comments (";" to end of line), so commented-out
+    # model lines never count.
+    function Read-InfText([string]$path) {
+        $b = [IO.File]::ReadAllBytes($path)
+        $t = if ($b.Length -ge 2 -and $b[0] -eq 0xFE -and $b[1] -eq 0xFF) { [Text.Encoding]::BigEndianUnicode.GetString($b) }
+             elseif ($b.Length -ge 2 -and (($b[0] -eq 0xFF -and $b[1] -eq 0xFE) -or $b[1] -eq 0)) { [Text.Encoding]::Unicode.GetString($b) }
+             else { [Text.Encoding]::UTF8.GetString($b) }
+        (($t -split "\r?\n") | ForEach-Object { $_ -replace ';.*$', '' }) -join "`n"
+    }
+    # Newest published package first; only packages for this exact model's
+    # composite parent (USB\VID_05AC&PID_xxxx, not one of its &MI_ interfaces).
+    function Find-OemInf([scriptblock]$match) {
+        $infs = Get-ChildItem (Join-Path $env:WINDIR "INF") -Filter "oem*.inf" -File -ErrorAction SilentlyContinue |
+            Sort-Object { [int]($_.BaseName -replace '\D', '') } -Descending
+        foreach ($f in $infs) {
+            $t = Read-InfText $f.FullName
+            if ($t -match "VID_05AC&PID_$devPid(?![0-9A-F&])" -and (& $match $t)) { return $f.Name }
         }
         return $null
     }
-    function Find-LibusbInf {
-        $text = (pnputil /enum-drivers) -join "`n"
-        foreach ($block in ($text -split "`n\s*`n")) {
-            if ($block -match "Provider Name:\s+libusb-win32" -and $block -match "Published Name:\s+(\S+\.inf)") {
-                $name = $Matches[1]
-                $path = Join-Path $env:WINDIR "INF\$name"
-                if ((Get-Content -Path $path -Raw -ErrorAction SilentlyContinue) -match "VID_05AC&PID_$devPid") { return $name }
-            }
-        }
-        return $null
-    }
-    function Find-AppleInf {
-        Find-Inf { param($b) $b -match "Provider Name:\s+Apple" -and $b -match "Original Name:\s+(appleusb\.inf|usbaapl64\.inf|usbaapl\.inf)" }
-    }
+    function Find-LibusbInf { Find-OemInf { param($t) $t -match 'AddService\s*=\s*"?libusb0\b' } }
+    # Apple's composite-parent package (appleusb.inf from Apple Devices / iTunes).
+    function Find-AppleInf { Find-OemInf { param($t) $t -match 'AppleUSB_CCGPDriverInstall' } }
     function Bind([string]$inf) {
         $path = Join-Path $env:WINDIR "INF\$inf"
         $once = {
@@ -175,9 +183,50 @@ try {
             }
         }
     }
+    # Removes one certificate from a LocalMachine store; in "My" its private key
+    # is deleted too. -DeleteKey is a dynamic parameter of the certificate
+    # provider: it only exists when the cert path is given directly (piping a
+    # certificate into Remove-Item -DeleteKey fails to bind on Windows
+    # PowerShell 5.1, which broke the bind in v2.2).
+    function Remove-CertWithKey([string]$store, [string]$thumb) {
+        $path = "Cert:\LocalMachine\$store\$thumb"
+        if (-not (Test-Path -LiteralPath $path)) { return }
+        if ($store -eq "My") {
+            try { Remove-Item -Path $path -DeleteKey -Force -ErrorAction Stop; return } catch {}
+            try {
+                $c = Get-Item -LiteralPath $path
+                $k = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($c)
+                if ($k -is [Security.Cryptography.RSACng]) { $k.Key.Delete() }
+                elseif ($k -is [Security.Cryptography.RSACryptoServiceProvider]) { $k.PersistKeyInCsp = $false; $k.Clear() }
+            } catch {}
+        }
+        Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    }
     function Remove-ZenLinkCert([string]$thumb) {
-        foreach ($store in "Root", "TrustedPublisher", "My") {
-            Get-ChildItem "Cert:\LocalMachine\$store" -ErrorAction SilentlyContinue | Where-Object { $_.Thumbprint -eq $thumb } | Remove-Item -Force -ErrorAction SilentlyContinue
+        foreach ($store in "Root", "TrustedPublisher", "My") { Remove-CertWithKey $store $thumb }
+    }
+    # Repairs PCs where the v2.2 bug stopped a bind half-way: the signing key
+    # was left in LocalMachine\My and the certificate trusted although no
+    # driver package was installed with it. ZenLink never keeps signing keys,
+    # and a ZenLink certificate stays trusted only while a ZenLink package in
+    # the driver store is signed with it.
+    function Repair-ZenLinkCerts {
+        Get-ChildItem "Cert:\LocalMachine\My" -ErrorAction SilentlyContinue | Where-Object { $_.Subject -like "CN=ZenLink USB Direct*" } | ForEach-Object {
+            Remove-CertWithKey "My" $_.Thumbprint
+            Step "removed a leftover ZenLink signing key ($($_.Thumbprint.Substring(0, 8)))"
+        }
+        $used = @{}
+        Get-ChildItem "$env:WINDIR\System32\DriverStore\FileRepository" -Directory -Filter "zenlink_usbdirect_*" -ErrorAction SilentlyContinue | ForEach-Object {
+            Get-ChildItem $_.FullName -Filter "*.cat" -File -ErrorAction SilentlyContinue | ForEach-Object {
+                $s = Get-AuthenticodeSignature -FilePath $_.FullName -ErrorAction SilentlyContinue
+                if ($s.SignerCertificate) { $used[$s.SignerCertificate.Thumbprint] = $true }
+            }
+        }
+        foreach ($store in "Root", "TrustedPublisher") {
+            Get-ChildItem "Cert:\LocalMachine\$store" -ErrorAction SilentlyContinue | Where-Object { $_.Subject -like "CN=ZenLink USB Direct*" -and -not $used[$_.Thumbprint] } | ForEach-Object {
+                Remove-CertWithKey $store $_.Thumbprint
+                Step "removed an unused ZenLink certificate from $store ($($_.Thumbprint.Substring(0, 8)))"
+            }
         }
     }
 
@@ -320,11 +369,20 @@ ServiceBinary = %12%\libusb0.sys
             Export-Certificate -Cert $cert -FilePath $cer | Out-Null
             Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\Root" | Out-Null
             Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\TrustedPublisher" | Out-Null
+        } catch {
+            # Nothing of a failed attempt stays trusted or on disk.
+            Remove-ZenLinkCert $cert.Thumbprint
+            Remove-Item $pkg -Recurse -Force -ErrorAction SilentlyContinue
+            throw
         } finally {
             # The private key is never kept: nothing else can be signed with it.
-            Get-ChildItem "Cert:\LocalMachine\My" | Where-Object { $_.Thumbprint -eq $cert.Thumbprint } | Remove-Item -Force -DeleteKey -ErrorAction SilentlyContinue
+            Remove-CertWithKey "My" $cert.Thumbprint
         }
-        Step "signed the package (certificate $($cert.Thumbprint), private key deleted)"
+        if (Test-Path -LiteralPath "Cert:\LocalMachine\My\$($cert.Thumbprint)") {
+            Remove-ZenLinkCert $cert.Thumbprint
+            throw "Windows did not delete the temporary signing key; nothing was installed."
+        }
+        Step "signed the package (certificate $($cert.Thumbprint.Substring(0, 8)), private key deleted)"
         $script:result.certificate = $cert.Thumbprint
         $script:result.package = $pkg
         return [pscustomobject]@{ inf = $infPath; thumbprint = $cert.Thumbprint }
@@ -350,6 +408,7 @@ ServiceBinary = %12%\libusb0.sys
     ($before | ConvertTo-Json -Depth 6) | Set-Content -Path $backup -Encoding UTF8
     $result.backup = $backup
     Step "backup saved"
+    Repair-ZenLinkCerts
 
     switch ($Action) {
         "bind" {
@@ -380,7 +439,11 @@ ServiceBinary = %12%\libusb0.sys
                 # service for this one change, retry, and always start it again.
                 $code = Invoke-WithAppleServicePaused $install
             }
-            if ($code -ne 0 -and $addedCert) { Remove-ZenLinkCert $addedCert; Step "removed the certificate added for this attempt" }
+            if ($code -ne 0 -and $addedCert) {
+                Remove-ZenLinkCert $addedCert
+                Remove-Item (Split-Path -Parent $infPath) -Recurse -Force -ErrorAction SilentlyContinue
+                Step "removed the certificate and package made for this attempt"
+            }
             if ($code -eq 259) {
                 throw "Windows could not switch the driver because another program has the device open (error 259). Close Apple Devices, iTunes and Phone Link, unplug the cable, plug it in again and retry. The device keeps Apple's driver."
             }
@@ -389,11 +452,21 @@ ServiceBinary = %12%\libusb0.sys
                 throw "Windows could not install the libusb-win32 driver (error $code). The device keeps Apple's driver."
             }
             Step "installed $inf as the device driver"
+            if ($result.reboot) {
+                # Windows finishes the switch at the next restart; rolling back
+                # now would undo a change that is only waiting for it.
+                $result.message = "The driver is installed, but Windows needs a restart to finish. Restart Windows, then plug the device in again."
+                $result.after = Get-State
+                $result.ok = $true
+                return
+            }
             if (-not (Wait-Service "libusb0")) {
                 $apple = Find-AppleInf
-                if ($apple) { [void](Bind $apple); Step "rolled back to Apple driver $apple" }
-                $result.rolledBack = $true
-                throw "The device did not start with the libusb-win32 driver. Apple's driver was put back."
+                $back = $false
+                if ($apple -and (Bind $apple) -eq 0) { $back = Wait-Service "usbccgp" }
+                $result.rolledBack = $back
+                if ($back) { throw "The device did not start with the libusb-win32 driver. Apple's driver was put back." }
+                throw "The device did not start with the libusb-win32 driver, and Apple's driver could not be put back automatically. Unplug the cable, plug it in again and press Restore Apple driver."
             }
             $result.message = "USB Direct driver installed. Unplug the cable and plug it in again."
         }
@@ -403,8 +476,15 @@ ServiceBinary = %12%\libusb0.sys
                 $apple = Find-AppleInf
                 if (-not $apple) { throw "Apple's USB driver package is not in the driver store. Install Apple Devices (Microsoft Store) and try again." }
                 $code = Bind $apple
+                if ($code -eq 259) { throw "Windows could not switch the driver because another program has the device open (error 259). Close TikTok LIVE Studio and other capture apps, unplug the cable, plug it in again and retry." }
                 if ($code -ne 0) { throw "Windows could not bind Apple's driver back (error $code)." }
                 Step "bound Apple driver $apple"
+                if ($result.reboot) {
+                    $result.message = "Apple's driver is installed, but Windows needs a restart to finish. Restart Windows, then plug the device in again."
+                    $result.after = Get-State
+                    $result.ok = $true
+                    return
+                }
             } else {
                 pnputil /restart-device "$InstanceId" | Out-Null
             }
