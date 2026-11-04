@@ -115,6 +115,36 @@ const ID = {
   "Mouse touch, keyboard, gestures and buttons": "Sentuh dengan mouse, keyboard, gestur dan tombol",
   "Apple's own driver, nothing to install": "Driver Apple sendiri, tanpa instalasi",
   "Needs iOS 27 or later (on older iOS the screen stays black)": "Butuh iOS 27 atau lebih baru (di iOS lama layar tetap hitam)",
+  "iOS 27 or later: native picture and control": "iOS 27 ke atas: gambar dan kontrol native",
+  "iOS 17 to 26: Hybrid Control, picture over AirPlay (same Wi-Fi) and control over the cable (Experimental)":
+    "iOS 17 sampai 26: Hybrid Control, gambar lewat AirPlay (Wi-Fi yang sama) dan kontrol lewat kabel (Eksperimental)",
+  "iOS 16 or older: use ZenLink Studio": "iOS 16 ke bawah: pakai ZenLink Studio",
+  "Control level": "Tingkat kontrol",
+  "Native Control": "Kontrol Native",
+  "Hybrid Control (Experimental)": "Hybrid Control (Eksperimental)",
+  "Mirroring Only": "Hanya Mirroring",
+  "Unsupported": "Tidak didukung",
+  "Ready · Hybrid": "Siap · Hybrid",
+  "Use Studio": "Pakai Studio",
+  "Hybrid Control (AirPlay + Apple driver)": "Hybrid Control (AirPlay + driver Apple)",
+  "This iOS version can't use Apple Driver mode. Switch to ZenLink Studio in Settings → Connection & Drivers.":
+    "Versi iOS ini tidak bisa memakai mode Apple Driver. Ganti ke ZenLink Studio di Pengaturan → Koneksi & Driver.",
+  "Hybrid Control (Experimental): the picture comes over AirPlay on the same Wi-Fi, touch and keyboard over the cable. Press Start casting.":
+    "Hybrid Control (Eksperimental): gambar lewat AirPlay di Wi-Fi yang sama, sentuh dan keyboard lewat kabel. Tekan Mulai mirroring.",
+  "Hybrid Control: touch, keyboard and buttons go over the cable (Experimental).":
+    "Hybrid Control: sentuh, keyboard dan tombol lewat kabel (Eksperimental).",
+  "Starting the AirPlay receiver and the touch link": "Menyalakan penerima AirPlay dan jalur sentuh",
+  "Opening touch control over the Apple driver…": "Membuka kontrol sentuh lewat driver Apple…",
+  "Touch, keyboard and buttons go over the Apple driver. Experimental: not yet confirmed on every iOS version.":
+    "Sentuh, keyboard dan tombol lewat driver Apple. Eksperimental: belum dipastikan di semua versi iOS.",
+  "Touch control needs Developer Mode (Settings > Privacy & Security), then a restart. The picture keeps working over AirPlay.":
+    "Kontrol sentuh butuh Mode Pengembang (Pengaturan > Privasi & Keamanan), lalu restart. Gambar tetap jalan lewat AirPlay.",
+  "Unlock the device and tap Trust, then press Start again for touch control. The picture keeps working over AirPlay.":
+    "Buka kunci perangkat dan ketuk Percayai, lalu tekan Mulai lagi untuk kontrol sentuh. Gambar tetap jalan lewat AirPlay.",
+  "Touch control needs the device on the cable (or Wi-Fi set up in Apple Driver mode). The picture keeps working over AirPlay.":
+    "Kontrol sentuh butuh perangkat tersambung kabel (atau Wi-Fi yang sudah disiapkan di mode Apple Driver). Gambar tetap jalan lewat AirPlay.",
+  "The device's media service didn't answer. Restart the device and try again.":
+    "Layanan media perangkat tidak menjawab. Restart perangkat lalu coba lagi.",
   "Works on iOS 18 to 26 too": "Juga jalan di iOS 18 sampai 26",
   "Cable or Wi-Fi (after a one-time setup with the cable)": "Kabel atau Wi-Fi (setelah atur sekali lewat kabel)",
   "QuickTime capture over USB, like TikTok LIVE Studio (H.264, higher bitrate)":
@@ -371,6 +401,16 @@ const ID = {
 const ID_PATTERNS = [
   [/^Apple Driver mode needs iOS (\d+) or later; this device runs iOS ([\d.]+)\. On iOS 18 to 26, use ZenLink Studio over the cable or Wi-Fi \(AirPlay\): Settings > Connection & Drivers\.$/,
     "Mode Apple Driver butuh iOS $1 atau lebih baru; perangkat ini iOS $2. Untuk iOS 18 sampai 26, pakai ZenLink Studio lewat kabel atau Wi-Fi (AirPlay): Pengaturan > Koneksi & Driver."],
+  [/^Apple Driver mode needs iOS (\d+) or later; this device runs iOS ([\d.]+)\. Use ZenLink Studio over the cable or Wi-Fi \(AirPlay\): Settings > Connection & Drivers\.$/,
+    "Mode Apple Driver butuh iOS $1 atau lebih baru; perangkat ini iOS $2. Pakai ZenLink Studio lewat kabel atau Wi-Fi (AirPlay): Pengaturan > Koneksi & Driver."],
+  [/^iOS ([\d.]+) doesn't send its screen to Apple Driver mode \(that needs iOS (\d+) or later\)\. ZenLink uses Hybrid Control on this device: the picture comes over AirPlay\. If it still fails, use ZenLink Studio: Settings > Connection & Drivers\.$/,
+    "iOS $1 tidak mengirim layarnya ke mode Apple Driver (butuh iOS $2 ke atas). ZenLink memakai Hybrid Control di perangkat ini: gambar lewat AirPlay. Kalau masih gagal, pakai ZenLink Studio: Pengaturan > Koneksi & Driver."],
+  [/^This device doesn't offer touch control over the Apple driver \(missing: (.+)\)\. Turn on Developer Mode \(Settings > Privacy & Security\), restart the device and try again\. The picture keeps working over AirPlay\.$/,
+    "Perangkat ini tidak menyediakan kontrol sentuh lewat driver Apple (tidak ada: $1). Nyalakan Mode Pengembang (Pengaturan > Privasi & Keamanan), restart perangkat lalu coba lagi. Gambar tetap jalan lewat AirPlay."],
+  [/^Touch control couldn't start \((.+)\)\. The picture keeps working over AirPlay\.$/,
+    "Kontrol sentuh gagal dimulai ($1). Gambar tetap jalan lewat AirPlay."],
+  [/^(.+) \(expected\)$/, "$1 (perkiraan)"],
+  [/^(.+) · touch ready$/, "$1 · sentuh siap"],
   [/^(.+) is ready$/, "$1 siap"],
   [/^(.+) · Wi-Fi$/, "$1 · Wi-Fi"],
   [/^(.+) is saved and applies after a restart\.$/, "$1 tersimpan dan berlaku setelah restart."],

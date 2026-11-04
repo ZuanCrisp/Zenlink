@@ -150,7 +150,7 @@ def build_app(manager: CastManager) -> web.Application:
         from zenlink.apple import keyboard
 
         body = await request.json()
-        if manager.state.get("phase") != "streaming" or manager.state.get("backend") != "apple":
+        if manager.state.get("phase") != "streaming" or manager.state.get("backend") not in ("apple", "hybrid"):
             return web.json_response({"ok": False, "message": "Shortcuts need Apple Driver mode while casting."}, status=409)
         try:
             from zenlink import secret
@@ -284,6 +284,10 @@ def build_app(manager: CastManager) -> web.Application:
             return resp
         if tail == "pli":
             return web.json_response({"ok": True})
+        if tail in ("touch", "key", "button") and manager.state.get("backend") == "hybrid":
+            # Hybrid: the picture is AirPlay (hub), input goes to the CoreDevice
+            # HID server on the same loopback port Apple mode uses.
+            return await cast_proxy(request)
         return web.json_response({"error": "Touch, keyboard and buttons are not available in USB Direct mode."}, status=409)
 
     async def cast_proxy(request: web.Request) -> web.StreamResponse:

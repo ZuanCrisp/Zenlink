@@ -1,6 +1,6 @@
 [project]
 name = "zenlink"
-version = "2.2.1"
+version = "2.2.2"
 description = "Mirror and control an iPhone or iPad on Windows - Apple Driver (cable or Wi-Fi) or ZenLink Studio (cable or AirPlay) for live streaming."
 readme = "README.md"
 license = "GPL-3.0-or-later"

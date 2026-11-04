@@ -566,13 +566,16 @@ class ApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class OldIosTests(unittest.TestCase):
-    def test_apple_mode_needs_ios_27_with_a_clear_message(self):
-        from zenlink.castmanager import _friendly_error, _ios_too_old
+    def test_apple_mode_needs_ios_17_with_a_clear_message(self):
+        # iOS 27+ native, 17-26 Hybrid Control (tests/test_compat.py), 16 and older refused.
+        from zenlink.castmanager import _friendly_error, _ios_too_old, _old_ios_message
 
-        self.assertTrue(_ios_too_old("26.1"))
-        self.assertTrue(_ios_too_old("18.6"))
+        self.assertTrue(_ios_too_old("16.7"))
+        self.assertFalse(_ios_too_old("26.1"))
+        self.assertFalse(_ios_too_old("18.6"))
         self.assertFalse(_ios_too_old("27.0"))
         self.assertFalse(_ios_too_old(None))
+        self.assertIn("ZenLink Studio", _old_ios_message("16.7"))
         msg = _friendly_error(Exception("Screen streaming needs iOS 27.0 or later; this device runs iOS 26.1"))
         self.assertIn("iOS 26.1", msg)
         self.assertIn("ZenLink Studio", msg)

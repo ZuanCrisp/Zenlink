@@ -111,6 +111,7 @@ const TALLY = {
 
 function applyState(next) {
   const prevPhase = state.phase;
+  const prevControl = state.control;
   state = next;
   const phase = state.phase;
   const casting = CASTING.includes(phase);
@@ -147,7 +148,7 @@ function applyState(next) {
   }
   // AirPlay: the device comes to us, so while waiting keep the how-to visible
   // instead of the cable checklist.
-  const airplayWaiting = Boolean(device?.airplay) && casting && phase !== "streaming";
+  const airplayWaiting = Boolean(device?.airplay || device?.hybrid) && casting && phase !== "streaming";
   if (airplayWaiting) {
     closeConnect();
   } else if (casting) {
@@ -160,6 +161,7 @@ function applyState(next) {
   }
 
   if (!casting && phase !== "error") closeConnect();
+  noteControl(prevControl, state.control);
   if (prevPhase === "streaming" && phase !== "streaming") {
     player.stop();
     renderMetrics(null);
@@ -188,7 +190,8 @@ function renderIdle(device) {
   const need = device && NEED[device.need];
   const idleAction = $("#idle-action");
   idleAction.hidden = !need;
-  els.deviceChipStatus.textContent = !device ? "" : need ? need[0] : device.ready ? "Ready" : "Tap Trust";
+  els.deviceChipStatus.textContent = !device ? "" : need ? need[0] : !device.ready ? "Tap Trust"
+    : device.control === "hybrid" ? "Ready · Hybrid" : device.control === "unsupported" ? "Use Studio" : "Ready";
   if (need) {
     art = "driver";
     els.idleTitle.textContent = need[1];
@@ -206,7 +209,11 @@ function renderIdle(device) {
   } else {
     art = "ready";
     els.idleTitle.textContent = `${device.name} is ready`;
-    els.idleSub.textContent = device.wifi ? "Connected over Wi-Fi. Unlock it, then press Start casting."
+    els.idleSub.textContent = device.control === "unsupported"
+      ? "This iOS version can't use Apple Driver mode. Switch to ZenLink Studio in Settings → Connection & Drivers."
+      : device.control === "hybrid"
+      ? "Hybrid Control (Experimental): the picture comes over AirPlay on the same Wi-Fi, touch and keyboard over the cable. Press Start casting."
+      : device.wifi ? "Connected over Wi-Fi. Unlock it, then press Start casting."
       : "Unlock it, then press Start casting.";
   }
   els.deviceArt.dataset.state = art;
@@ -217,7 +224,8 @@ function renderIdle(device) {
 // ZenLink Studio over Wi-Fi: the device mirrors to us, so show how.
 function renderAirplayGuide(device) {
   const guide = $("#airplay-guide");
-  const on = Boolean(device?.airplay) && state.phase !== "streaming";
+  const on = (Boolean(device?.airplay) || (Boolean(device?.hybrid) && CASTING.includes(state.phase)))
+    && state.phase !== "streaming";
   guide.hidden = !on;
   if (!on) return;
   $("#ag-name").textContent = `“${device.receiver || "ZenLink"}”`;
@@ -227,7 +235,28 @@ function renderAirplayGuide(device) {
     : "Press Start casting, then follow these steps on the device:";
   $("#ag-note").textContent = firewallOk === false
     ? "ZenLink doesn't appear in the list? Settings → Connection & Drivers → Allow ZenLink on the network."
+    : device.hybrid ? "Hybrid Control: touch, keyboard and buttons go over the cable (Experimental)."
     : "No touch control over AirPlay; picture and sound only.";
+}
+
+// What a session actually opened, in plain words (never assumed from the iOS version).
+const CONTROL_NAME = {
+  native: "Native Control",
+  hybrid: "Hybrid Control (Experimental)",
+  mirroring: "Mirroring Only",
+  unsupported: "Unsupported",
+};
+function controlText(c, device) {
+  if (c) {
+    const name = c.level === "hybrid" && !c.control ? CONTROL_NAME.mirroring : CONTROL_NAME[c.level] || "—";
+    return c.level === "hybrid" && c.control ? `${name} · touch ready` : name;
+  }
+  return device?.control ? `${CONTROL_NAME[device.control]} (expected)` : "—";
+}
+// Tell the user once when Hybrid falls back to picture only, with the reason.
+function noteControl(prev, next) {
+  if (!next || next.level !== "mirroring" || prev?.level === "mirroring" || !next.note) return;
+  toast(next.note, "bad");
 }
 
 // ---------------------------------------------------------------- stealth dim & passcode
@@ -541,7 +570,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 // Which of App Switcher / Notification Center / Control Center the panel opened.
 let openOverlay = null;
 let overlayBusy = false;
-const appleInput = () => (state.backend || state.connection?.active) !== "usbdirect";
+const appleInput = () => (state.backend || state.connection?.active) !== "usbdirect"
+  && !(state.backend === "hybrid" && state.control && !state.control.control);
 const screenShown = () => !els.screen.hidden || !$("#screen-video").hidden;
 const controlling = () => settings.touch && appleInput() && state.phase === "streaming" && settingsEl.hidden && screenShown();
 
@@ -1052,7 +1082,7 @@ function maybeAutoStart() {
 
 // ---------------------------------------------------------------- connection mode & drivers
 
-const MODE_NAME = { apple: "Apple Driver (Standard)", usbdirect: "ZenLink Studio" };
+const MODE_NAME = { apple: "Apple Driver (Standard)", usbdirect: "ZenLink Studio", hybrid: "Hybrid Control (AirPlay + Apple driver)" };
 const chooser = $("#chooser");
 const chooserContinue = $("#chooser-continue");
 const chooserCancel = $("#chooser-cancel");
@@ -1179,6 +1209,7 @@ function renderConnection() {
   const cap = state.capture;
   $("#d-backend").textContent = cap ? MODE_NAME[cap.backend] : state.phase === "idle" ? "Idle" : state.phase;
   $("#d-codec").textContent = cap?.codec || player.codecName || "—";
+  $("#d-control").textContent = controlText(state.control, (state.devices || [])[0]);
   // driver buttons follow the device's state and the chosen mode
   const warn = $("#conn-warn");
   let note = "";
