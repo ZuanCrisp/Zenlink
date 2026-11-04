@@ -13,6 +13,9 @@
 - Apple Driver mode now starts on iOS 17 and later; iOS 16 and older get a clear message pointing to ZenLink Studio.
 - iOS 27 and later keep the native Apple mode unchanged.
 
+### Fixed
+- **Apple Driver mode in the exe failed at "Secure connection"** with "No package metadata was found for pyimg4". The build left out a package's metadata that the developer-image code reads. The build now includes it, and every build checks itself (`ZenLink.exe --selftest`) before it can be released.
+
 ### Not changed
 - ZenLink Studio (cable and AirPlay), the USB driver switch, restore, automatic rollback and the error 259 handling.
 
