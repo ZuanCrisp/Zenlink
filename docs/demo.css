@@ -158,21 +158,41 @@
 
 /* overlays */
 .ov { position: absolute; z-index: 15; transition: transform .45s cubic-bezier(.2,.8,.2,1), opacity .35s; pointer-events: none; }
-.cc { top: 4%; right: 4%; width: 62%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; opacity: 0; transform: translateY(-18%) scale(.96); }
-.device.tablet .cc { width: 36%; }
+.cc { top: 9%; left: 8%; width: 84%; display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: 18.75cqw; gap: 3cqw;
+  opacity: 0; transform: scale(.94); transform-origin: 90% 0; }
+.device.tablet .cc { top: 7%; left: auto; right: 4%; width: 36%; grid-auto-rows: 7.8cqw; gap: 1.6cqw; }
 .cc.show { opacity: 1; transform: none; }
-.cc > div { border-radius: 20px; background: rgba(40,40,48,.78); backdrop-filter: blur(16px); padding: 10px; min-height: 13cqh; }
-.device.tablet .cc > div { min-height: 17cqh; }
-.cc .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.cc .tiles i { aspect-ratio: 1; border-radius: 50%; background: rgba(255,255,255,.16); display: grid; place-items: center; }
-.cc .tiles i.on { background: #ff4fa3; }
-.cc .tiles i svg { width: 52%; height: 52%; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.cc .slider { position: relative; overflow: hidden; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px; }
-.cc .slider svg { position: relative; z-index: 1; width: 7cqmin; min-width: 14px; height: auto; fill: none; stroke: #55555e; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.cc .slider::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--lvl, 60%); background: rgba(255,255,255,.88); transition: height .35s; }
-.cc .wide { grid-column: span 2; display: flex; align-items: center; gap: 8px; font-size: max(8px, 2.6cqmin); min-height: 0 !important; }
-.cc .wide i { width: 12cqmin; aspect-ratio: 1; border-radius: 10px; background: linear-gradient(135deg, #ff4fa3, #7b5cff); flex: none; }
-.dim { position: absolute; inset: 0; z-index: 14; background: rgba(0,0,0,.25); backdrop-filter: blur(6px); opacity: 0; transition: opacity .35s; pointer-events: none; }
+/* iOS 26/27 Liquid Glass modules */
+.cc .m { position: relative; border-radius: 5.2cqw; overflow: hidden; display: grid; place-items: center;
+  background: linear-gradient(160deg, rgba(255,255,255,.2), rgba(255,255,255,.07)); backdrop-filter: blur(22px) saturate(1.6);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), inset 0 0 0 1px rgba(255,255,255,.14), 0 8px 24px rgba(0,0,0,.18); }
+.device.tablet .cc .m { border-radius: 2.2cqw; }
+.cc svg { width: 46%; height: 46%; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cc .conn, .cc .media { grid-column: span 2; grid-row: span 2; }
+.cc .conn { grid-template-columns: 1fr 1fr; gap: 9%; padding: 13%; }
+.cc .conn .b { width: 100%; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.18); }
+.cc .conn .b svg { width: 50%; height: 50%; }
+.cc .conn .b.g { background: #30d158; }
+.cc .conn .b.bl { background: #0a84ff; }
+.cc .media { place-items: start; align-content: start; padding: 12%; gap: 2%; font-size: max(8px, 3.2cqw); text-align: left; }
+.device.tablet .cc .media { font-size: max(8px, 1.4cqw); }
+.cc .media .art { width: 38%; aspect-ratio: 1; border-radius: 22%; background: linear-gradient(135deg, #ff4fa3, #7b5cff); margin-bottom: 6%; }
+.cc .media span { opacity: .65; }
+.cc .media .mc { position: absolute; left: 10%; right: 10%; bottom: 10%; display: flex; justify-content: space-between; }
+.cc .media .mc svg { width: 22%; height: auto; aspect-ratio: 1; fill: #fff; stroke: none; }
+.cc .sl { grid-row: span 2; place-items: end center; padding-bottom: 18%; border-radius: 6cqw; }
+.device.tablet .cc .sl { border-radius: 2.6cqw; }
+.cc .sl::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: var(--lvl, 60%); background: #fff; transition: height .35s; }
+.cc .sl svg { position: relative; width: 40%; height: auto; aspect-ratio: 1; stroke: #6e6e78; }
+.cc .focus { grid-column: span 2; grid-template-columns: auto 1fr; justify-items: start; gap: 8%; padding: 0 12%; font-size: max(8px, 3.4cqw); font-weight: 600; border-radius: 99px; }
+.device.tablet .cc .focus { font-size: max(8px, 1.5cqw); }
+.cc .focus svg { width: auto; height: 42%; aspect-ratio: 1; fill: #fff; stroke: none; }
+.cc .sq svg { width: 40%; height: 40%; }
+.cc .r { aspect-ratio: 1; align-self: center; justify-self: center; width: 86%; border-radius: 50%; display: grid; place-items: center;
+  background: linear-gradient(160deg, rgba(255,255,255,.2), rgba(255,255,255,.07)); backdrop-filter: blur(22px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.35), inset 0 0 0 1px rgba(255,255,255,.14); }
+.cc .r svg { width: 44%; height: 44%; }
+.dim { position: absolute; inset: 0; z-index: 14; background: rgba(10,6,16,.38); backdrop-filter: blur(18px) saturate(1.2); opacity: 0; transition: opacity .35s; pointer-events: none; }
 .dim.show { opacity: 1; }
 
 .nc { top: 0; left: 0; right: 0; height: 100%; z-index: 16; padding: 14% 5% 0; transform: translateY(-100%); background: linear-gradient(180deg, rgba(20,12,30,.85), rgba(20,12,30,.55)); backdrop-filter: blur(16px); }
