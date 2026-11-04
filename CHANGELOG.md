@@ -14,7 +14,7 @@
 - iOS 27 and later keep the native Apple mode unchanged.
 
 ### Fixed
-- **Apple Driver mode in the exe failed at "Secure connection"** with "No package metadata was found for pyimg4". The build left out a package's metadata that the developer-image code reads. The build now includes it, and every build checks itself (`ZenLink.exe --selftest`) before it can be released.
+- **Apple Driver mode in the exe failed at "Secure connection"** with "No package metadata was found for pyimg4". The build left out a package's metadata that the developer-image code reads, and also `wintun.dll`, which the tunnel code loads. Both are included now, and every build checks itself (`ZenLink.exe --selftest`) before it can be released.
 
 ### Not changed
 - ZenLink Studio (cable and AirPlay), the USB driver switch, restore, automatic rollback and the error 259 handling.

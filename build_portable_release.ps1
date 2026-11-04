@@ -48,6 +48,7 @@ $pyiArgs = @(
     "--recursive-copy-metadata", "pymobiledevice3",
     "--collect-all", "pmd_pytcp",
     "--collect-all", "pmd_net_addr",
+    "--collect-all", "pytun_pmd3",  # wintun.dll, loaded when the tunnel module is imported
     "--collect-all", "webview",
     "--collect-all", "_sounddevice_data",
     "--collect-all", "zeroconf",
