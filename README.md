@@ -94,10 +94,9 @@ Device shortcuts work in Apple Driver mode while casting.
 2. Run it and follow the steps (Bahasa Indonesia or English). ZenLink appears in the Start Menu and, if you want, on the Desktop.
 3. Open **ZenLink**, choose a connection mode, plug in your device and press **Mulai mirroring / Start casting**.
 
-### Option 1B: Standalone (no installation, no Python)
-1. Download **`ZenLink-vX.Y.Z-Win64-Standalone.zip`** from [**Releases**](../../releases/latest) and extract it anywhere (e.g. `D:\ZenLink`).
-2. Double-click **`ZenLink.exe`** (or **`Start ZenLink.bat`**). Settings stay inside that folder.
-3. *(Optional)* **`Create-Desktop-Shortcut.bat`** adds Desktop and Start Menu shortcuts.
+### Option 1B: Portable (one .exe, no installation, no Python)
+1. Download **`ZenLink-vX.Y.Z-Portable.exe`** from [**Releases**](../../releases/latest) and put it anywhere.
+2. Double-click it. The first start takes a few seconds (it unpacks itself); settings are kept in `%LOCALAPPDATA%\ZenLink`.
 
 ### Option 2: Run from Source
 ```powershell
@@ -149,7 +148,8 @@ Switch any time in **Settings → Connection & Drivers**. Changing the driver as
 
 - The passcode for `Alt+U` is encrypted with Windows DPAPI for your account only; remove it any time in Settings.
 - **Installer version**: uninstall from **Windows Settings → Apps**.
-- **Standalone / source**: run **`Uninstall-ZenLink.bat`** — it closes ZenLink, deletes its settings, passcode, logs and WebView2 cache, removes the shortcuts and can delete the folder.
+- **Portable exe**: delete the `.exe` and the `%LOCALAPPDATA%\ZenLink` folder.
+- **Source**: run **`Uninstall-ZenLink.bat`** — it closes ZenLink, deletes its settings, passcode, logs and WebView2 cache, removes the shortcuts and can delete the folder.
 - If you used ZenLink Studio over the cable, press **Restore Apple driver** in Settings first so Apple apps see the device again.
 
 ---
