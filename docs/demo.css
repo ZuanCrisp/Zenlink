@@ -93,7 +93,7 @@
 
 .home { position: absolute; inset: 0; transition: transform .45s cubic-bezier(.2,.8,.2,1), opacity .35s; }
 .pages { position: absolute; inset: 11% 0 21% 0; display: flex; width: 200%; transition: transform .55s cubic-bezier(.2,.8,.2,1); }
-.page { width: 50%; display: grid; grid-template-columns: repeat(4, 1fr); align-content: start; gap: 5.5cqh 0; padding: 0 6%; }
+.page { width: 50%; display: grid; grid-template-columns: repeat(4, 1fr); align-content: start; gap: 4cqh 0; padding: 0 6%; }
 .device.tablet .page { grid-template-columns: repeat(6, 1fr); gap: 7cqh 0; padding: 0 9%; }
 .icon { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: max(7px, 2.6cqmin); color: rgba(255,255,255,.92); }
 .device.tablet .icon { font-size: max(7px, 1.9cqmin); }

@@ -276,7 +276,7 @@
     .traymenu { margin-right: 0; }
   }
 </style>
-<link rel="stylesheet" href="demo.css">
+<link rel="stylesheet" href="demo.css?v=202611040925">
 </head>
 <body>
 
@@ -789,6 +789,6 @@
   setInterval(() => { if (!document.hidden) load(); }, 5 * 60 * 1000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - loadedAt > 60 * 1000) load(); });
 </script>
-<script src="demo.js"></script>
+<script src="demo.js?v=202611040925"></script>
 </body>
 </html>
