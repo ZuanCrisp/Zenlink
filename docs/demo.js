@@ -1,4 +1,4 @@
-// ZenLink live demo: gestures on a mirrored iPhone 18 Pro Max / iPad Air.
+// ZenLink live demo: gestures on a mirrored iPhone 18 Pro Max / iPad Pro.
 (() => {
   const $ = (s, r = document) => r.querySelector(s);
   const app = $("#demo-app"), device = $("#demo-device"), screen = $("#demo-screen");
@@ -157,7 +157,7 @@
   // --- device + mode switches -----------------------------------------
   const DEV = {
     phone: { id: "iPhone 18 Pro Max", res: "2868×1320" },
-    tablet: { id: "iPad Air", res: "2360×1640" },
+    tablet: { id: "iPad Pro 13″", res: "2752×2064" },
   };
   let mode = "apple";
   const renderTop = () => {

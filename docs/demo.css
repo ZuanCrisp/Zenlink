@@ -56,9 +56,21 @@
 /* the mirrored device */
 .device { position: relative; transition: width .5s cubic-bezier(.2,.8,.2,1), height .5s cubic-bezier(.2,.8,.2,1); }
 .device.phone { height: 88%; aspect-ratio: 1320 / 2868; }
-.device.tablet { width: 84%; aspect-ratio: 2360 / 1640; max-height: 86%; }
+.device.tablet { height: 70%; width: auto; aspect-ratio: 2752 / 2064; max-width: 86%; }
 .frame { position: absolute; inset: -9px; border-radius: 62px; background: linear-gradient(145deg, #3a3a42, #17171c 40%, #2c2c33); box-shadow: 0 30px 80px rgba(0,0,0,.6), inset 0 0 0 1px rgba(255,255,255,.08); }
 .device.tablet .frame { inset: -14px; border-radius: 34px; }
+/* iPad Pro (M5) front, Space Black: dark aluminium edge, thin even bezel,
+   landscape front camera on the long top edge, buttons on the top edge */
+.device.tablet .frame { inset: -13px; border-radius: 32px;
+  background: linear-gradient(180deg, #2b2b30 0%, #121214 8%, #0b0b0d 50%, #121214 92%, #2b2b30 100%);
+  box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px #000, inset 0 0 0 1px rgba(255,255,255,.14); }
+.device.tablet .frame::before { content: ""; position: absolute; inset: 3px; border-radius: 29px; background: #030304; }
+.device.tablet .frame::after { content: ""; position: absolute; top: 4px; left: 50%; width: 5px; height: 5px; transform: translateX(-50%); border-radius: 50%; background: radial-gradient(circle at 35% 35%, #2a2a4a, #050508 70%); }
+.device.tablet .hw { display: block; height: 3px; width: auto; background: linear-gradient(180deg, #3a3a40, #18181b); }
+.device.tablet .hw.act, .device.tablet .hw.camc { display: none; }
+.device.tablet .hw.pw { top: -16px; right: 7%; left: auto; width: 7%; border-radius: 2px 2px 0 0; }
+.device.tablet .hw.vu { top: auto; bottom: auto; left: auto; right: -16px; top: 8%; width: 3px; height: 9%; border-radius: 0 2px 2px 0; }
+.device.tablet .hw.vd { top: auto; left: auto; right: -16px; top: 19%; width: 3px; height: 9%; border-radius: 0 2px 2px 0; }
 /* iPhone 18 Pro front: burgundy aluminium edge, thin black bezel, side buttons */
 .device.phone .frame { inset: -11px; border-radius: 64px;
   background: linear-gradient(90deg, #2a0f17 0%, #6b2a3a 6%, #3a1520 14%, #2a0f17 50%, #3a1520 86%, #6b2a3a 94%, #2a0f17 100%);
