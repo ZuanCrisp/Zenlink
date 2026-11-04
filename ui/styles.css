@@ -603,6 +603,7 @@ body[data-fit="native"] .stage { overflow: auto; place-items: safe center; }
 }
 .ctl svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; opacity: .85; }
 .ctl:hover { background: var(--hover); border-color: var(--text-3); }
+.ctl[aria-pressed="true"] { border-color: var(--accent); color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .ctl:active { transform: scale(.96); }
 .ctl.sm { height: 32px; font-size: 12px; padding: 0 6px; }
 .ctl.accent {

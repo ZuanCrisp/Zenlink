@@ -538,6 +538,9 @@ async function startCasting() {
 const postCast = (path, payload) =>
   fetch(`/cast/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }).catch(() => {});
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// Which of App Switcher / Notification Center / Control Center the panel opened.
+let openOverlay = null;
+let overlayBusy = false;
 const appleInput = () => (state.backend || state.connection?.active) !== "usbdirect";
 const screenShown = () => !els.screen.hidden || !$("#screen-video").hidden;
 const controlling = () => settings.touch && appleInput() && state.phase === "streaming" && settingsEl.hidden && screenShown();
@@ -662,6 +665,7 @@ function releaseActive() {
 
 els.stage.addEventListener("pointerdown", (e) => {
   if (!controlling()) return;
+  if (openOverlay && e.button === 0 && !e.target.closest("button, a, input")) setOverlay(null);
   if (e.button === 3) { e.preventDefault(); backGesture(); return; }
   if (e.button !== 0 || e.target.closest("button, a, input, .idle, .connect")) return;
   // Margins count only close to the picture (drag up from below it for Home).
@@ -764,7 +768,7 @@ window.HandsetKeys?.attach({
   post: (payload) => fetch("/cast/key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   enabled: () => settings.keyboard && appleInput() && state.phase === "streaming" && settingsEl.hidden,
 });
-$("#btn-home")?.addEventListener("click", () => pressHome(1));
+$("#btn-home")?.addEventListener("click", () => { setOverlay(null); pressHome(1); });
 
 // ---------------------------------------------------------------- gestures & buttons panel
 
@@ -793,7 +797,7 @@ let ctlUserClosed = false;  // the panel button closed the side panel for this c
 function syncControls() {
   const mode = settings.ctlMode || "always";
   ctlBtn.hidden = mode === "hidden";
-  if (!CASTING.includes(state.phase)) ctlUserClosed = false;
+  if (!CASTING.includes(state.phase)) { ctlUserClosed = false; if (openOverlay) setOverlay(null); }
   ctlPanel.classList.toggle("disabled", !appleInput());
   $("#ctl-note").hidden = appleInput();
   // Docked as a side panel while casting in Apple Driver mode.
@@ -827,16 +831,35 @@ function canSend() {
   if (state.phase !== "streaming") { toast("Start casting first."); return false; }
   return true;
 }
-ctlPanel.querySelectorAll("[data-gesture]").forEach((b) => b.addEventListener("click", () => {
-  if (!canSend()) return;
+// App Switcher, Notification Center and Control Center buttons toggle: a second
+// press closes what the first one opened (Home dismisses all three). Any other
+// input on the picture or panel means the overlay was used or closed there.
+function setOverlay(name) {
+  openOverlay = name;
+  ctlPanel.querySelectorAll("[data-gesture]").forEach((b) => {
+    if (b.dataset.gesture !== "home") b.setAttribute("aria-pressed", String(b.dataset.gesture === name));
+  });
+}
+function openOverlayGesture(g) {
+  if (g === "switcher") return openAppSwitcher();
+  return swipeOnScreen(...PANEL_GESTURES[g]);
+}
+ctlPanel.querySelectorAll("[data-gesture]").forEach((b) => b.addEventListener("click", async () => {
+  if (!canSend() || overlayBusy) return;
   flash(b);
   const g = b.dataset.gesture;
-  if (g === "home") return pressHome(1);
-  if (g === "switcher") return openAppSwitcher();
-  swipeOnScreen(...PANEL_GESTURES[g]);
+  if (g === "home") { setOverlay(null); return pressHome(1); }
+  overlayBusy = true;
+  try {
+    if (openOverlay === g) { setOverlay(null); await pressHome(1); return; }
+    if (openOverlay) { await pressHome(1); await wait(450); }
+    setOverlay(g);
+    await openOverlayGesture(g);
+  } finally { overlayBusy = false; }
 }));
 ctlPanel.querySelectorAll("[data-swipe]").forEach((b) => b.addEventListener("click", () => {
   if (!canSend()) return;
+  setOverlay(null);
   flash(b);
   const left = b.dataset.swipe === "left";
   // "Swipe" from the right edge goes forward; "Swipe →" from the left edge is Back.
@@ -844,12 +867,13 @@ ctlPanel.querySelectorAll("[data-swipe]").forEach((b) => b.addEventListener("cli
 }));
 ctlPanel.querySelectorAll("[data-btn]").forEach((b) => b.addEventListener("click", () => {
   if (!canSend()) return;
+  setOverlay(null);
   flash(b);
   postCast("button", { name: b.dataset.btn, state: "press" });
 }));
 // A focused button would swallow Space / Enter meant for the device.
 ctlPanel.addEventListener("pointerup", (e) => e.target.closest("button")?.blur());
-$("#btn-home")?.addEventListener("contextmenu", (e) => { e.preventDefault(); openAppSwitcher(); });
+$("#btn-home")?.addEventListener("contextmenu", (e) => { e.preventDefault(); setOverlay("switcher"); openAppSwitcher(); });
 
 els.castBtn.addEventListener("click", async () => {
   els.castBtn.disabled = true;
@@ -903,11 +927,11 @@ els.muteBtn.addEventListener("click", () => {
 
 const toggleFullscreen = () => window.ZenLinkWindow?.toggleFullscreen();
 els.fullscreenBtn.addEventListener("click", toggleFullscreen);
-els.stage.addEventListener("dblclick", (e) => {
-  // With touch on, a double click is a double tap on the device.
-  const r = pictureRect();
-  const onPicture = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-  if (state.phase === "streaming" && !(settings.touch && appleInput() && onPicture)) toggleFullscreen();
+els.stage.addEventListener("dblclick", () => {
+  // Apple mode controls the device: a double click is always a double tap,
+  // never fullscreen (F11 or the fullscreen button still work). ZenLink
+  // Studio has no touch, so there a double click toggles fullscreen.
+  if (state.phase === "streaming" && !appleInput()) toggleFullscreen();
 });
 
 // ---------------------------------------------------------------- settings

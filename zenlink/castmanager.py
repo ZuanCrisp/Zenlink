@@ -58,6 +58,7 @@ class CastManager:
         self._thread: threading.Thread | None = None
         self.hub = None  # MediaHub while a USB Direct session runs
         self._airplay_paused = False
+        self._sound_lock = threading.RLock()
         self._presence: dict = {"service": True, "devices": [], "takenOver": False}
         self._drivers: dict = {"apple": {}, "libusb0": {}, "devices": []}
         self._drivers_at = 0.0
@@ -340,7 +341,16 @@ class CastManager:
     # ------------------------------------------------------------ native sound
 
     def _start_sound(self) -> None:
-        if not self.audio_enabled or self._session is None or self.audio.running:
+        # Called from the cast session and from every open window at once.
+        # Without the lock two calls could both pass the check and start two
+        # Apple sound feeds: the same sound fed twice -> overflow, crackle.
+        with self._sound_lock:
+            self._start_sound_locked()
+
+    def _start_sound_locked(self) -> None:
+        if not self.audio_enabled or self._session is None:
+            return
+        if self.audio.running and (self._backend != "apple" or self._pump is not None):
             return
         # AirPlay over Wi-Fi delivers sound in bursts: keep ~120 ms queued.
         # The cable modes stay at the lowest latency.
@@ -349,19 +359,20 @@ class CastManager:
             return
         if self._backend == "usbdirect" and self.hub is not None:
             self.hub.audio_sink = self.audio.feed
-        elif self._backend == "apple":
+        elif self._backend == "apple" and self._pump is None:
             from zenlink.apple import session as apple_session
 
             self._pump = AppleAudioPump(f"http://{apple_session.STREAM_HOST}:{apple_session.STREAM_PORT}/audio.bin", self.audio)
             self._pump.start()
 
     def _stop_sound(self) -> None:
-        if self._pump is not None:
-            self._pump.stop()
-            self._pump = None
-        if self.hub is not None:
-            self.hub.audio_sink = None
-        self.audio.stop()
+        with self._sound_lock:
+            if self._pump is not None:
+                self._pump.stop()
+                self._pump = None
+            if self.hub is not None:
+                self.hub.audio_sink = None
+            self.audio.stop()
 
     def set_audio(self, enabled=None, volume=None, muted=None) -> dict:
         if volume is not None:

@@ -120,6 +120,37 @@ class DeviceListTests(unittest.TestCase):
 
 # ------------------------------------------------------------------ cast manager
 
+class AppleSoundFeedTests(unittest.TestCase):
+    def test_simultaneous_starts_make_one_feed(self):
+        """Window + session asking for sound at once used to start two Apple
+        sound feeds: the same sound fed twice (overflow, crackling)."""
+        from zenlink.castmanager import CastManager
+
+        with mock.patch("zenlink.castmanager.threading.Thread"):
+            m = CastManager()
+        m._session, m._backend, m.audio_enabled = object(), "apple", True
+        pumps = []
+
+        class FakePump:
+            def __init__(self, *a):
+                pumps.append(self)
+                time.sleep(0.05)  # widen the race window
+
+            def start(self):
+                pass
+
+            def stop(self):
+                pass
+
+        with mock.patch("zenlink.castmanager.AppleAudioPump", FakePump),              mock.patch.object(m.audio, "start", return_value=True),              mock.patch.object(type(m.audio), "running", new_callable=mock.PropertyMock, return_value=True):
+            threads = [threading.Thread(target=m._start_sound) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual(len(pumps), 1)
+
+
 class CastManagerTests(unittest.TestCase):
     def make(self, mode: str, link: str):
         from zenlink.castmanager import CastManager
