@@ -2,7 +2,7 @@
 .SYNOPSIS
   Builds the ZenLink release files into .\release\:
 
-    ZenLink-v<ver>-Win64-Standalone.zip   ZenLink.exe + everything it needs (no Python)
+    ZenLink-v<ver>-Portable.exe           one ZenLink.exe, nothing to install (no Python)
     ZenLink-v<ver>-Setup.exe              installer (Inno Setup 6, if installed)
     ZenLink-v<ver>-Portable-Source.zip    source + Start ZenLink.bat (sets up Python on first run)
 
@@ -94,12 +94,19 @@ foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-D
     Copy-Item $f $app
 }
 
-Write-Host "[3/4] Packing the standalone zip..." -ForegroundColor Magenta
-$portable = Join-Path $build "portable\ZenLink"
-New-Item -ItemType Directory -Force (Split-Path $portable) | Out-Null
-Copy-Item -Recurse $app $portable
-"ZenLink keeps its settings in this folder (portable mode)." | Set-Content (Join-Path $portable "portable.txt")
-Compress-Archive -Path $portable -DestinationPath (Join-Path $release "ZenLink-v$Version-Win64-Standalone.zip") -CompressionLevel Optimal
+Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta
+# Same app as one .exe: it unpacks itself to a temporary folder on start and
+# keeps its settings in %LOCALAPPDATA%\ZenLink.
+$oneArgs = @()
+for ($i = 0; $i -lt $pyiArgs.Count; $i++) {
+    if ($pyiArgs[$i] -eq "--onedir") { $oneArgs += "--onefile"; continue }
+    if ($pyiArgs[$i] -eq "--contents-directory") { $i++; continue }
+    $oneArgs += $pyiArgs[$i]
+}
+$oneArgs += @("--distpath", (Join-Path $build "onefile-dist"), "--workpath", (Join-Path $build "onefile-work"))
+& $py @oneArgs
+if ($LASTEXITCODE) { throw "PyInstaller (one file) failed" }
+Copy-Item (Join-Path $build "onefile-dist\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
 
 Write-Host "[4/4] Building the installer and the source zip..." -ForegroundColor Magenta
 $iscc = @(

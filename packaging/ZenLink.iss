@@ -62,12 +62,30 @@ Filename: "{app}\ZenLink.exe"; Description: "{cm:LaunchProgram,ZenLink}"; Flags:
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/im ZenLink.exe /f"; Flags: runhidden; RunOnceId: "KillZenLink"
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""ZenLink (AirPlay)"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; RunOnceId: "DelFirewall"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""ZenLink (AirPlay)"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; RunOnceId: "DelFirewall"; Check: FirewallRuleExists
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\ZenLink"
 
 [Code]
+// Only ask for administrator rights on uninstall when the AirPlay rule exists.
+function FirewallRuleExists(): Boolean;
+var
+  Names: TArrayOfString;
+  I: Integer;
+  Value: String;
+begin
+  Result := False;
+  if RegGetValueNames(HKLM, 'SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules', Names) then
+    for I := 0 to GetArrayLength(Names) - 1 do
+      if RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules', Names[I], Value) then
+        if Pos('|Name=ZenLink (AirPlay)|', Value) > 0 then
+        begin
+          Result := True;
+          Exit;
+        end;
+end;
+
 function AppleServiceInstalled(): Boolean;
 var
   ImagePath: String;

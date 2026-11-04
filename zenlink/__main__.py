@@ -57,6 +57,27 @@ def _set_icon(window) -> None:
         pass
 
 
+def _already_running() -> bool:
+    """A second launch brings the running ZenLink to the front and exits,
+    instead of waiting invisibly for a port the first one holds."""
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://{HOST}:{PORT}/api/state", timeout=1.5) as r:
+            json.loads(r.read())
+    except Exception:  # noqa: BLE001 - nothing (or not ZenLink) is listening
+        return False
+    try:
+        req = urllib.request.Request(f"http://{HOST}:{PORT}/api/app/show", data=b"{}", method="POST",
+                                     headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=3).read()
+    except Exception:  # noqa: BLE001
+        pass
+    logging.getLogger(__name__).info("ZenLink is already running: brought it to the front")
+    return True
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -73,6 +94,8 @@ def main() -> None:
     from zenlink import restart
 
     restart.wait_for_port(HOST, PORT)
+    if _already_running():
+        return
     manager = CastManager()
     ready = threading.Event()
     threading.Thread(target=serve_forever, args=(manager, ready), name="server", daemon=True).start()
@@ -117,6 +140,7 @@ def main() -> None:
         window.destroy()  # closes WebView2 cleanly; webview.start() returns
 
     manager.restart_hook = restart_hook
+    manager.show_hook = api.show_from_tray
 
     from zenlink.tray import Tray
 

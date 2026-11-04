@@ -183,6 +183,14 @@ def build_app(manager: CastManager) -> web.Application:
             "latencyMs", "audioMs", "audio", "hardware", "renderer", "lastError")})
         return web.json_response({"ok": True})
 
+    @routes.post("/api/app/show")
+    async def app_show(_request: web.Request) -> web.Response:
+        """A second launch asks the running instance to come to the front."""
+        hook = getattr(manager, "show_hook", None)
+        if hook is not None:
+            await asyncio.to_thread(hook)
+        return web.json_response({"ok": hook is not None})
+
     @routes.post("/api/app/restart")
     async def app_restart(_request: web.Request) -> web.Response:
         """Stop casting and restart the app. With a window, the window closes

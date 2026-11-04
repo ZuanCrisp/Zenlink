@@ -138,6 +138,14 @@ class WindowApi:
         self._window.show()
         self._window.restore()
         self.visible = True
+        try:  # bring it in front of other windows too
+            import ctypes
+
+            hwnd = self._window.native.Handle.ToInt32()
+            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+        except Exception:  # noqa: BLE001
+            pass
 
     def quit(self) -> None:
         self._window.destroy()

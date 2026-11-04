@@ -16,9 +16,12 @@ from pathlib import Path
 FROZEN = bool(getattr(sys, "frozen", False))
 
 if FROZEN:
-    APP_ROOT = Path(sys.executable).resolve().parent
-    if (APP_ROOT / "portable.txt").exists():
-        DATA_DIR = APP_ROOT
+    EXE_DIR = Path(sys.executable).resolve().parent
+    # Bundled files: next to the exe (folder build) or the one-file build's
+    # temporary unpack folder (sys._MEIPASS); the two are equal in a folder build.
+    APP_ROOT = Path(getattr(sys, "_MEIPASS", EXE_DIR)).resolve()
+    if (EXE_DIR / "portable.txt").exists():
+        DATA_DIR = EXE_DIR
     else:
         DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "ZenLink"
 else:
