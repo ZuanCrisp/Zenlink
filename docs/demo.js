@@ -145,6 +145,11 @@
   let auto = null, step = 0;
   const playStep = () => {
     if (app.classList.contains("studio")) { clearAll(); say("studio"); return; }
+    // After every gesture on one device, the tour moves to the other one.
+    if (step > 0 && step % SEQ.length === 0) {
+      const next = device.classList.contains("tablet") ? "phone" : "tablet";
+      document.querySelector(`[data-dev="${next}"]`).click();
+    }
     const g = SEQ[step++ % SEQ.length];
     document.querySelectorAll("[data-g]").forEach((x) => x.classList.toggle("on", x.dataset.g === g));
     if (g === "volup") run.volume(true); else run[g]();

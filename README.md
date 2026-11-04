@@ -88,8 +88,8 @@ Device shortcuts work in Apple Driver mode while casting.
 
 - **Windows 10 (1809+) or Windows 11, 64-bit**, with Microsoft Edge **WebView2** (built into Windows 11).
 - **Apple Devices** (Microsoft Store) or iTunes, for Apple's USB driver and Apple Mobile Device Service.
-- **iOS 17 or newer** for Apple Driver mode, with **Developer Mode** on: connect the cable, tap **Trust This Computer**, then **Settings → Privacy & Security → Developer Mode → On** and restart. *(If the toggle is missing, opening a screen-mirroring tool once — e.g. 3uTools → Realtime Screen — makes it appear.)*
-- ZenLink Studio (cable or AirPlay) works without Developer Mode. AirPlay needs the PC and the device on the same network; the installer (or the first run of `Start ZenLink.bat`) offers to allow ZenLink through Windows Firewall.
+- **iOS 27 or newer** for Apple Driver mode (Apple's screen service sends no picture on older iOS), with **Developer Mode** on: connect the cable, tap **Trust This Computer**, then **Settings → Privacy & Security → Developer Mode → On** and restart. *(If the toggle is missing, opening a screen-mirroring tool once — e.g. 3uTools → Realtime Screen — makes it appear.)*
+- **iOS 18 to 26:** use ZenLink Studio (cable or AirPlay). ZenLink Studio works without Developer Mode. AirPlay needs the PC and the device on the same network; the installer (or the first run of `Start ZenLink.bat`) offers to allow ZenLink through Windows Firewall.
 
 ### Option 1A: Installer (Recommended)
 1. Download **`ZenLink-vX.Y.Z-Setup.exe`** from [**Releases**](../../releases/latest).
@@ -133,7 +133,7 @@ Switch any time in **Settings → Connection & Drivers**. Changing the driver as
 ```
 ┌──────────────────┐  Apple Driver: RemoteXPC / RSD tunnel (USB or Wi-Fi)   ┌─────────────────────────┐
 │  iPhone / iPad   │ ◄────────────────────────────────────────────────────► │  ZenLink                │
-│  (iOS 17+)       │  Studio: QuickTime over libusb0, or AirPlay (Wi-Fi)    │  • UI on 127.0.0.1 only │
+│  (iOS 27+)       │  Studio: QuickTime over libusb0, or AirPlay (Wi-Fi)    │  • UI on 127.0.0.1 only │
 └──────────────────┘  • HEVC / H.264 video  • PCM sound  • HID touch & keys │  • WebView2 + WebCodecs │
                                                                             └─────────────────────────┘
 ```

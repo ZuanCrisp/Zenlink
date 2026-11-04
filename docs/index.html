@@ -276,7 +276,7 @@
     .traymenu { margin-right: 0; }
   }
 </style>
-<link rel="stylesheet" href="demo.css?v=20261104092828">
+<link rel="stylesheet" href="demo.css?v=20261104123510">
 </head>
 <body>
 
@@ -442,6 +442,7 @@
       <ul>
         <li data-id="Sentuh, keyboard, gesture dan tombol" data-en="Touch, keyboard, gestures and buttons">Sentuh, keyboard, gesture dan tombol</li>
         <li data-id="Tanpa instal driver tambahan" data-en="No extra driver to install">Tanpa instal driver tambahan</li>
+        <li data-id="iOS 27 atau lebih baru" data-en="iOS 27 or newer">iOS 27 atau lebih baru</li>
         <li data-id="Wi-Fi diatur otomatis sekali lewat kabel" data-en="Wi-Fi set up automatically once over the cable">Wi-Fi diatur otomatis sekali lewat kabel</li>
         <li data-id="HEVC, sekitar 4–6 Mbps (batas perangkat)" data-en="HEVC, about 4–6 Mbps (device limit)">HEVC, sekitar 4–6 Mbps (batas perangkat)</li>
       </ul>
@@ -454,6 +455,7 @@
         <li data-id="Resolusi native penuh layar perangkat" data-en="The device screen's full native resolution">Resolusi native penuh layar perangkat</li>
         <li data-id="H.264 bitrate tinggi, hingga ~56 fps" data-en="High-bitrate H.264, up to ~56 fps">H.264 bitrate tinggi, hingga ~56 fps</li>
         <li data-id="Delay sangat rendah" data-en="Very low delay">Delay sangat rendah</li>
+        <li data-id="Juga untuk iOS 18–26" data-en="Also for iOS 18–26">Juga untuk iOS 18–26</li>
         <li class="no" data-id="Gambar dan suara saja" data-en="Picture and sound only">Gambar dan suara saja</li>
       </ul>
     </div>
@@ -465,6 +467,7 @@
         <li data-id="Stream asli perangkat, tanpa encode ulang" data-en="The device's own stream, never re-encoded">Stream asli perangkat, tanpa encode ulang</li>
         <li data-id="Hingga 3108×2160 di iPad, ~16 ms" data-en="Up to 3108×2160 on iPad, ~16 ms">Hingga 3108×2160 di iPad, ~16 ms</li>
         <li data-id="Panduan langsung di layar" data-en="Step-by-step guide on screen">Panduan langsung di layar</li>
+        <li data-id="Juga untuk iOS 18–26" data-en="Also for iOS 18–26">Juga untuk iOS 18–26</li>
         <li class="no" data-id="Gambar dan suara saja" data-en="Picture and sound only">Gambar dan suara saja</li>
       </ul>
     </div>
@@ -650,7 +653,7 @@
     <details class="reveal"><summary data-id="Apakah ZenLink gratis?" data-en="Is ZenLink free?">Apakah ZenLink gratis?</summary>
       <p data-id="Ya. ZenLink gratis dan open source (GPL-3.0). Kalau terbantu, kamu bisa mendukung lewat Sociabuzz." data-en="Yes. ZenLink is free and open source (GPL-3.0). If it helps you, you can support it on Sociabuzz.">Ya. ZenLink gratis dan open source (GPL-3.0). Kalau terbantu, kamu bisa mendukung lewat Sociabuzz.</p></details>
     <details class="reveal"><summary data-id="Perangkat dan versi iOS apa yang didukung?" data-en="Which devices and iOS versions work?">Perangkat dan versi iOS apa yang didukung?</summary>
-      <p data-id="iPhone dan iPad. Mode Apple Driver butuh iOS 17 atau lebih baru dengan Developer Mode, plus Apple Devices atau iTunes di PC. ZenLink Studio (kabel atau AirPlay) tidak butuh Developer Mode." data-en="iPhone and iPad. Apple Driver mode needs iOS 17 or newer with Developer Mode, plus Apple Devices or iTunes on the PC. ZenLink Studio (cable or AirPlay) doesn't need Developer Mode.">iPhone dan iPad. Mode Apple Driver butuh iOS 17 atau lebih baru dengan Developer Mode, plus Apple Devices atau iTunes di PC. ZenLink Studio (kabel atau AirPlay) tidak butuh Developer Mode.</p></details>
+      <p data-id="iPhone dan iPad. Mode Apple Driver (dengan kontrol) butuh iOS 27 atau lebih baru dengan Developer Mode, plus Apple Devices atau iTunes di PC; di iOS lama layanan layar Apple tidak mengirim gambar. Untuk iOS 18 sampai 26, pakai ZenLink Studio lewat kabel atau Wi-Fi (AirPlay), tanpa Developer Mode." data-en="iPhone and iPad. Apple Driver mode (with control) needs iOS 27 or newer with Developer Mode, plus Apple Devices or iTunes on the PC; on older iOS Apple's screen service sends no picture. On iOS 18 to 26, use ZenLink Studio over the cable or Wi-Fi (AirPlay), no Developer Mode needed.">iPhone dan iPad. Mode Apple Driver (dengan kontrol) butuh iOS 27 atau lebih baru dengan Developer Mode, plus Apple Devices atau iTunes di PC; di iOS lama layanan layar Apple tidak mengirim gambar. Untuk iOS 18 sampai 26, pakai ZenLink Studio lewat kabel atau Wi-Fi (AirPlay), tanpa Developer Mode.</p></details>
     <details class="reveal"><summary data-id="ZenLinkStudio tidak muncul di Pencerminan Layar?" data-en="ZenLinkStudio doesn't show up in Screen Mirroring?">ZenLinkStudio tidak muncul di Pencerminan Layar?</summary>
       <p data-id="Pastikan PC dan perangkat ada di Wi-Fi yang sama, lalu izinkan aturan firewall &quot;ZenLink (AirPlay)&quot; saat diminta. Izinnya hanya untuk jaringan lokal dan kamu yang menyetujuinya." data-en="Make sure the PC and the device are on the same Wi-Fi, then allow the &quot;ZenLink (AirPlay)&quot; firewall rule when asked. It only covers your local network and you approve it.">Pastikan PC dan perangkat ada di Wi-Fi yang sama, lalu izinkan aturan firewall "ZenLink (AirPlay)" saat diminta. Izinnya hanya untuk jaringan lokal dan kamu yang menyetujuinya.</p></details>
     <details class="reveal"><summary data-id="Tersambung lewat kabel tapi layar tidak muncul?" data-en="Plugged in but no picture over the cable?">Tersambung lewat kabel tapi layar tidak muncul?</summary>
@@ -789,6 +792,6 @@
   setInterval(() => { if (!document.hidden) load(); }, 5 * 60 * 1000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - loadedAt > 60 * 1000) load(); });
 </script>
-<script src="demo.js?v=20261104092828"></script>
+<script src="demo.js?v=20261104123510"></script>
 </body>
 </html>
