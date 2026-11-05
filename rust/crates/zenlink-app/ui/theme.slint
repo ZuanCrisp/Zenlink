@@ -1,0 +1,37 @@
+// Liquid Glass tokens. Light is the default; Dark is its twin.
+// `glass` (0..1) is the Liquid Glass intensity from Settings: 0 = solid.
+
+export global Theme {
+    in-out property <bool> dark: false;
+    in-out property <float> glass: 1.0;
+
+    out property <color> text: dark ? #f6f6fa : #20212a;
+    out property <color> text-2: dark ? #a5a7b5 : #5f6170;
+    out property <color> text-3: dark ? #8f91a3 : #6b6d7c;
+    out property <color> accent: dark ? #ff73bc : #e8509c;
+    out property <color> btn: dark ? #ff73bc : #f46bac;
+    out property <color> btn-hover: dark ? #ff91cb : #e84f9c;
+    out property <color> btn-text: dark ? #24081a : #ffffff;
+    out property <color> accent-soft: dark ? #ff73bc29 : #f46bac24;
+    // Window fill over the blurred desktop. At glass 0 it is opaque.
+    out property <color> base: dark ? Colors.rgba(16, 17, 22, 1 - 0.62 * glass) : Colors.rgba(245, 246, 250, 1 - 0.74 * glass);
+    out property <color> panel: dark ? Colors.rgba(34, 35, 48, 1 - 0.48 * glass) : Colors.rgba(255, 255, 255, 1 - 0.58 * glass);
+    out property <color> raise: dark ? Colors.rgba(52, 54, 70, 1 - 0.40 * glass) : Colors.rgba(255, 255, 255, 1 - 0.40 * glass);
+    out property <color> hover: dark ? #3a3c4ccc : #ffffffee;
+    out property <color> edge: dark ? #ffffff1f : #ffffffd0;
+    out property <color> line: dark ? #ffffff14 : #20212a17;
+    out property <color> shadow: dark ? #00000066 : #20212a1f;
+    out property <color> ok: #2fc26b;
+    out property <color> warn: #f2a53a;
+    out property <color> bad: #ef5466;
+    out property <length> radius: 14px;
+    out property <string> icons: "Segoe Fluent Icons";
+}
+
+export global I18n {
+    // Indonesian is the default language.
+    in-out property <bool> id: true;
+    public pure function t(id-text: string, en-text: string) -> string {
+        return self.id ? id-text : en-text;
+    }
+}
