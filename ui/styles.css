@@ -810,3 +810,120 @@ body.ctl-docked #btn-controls { color: var(--accent); }
 .chooser-lang .lang-switch { height: 24px; }
 .chooser-lang .lang-switch button { line-height: 24px; }
 .lang-switch.lang-wide button { padding: 0 12px; letter-spacing: .02em; font-family: inherit; font-size: 11.5px; }
+
+/* ======================================================================
+   Liquid Glass (v2.2.3). Same layout as before; only the material changes.
+   Light is the default theme, Dark is its twin. Glass is used on chrome
+   (bars, panels, cards, dialogs). The live video stage stays opaque black:
+   no blur behind or over the picture, so OBS capture and frame pacing
+   cost nothing extra.
+   ====================================================================== */
+:root, [data-theme="light"] {
+  --ink: #f5f6fa;
+  --panel: rgba(255, 255, 255, calc(1 - .38 * var(--glass-k, 1)));
+  --raise: rgba(255, 255, 255, calc(1 - .22 * var(--glass-k, 1)));
+  --hover: rgba(255, 255, 255, .9);
+  --line: rgba(32, 33, 42, .08);
+  --line-2: rgba(32, 33, 42, .13);
+  --text: #20212a;
+  --text-2: #5f6170;
+  --text-3: #8d8f9c;
+  --accent: #e8509c;
+  --accent-2: #d63f8b;
+  --accent-soft: rgba(244, 107, 172, .14);
+  --btn: #f46bac;
+  --btn-text: #ffffff;
+  --btn-hover: #e84f9c;
+  --dot: rgba(244, 107, 172, .22);
+  --dot-hot: #f46bac;
+  --glass-edge: rgba(255, 255, 255, .78);
+  --glass-shine: linear-gradient(180deg, rgba(255,255,255,.65), rgba(255,255,255,0) 42%);
+  --glass-shadow: 0 1px 1px rgba(32,33,42,.04), 0 10px 30px rgba(32,33,42,.08), 0 30px 70px rgba(32,33,42,.08);
+  --glass-blur: blur(calc(30px * var(--glass-k, 1))) saturate(calc(1 + .8 * var(--glass-k, 1)));
+  --backdrop:
+    radial-gradient(900px 600px at 12% -10%, rgba(244,107,172,.20), transparent 60%),
+    radial-gradient(800px 700px at 105% 15%, rgba(150,140,255,.16), transparent 60%),
+    radial-gradient(900px 700px at 50% 120%, rgba(120,200,255,.14), transparent 60%),
+    #f5f6fa;
+  color-scheme: light;
+}
+[data-theme="dark"] {
+  --ink: #101116;
+  --panel: rgba(30, 31, 42, calc(1 - .34 * var(--glass-k, 1)));
+  --raise: rgba(40, 41, 54, calc(1 - .22 * var(--glass-k, 1)));
+  --hover: rgba(58, 60, 76, .8);
+  --line: rgba(255, 255, 255, .07);
+  --line-2: rgba(255, 255, 255, .12);
+  --text: #f6f6fa;
+  --text-2: #a5a7b5;
+  --text-3: #6f7182;
+  --accent: #ff73bc;
+  --accent-2: #ff91cb;
+  --accent-soft: rgba(255, 115, 188, .16);
+  --btn: #ff73bc;
+  --btn-text: #24081a;
+  --btn-hover: #ff91cb;
+  --dot: rgba(255, 115, 188, .2);
+  --dot-hot: #ff73bc;
+  --glass-edge: rgba(255, 255, 255, .10);
+  --glass-shine: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,0) 40%);
+  --glass-shadow: 0 1px 1px rgba(0,0,0,.25), 0 12px 32px rgba(0,0,0,.35), 0 30px 80px rgba(0,0,0,.35);
+  --backdrop:
+    radial-gradient(900px 600px at 10% -10%, rgba(255,115,188,.16), transparent 60%),
+    radial-gradient(800px 700px at 105% 20%, rgba(120,110,255,.12), transparent 60%),
+    radial-gradient(900px 700px at 50% 120%, rgba(60,120,200,.10), transparent 60%),
+    #101116;
+  color-scheme: dark;
+}
+
+body { background: var(--backdrop); background-attachment: fixed; }
+.stage { background: transparent; }
+.stage.live { background: #000; }
+
+/* glass surfaces */
+.topbar, .controls, .settings, .ctl-panel, .ctl-panel.docked, .connect-card, .chooser-card,
+.busy-card, .toast, .device-chip {
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border-color: var(--glass-edge);
+}
+.connect-card, .chooser-card, .busy-card, .toast, .ctl-panel:not(.docked), .settings {
+  background-image: var(--glass-shine); background-color: var(--panel);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-edge);
+}
+.topbar { border-bottom-color: var(--line); box-shadow: inset 0 -1px 0 var(--glass-edge); }
+.controls { border-top-color: var(--line); box-shadow: inset 0 1px 0 var(--glass-edge); }
+.connect-card, .chooser-card { border-radius: 22px; }
+.busy-card { border-radius: 22px; }
+.toast { border-radius: 16px; }
+.ctl-panel:not(.docked) { border-radius: 20px; }
+.settings { border-left-color: var(--glass-edge); }
+.chooser, .busy { background: color-mix(in srgb, var(--ink) 45%, transparent); -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%); }
+
+/* controls: softer, rounder, glassy */
+.btn, .icon-btn, .ctl { border-radius: 12px; transition: background-color .18s var(--ease), border-color .18s var(--ease), transform .18s var(--spring), box-shadow .18s var(--ease); }
+.btn:active, .icon-btn:active, .ctl:active { transform: scale(.97); }
+.btn.ghost-btn, .ctl { background: var(--raise); border-color: var(--line-2); }
+.btn.ghost-btn:hover, .ctl:hover, .icon-btn:hover { background: var(--hover); }
+.btn.primary, .btn:not(.ghost-btn).accent { box-shadow: 0 6px 18px color-mix(in srgb, var(--btn) 35%, transparent), inset 0 1px 0 rgba(255,255,255,.35); }
+.seg { background: color-mix(in srgb, var(--text) 5%, transparent); border-color: var(--line); border-radius: 12px; }
+.seg button[aria-pressed="true"] { background: var(--raise); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 0 0 1px var(--glass-edge); border-radius: 9px; }
+.mode-card { background: var(--raise) !important; border-color: var(--line-2) !important; border-radius: 18px !important; }
+.mode-card.selected, .mode-card[aria-checked="true"] {
+  background: linear-gradient(160deg, var(--accent-soft), var(--raise)) !important; border-color: var(--accent) !important;
+  box-shadow: 0 0 0 1px var(--accent), 0 14px 40px color-mix(in srgb, var(--accent) 22%, transparent) !important;
+}
+.diag, .airplay-guide li { background: color-mix(in srgb, var(--text) 4%, transparent); border-color: var(--line); }
+.wordmark { background: linear-gradient(90deg, var(--text) 35%, var(--accent)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+/* Settings > Liquid Glass at 0%: solid surfaces, no blur work for the GPU. */
+[data-glass="off"] { --glass-shine: none; }
+[data-glass="off"] :is(.topbar, .controls, .settings, .ctl-panel, .connect-card, .chooser-card, .busy-card, .toast, .device-chip, .chooser, .busy) {
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .topbar, .controls, .settings, .ctl-panel, .connect-card, .chooser-card, .busy-card, .toast, .device-chip {
+    -webkit-backdrop-filter: none; backdrop-filter: none; background-color: var(--ink);
+  }
+}

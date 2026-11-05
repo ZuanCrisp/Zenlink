@@ -352,6 +352,8 @@ const ID = {
   "Theme": "Tema",
   "Dark": "Gelap",
   "Light": "Terang",
+  "System": "Sistem",
+  "How see-through the bars and panels are. 0% turns the glass off.": "Seberapa tembus pandang bar dan panel. 0% mematikan efek kaca.",
   "Language": "Bahasa",
   "Shortcuts": "Pintasan",
   "Leave full screen / close a panel": "Keluar layar penuh / tutup panel",

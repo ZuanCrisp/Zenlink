@@ -61,7 +61,7 @@ class CastPlayer {
     const d = this._diag, secs = (now - this._diagAt) / 1000;
     const body = {
       codec: this.codecName, decodedFps: +(d.decoded / secs).toFixed(1), paintedFps: +(d.painted / secs).toFixed(1),
-      decodeErrors: d.errors, rebuilds: d.rebuilds, maxDecodeQueue: d.maxQueue,
+      decodeErrors: d.errors, rebuilds: d.rebuilds, maxDecodeQueue: d.maxQueue, coalesced: d.coalesced || 0,
       latencyMs: d.latN ? Math.round(d.lat / d.latN) : null, lastError: d.lastError,
       audioMs: this.audio ? Math.round(this._audioLat || 0) : null, audio: this._audioParts || null,
       hardware: this._hw, renderer: this.videoMode ? "video" : this.gl ? "webgl2" : "canvas2d",
@@ -362,6 +362,7 @@ class CastPlayer {
   }
 
   _closeVideoOutput() {
+    this._dropDue();
     this.videoMode = false;
     const writer = this._writer;
     this._writer = null;
@@ -425,9 +426,7 @@ class CastPlayer {
       keep.close();
     } else {
       const delay = this.lipSync && (this.audio || this.nativeAudio) && this._audioLat > 0 ? Math.min(250, this._audioLat) : 0;
-      const writer = this._writer;
-      if (delay >= 4) setTimeout(() => { if (this._writer === writer) writer.write(keep).catch(() => {}); else keep.close(); }, delay);
-      else writer.write(keep).catch(() => {});
+      this._schedule(keep, performance.now() + delay);
     }
     if (out !== frame) frame.close();
     if (fixed && fixed !== out) fixed.close();
@@ -449,6 +448,51 @@ class CastPlayer {
       });
       this._resetStats(now);
     }
+  }
+
+  // Frames reach the <video> track on the display's refresh (requestAnimationFrame),
+  // not whenever the decoder or a lip-sync timer happens to fire. Writes that
+  // land at random points between refreshes make the picture look smooth in
+  // ZenLink's own window but uneven in OBS, which samples the composed desktop
+  // on its own clock. When two frames fall due within one refresh only the
+  // newer one is shown (the older could never have been seen anyway).
+  // A timer backs rAF up, because Chromium pauses rAF for windows it considers
+  // hidden (for example fully covered) while OBS may still be capturing them.
+  _schedule(frame, at) {
+    const q = this._due || (this._due = []);
+    q.push({ frame, at, writer: this._writer });
+    while (q.length > 6) { try { q.shift().frame.close(); } catch (_) {} }
+    if (!this._dueRaf) this._dueRaf = requestAnimationFrame(() => this._flushDue("raf"));
+    if (!this._dueTimer) this._dueTimer = setTimeout(() => this._flushDue("timer"), 34);
+  }
+
+  _flushDue(source) {
+    if (source === "raf") this._dueRaf = 0;
+    else this._dueTimer = 0;
+    const q = this._due || [];
+    const t = performance.now();
+    let ready = null;
+    while (q.length && q[0].at <= t + 4) {
+      if (ready) { try { ready.frame.close(); } catch (_) {} this._diag.coalesced = (this._diag.coalesced || 0) + 1; }
+      ready = q.shift();
+    }
+    if (ready) {
+      if (this._writer === ready.writer && this._writer) ready.writer.write(ready.frame).catch(() => {});
+      else { try { ready.frame.close(); } catch (_) {} }
+    }
+    if (q.length) {
+      if (!this._dueRaf) this._dueRaf = requestAnimationFrame(() => this._flushDue("raf"));
+      if (!this._dueTimer) this._dueTimer = setTimeout(() => this._flushDue("timer"), 34);
+    } else if (this._dueTimer && source === "raf") {
+      clearTimeout(this._dueTimer); this._dueTimer = 0;
+    }
+  }
+
+  _dropDue() {
+    for (const d of this._due || []) { try { d.frame.close(); } catch (_) {} }
+    this._due = [];
+    if (this._dueRaf) { cancelAnimationFrame(this._dueRaf); this._dueRaf = 0; }
+    if (this._dueTimer) { clearTimeout(this._dueTimer); this._dueTimer = 0; }
   }
 
   // Newest frame wins; paint once per display refresh.

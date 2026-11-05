@@ -16,7 +16,10 @@ from zenlink.window import WindowApi
 # Hardware video decode and sound without a click first.
 os.environ.setdefault(
     "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    "--enable-features=PlatformHEVCDecoderSupport --autoplay-policy=no-user-gesture-required",
+    # No DirectComposition video overlay: an overlay plane looks smooth on screen
+    # but reaches DWM-based capture (OBS Window/Display Capture) unevenly.
+    "--enable-features=PlatformHEVCDecoderSupport --autoplay-policy=no-user-gesture-required"
+    " --disable-direct-composition-video-overlays",
 )
 
 
@@ -31,6 +34,26 @@ def _dark_title_bar(window) -> None:
     except Exception:
         pass
 
+
+
+def _wait_for_parent() -> None:
+    """Headless backend: run until the process given by --parent-pid exits
+    (the native ZenLink app), or forever when there is none."""
+    pid = None
+    if "--parent-pid" in sys.argv:
+        try:
+            pid = int(sys.argv[sys.argv.index("--parent-pid") + 1])
+        except (IndexError, ValueError):
+            pid = None
+    if not pid:
+        threading.Event().wait()
+        return
+    synchronize, infinite = 0x00100000, 0xFFFFFFFF
+    handle = ctypes.windll.kernel32.OpenProcess(synchronize, False, pid)
+    if not handle:
+        return
+    ctypes.windll.kernel32.WaitForSingleObject(handle, infinite)
+    ctypes.windll.kernel32.CloseHandle(handle)
 
 ICON = APP_ROOT / "assets" / "zenlink.ico"
 
@@ -113,8 +136,10 @@ def main() -> None:
 
     if "--headless" in sys.argv:
         if sys.stdout:
-            print(f"ZenLink running at http://{HOST}:{PORT}/")
-        threading.Event().wait()
+            print(f"ZenLink running at http://{HOST}:{PORT}/", flush=True)
+        _wait_for_parent()
+        manager.stop()
+        return
 
     import webview
 
@@ -130,7 +155,7 @@ def main() -> None:
         min_size=(640, 420),
         frameless=True,
         easy_drag=False,
-        background_color="#070708",
+        background_color="#f5f6fa",
     )
     api.bind(window)
     restart_requested = threading.Event()

@@ -969,7 +969,7 @@ els.stage.addEventListener("dblclick", () => {
 const DEFAULTS = {
   quality: "best", touch: true, keyboard: true, gestures: true, scrollSpeed: "100",
   fit: "contain", fitWindow: true, smoothing: "smooth", rotation: "auto", stats: false, dots: true,
-  audioOut: "pc", volume: 100, audioBuffer: "low", lipSync: true, closeToTray: false, ctlMode: "always", autoStart: false, onTop: false, theme: "dark",
+  audioOut: "pc", volume: 100, audioBuffer: "low", lipSync: true, closeToTray: false, ctlMode: "always", autoStart: false, onTop: false, theme: "light", glass: 100,
 };
 // The stats bar is a debugging aid now: hidden unless turned on again.
 if (prefs.get("statsV2", null) === null) { prefs.set("stats", false); prefs.set("statsV2", true); }
@@ -1021,6 +1021,12 @@ function applySetting(key, value) {
     case "ctlMode": syncControls(); break;
     case "closeToTray": window.pywebview?.api?.set_close_to_tray?.(Boolean(value)); break;
     case "theme": applyTheme(value); break;
+    case "glass": {
+      const k = Math.max(0, Math.min(100, Number(value) || 0)) / 100;
+      document.documentElement.style.setProperty("--glass-k", String(k));
+      document.documentElement.dataset.glass = k > 0 ? "on" : "off";
+      break;
+    }
   }
   syncSettingsControls();
 }
@@ -1358,15 +1364,18 @@ document.addEventListener("keydown", (e) => {
 
 // ---------------------------------------------------------------- theme
 
+// "system" follows the Windows app theme and keeps following it while the app is open.
+const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 function applyTheme(theme) {
   // Switch without transitions, or controls keep the old theme's fill.
   document.documentElement.classList.add("theme-switching");
-  document.documentElement.dataset.theme = theme;
+  document.documentElement.dataset.theme = theme === "system" ? (systemDark.matches ? "dark" : "light") : theme;
   requestAnimationFrame(() =>
     requestAnimationFrame(() => document.documentElement.classList.remove("theme-switching"))
   );
   prefs.set("theme", theme);
 }
+systemDark.addEventListener("change", () => { if (settings.theme === "system") applyTheme("system"); });
 els.themeBtn.addEventListener("click", () =>
   applySetting("theme", document.documentElement.dataset.theme === "dark" ? "light" : "dark")
 );

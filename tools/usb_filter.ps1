@@ -363,12 +363,25 @@ ServiceBinary = %12%\libusb0.sys
             -CertStoreLocation "Cert:\LocalMachine\My" -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
             -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(20)
         try {
-            $signed = Set-AuthenticodeSignature -FilePath $catPath -Certificate $cert -HashAlgorithm SHA256
-            if ($signed.Status -eq "UnknownError" -or -not $signed.SignerCertificate) { throw "Signing the driver catalog failed: $($signed.StatusMessage)" }
+            # Trust the public certificate BEFORE signing. Set-AuthenticodeSignature
+            # checks the chain as soon as it has signed, and with an untrusted
+            # self-signed root it reports Status "UnknownError" ("A certificate
+            # chain processed, but terminated in a root certificate which is not
+            # trusted by the trust provider") although the catalog was signed.
+            # v2.2.2 and older treated that as a failed signature.
             $cer = Join-Path $pkg "$name.cer"
             Export-Certificate -Cert $cert -FilePath $cer | Out-Null
             Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\Root" | Out-Null
             Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\TrustedPublisher" | Out-Null
+            $signed = Set-AuthenticodeSignature -FilePath $catPath -Certificate $cert -HashAlgorithm SHA256
+            if (-not $signed.SignerCertificate -or $signed.SignerCertificate.Thumbprint -ne $cert.Thumbprint) {
+                throw "Signing the driver catalog failed: $($signed.StatusMessage)"
+            }
+            # Verify from disk, the way Windows will check it when installing.
+            $check = Get-AuthenticodeSignature -FilePath $catPath
+            if ($check.Status -ne "Valid") {
+                throw "The signed driver catalog does not verify ($($check.Status)): $($check.StatusMessage)"
+            }
         } catch {
             # Nothing of a failed attempt stays trusted or on disk.
             Remove-ZenLinkCert $cert.Thumbprint
