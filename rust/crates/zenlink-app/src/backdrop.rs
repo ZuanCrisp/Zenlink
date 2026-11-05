@@ -58,11 +58,18 @@ fn set_accent(hwnd: HWND, state: u32, tint: u32) -> bool {
 }
 
 /// Apply `mode` to `hwnd`. `dark` picks the dark title bar and tint.
-pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool) -> bool {
+/// `glass` (0..1): 1 = clear Liquid Glass (desktop shows through, lightly
+/// blurred), lower = more frosted tint.
+pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, glass: f32) -> bool {
     unsafe {
         let d = BOOL::from(dark);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &d as *const _ as _, 4);
-        let margins = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
+        // Rounded corners like Windows 11 / macOS windows (no system frame).
+        let corner: u32 = 2; // DWMWCP_ROUND
+        let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE, &corner as *const _ as _, 4);
+        // No frame extension: on a frameless window DWM would paint ghost
+        // caption buttons into the extended area. The blur needs none.
+        let margins = MARGINS::default();
         let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
         let set_backdrop = |t: DWM_SYSTEMBACKDROP_TYPE| {
             DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, &t as *const _ as _, 4).is_ok()
@@ -79,8 +86,24 @@ pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool) -> bool {
             Backdrop::Accent => {
                 set_backdrop(DWMSBT_NONE);
                 // ACCENT_ENABLE_ACRYLICBLURBEHIND = 4, light/dark tint with low alpha.
-                let tint = if dark { 0x30_16_11_10 } else { 0x28_fa_f6_f5 };
-                set_accent(hwnd, 4, tint)
+                // Tint alpha follows the glass level: ~0 at 100% gives clear
+                // glass (measured: background stripes stay visible), up to
+                // a frosted 0xB0 near 0%. Colour is AABBGGRR.
+                let a = (((1.0 - glass.clamp(0.0, 1.0)) * 0xB0 as f32) as u32).max(1);
+                // The tint colour also drives Acrylic's luminosity layer: a
+                // white tint turns the glass milky even at alpha 1. Neutral
+                // grey keeps it clear (measured 6x more background through);
+                // the theme colour comes in as the glass level drops.
+                let g = glass.clamp(0.0, 1.0);
+                let mix = |c: u32, n: u32| -> u32 {
+                    let ch = |sh: u32| {
+                        let (a, b) = (((c >> sh) & 0xff) as f32, ((n >> sh) & 0xff) as f32);
+                        ((a + (b - a) * g) as u32) << sh
+                    };
+                    ch(0) | ch(8) | ch(16)
+                };
+                let rgb = mix(if dark { 0x16_11_10 } else { 0xfa_f6_f5 }, 0x80_80_80);
+                set_accent(hwnd, 4, (a << 24) | rgb)
             }
         }
     }

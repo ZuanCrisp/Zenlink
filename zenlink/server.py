@@ -32,7 +32,7 @@ OCR_KEY: web.AppKey["OcrSession"] = web.AppKey("ocr")
 log = logging.getLogger(__name__)
 
 HOST = "127.0.0.1"
-PORT = 47321
+PORT = int(os.environ.get("ZENLINK_PORT") or 47321)  # same override as the Rust app
 UPSTREAM = f"http://{session.STREAM_HOST}:{session.STREAM_PORT}"
 _HOP = {"connection", "keep-alive", "transfer-encoding", "content-length", "content-encoding"}
 

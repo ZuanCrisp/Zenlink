@@ -4,7 +4,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme, I18n } from "theme.slint";
-import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip } from "widgets.slint";
+import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip, Tip } from "widgets.slint";
 
 export { Theme, I18n }
 
@@ -30,7 +30,55 @@ export struct Prefs {
     dots: bool,             // animated dot background
 }
 
-component TopBar inherits Glass {
+// Window controls, Windows order (min, max, close) on the right, drawn as
+// coloured dots with the Windows glyph always visible inside.
+component TrafficLights inherits HorizontalLayout {
+    callback act(string);
+    in property <bool> maximized;
+    spacing: 8px;
+    alignment: center;
+    for b in [
+        { id: "min", c: #febc2e, g: "\u{E921}" },
+        { id: "max", c: #28c840, g: "\u{E922}" },
+        { id: "close", c: #ff5f57, g: "\u{E8BB}" },
+    ]: Rectangle {
+        width: 16px;
+        height: 16px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 8px;
+        background: ta.pressed ? b.c.darker(25%) : ta.has-hover ? b.c.brighter(10%) : b.c;
+        border-width: 0.5px;
+        border-color: #00000030;
+        Text {
+            text: b.id == "max" && root.maximized ? "\u{E923}" : b.g;
+            font-family: Theme.icons;
+            font-size: 8px;
+            color: #000000a0;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { Tip.shown = false; root.act(b.id); }
+            changed has-hover => {
+                if self.has-hover {
+                    Tip.text = b.id == "min" ? I18n.t("Kecilkan", "Minimise") : b.id == "close" ? I18n.t("Tutup", "Close")
+                        : root.maximized ? I18n.t("Pulihkan", "Restore") : I18n.t("Perbesar", "Maximise");
+                    Tip.x = self.absolute-position.x + self.width / 2;
+                    Tip.top = self.absolute-position.y;
+                    Tip.bottom = self.absolute-position.y + self.height;
+                    Tip.shown = true;
+                } else {
+                    Tip.shown = false;
+                }
+            }
+        }
+    }
+}
+
+// The window's own header: no card of its own, it is the top of the glass
+// window (no header-inside-a-header).
+component TopBar inherits Rectangle {
     in property <string> device;
     in property <string> phase;
     in property <string> link;
@@ -44,48 +92,80 @@ component TopBar inherits Glass {
     callback mute();
     callback rotate();
     callback fit-next();
+    callback window-action(string);
     in property <string> fit;
     in property <bool> compact;
+    in property <bool> maximized;
     property <bool> live: phase == "streaming";
     property <bool> busy: phase == "connecting" || phase == "activating";
     height: 46px;
-    border-radius: 16px;
+    // Empty header space moves the window; double-click maximises.
+    TouchArea {
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                root.window-action("drag");
+            }
+        }
+    }
     HorizontalLayout {
         padding-left: 12px;
-        padding-right: 7px;
+        padding-right: 12px;
+        padding-top: 7px;
+        padding-bottom: 7px;
         spacing: 6px;
         alignment: stretch;
-        Image {
-            source: @image-url("../../../../ui/logo-256.png");
-            width: 22px;
-            height: 22px;
-            y: (parent.height - self.height) / 2;
+        // App identity: always visible, the wordmark only when there is room.
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: @image-url("../../../../ui/logo-256.png");
+                width: 24px;
+                height: 24px;
+            }
         }
-        if !compact: Text {
+        Text {
             text: "ZenLink";
             font-size: 14px;
             font-weight: 700;
             color: Theme.text;
             vertical-alignment: center;
         }
-        Rectangle {
-            width: pillT.preferred-width + 14px;
-            height: 22px;
-            y: (parent.height - self.height) / 2;
-            border-radius: 6px;
-            background: live ? Theme.accent-soft : Theme.dark ? #ffffff10 : #20212a0d;
+        // Status: a dot when narrow (name in its tooltip), a pill otherwise.
+        if compact: VerticalLayout {
+          alignment: center;
+          Rectangle {
+            width: 10px;
+            height: 10px;
+            border-radius: 5px;
+            background: live ? Theme.accent : busy ? #f59e0b : #22c55e;
+            border-width: 2px;
+            border-color: Theme.dark ? #ffffff33 : #ffffffcc;
+          }
+        }
+        if !compact: VerticalLayout {
+          alignment: center;
+          Rectangle {
+            width: pillT.preferred-width + 16px;
+            height: 24px;
+            border-radius: 12px;
+            background: live ? Theme.accent-soft : Theme.raise;
+            border-width: 1px;
+            border-color: Theme.line;
             pillT := Text {
                 text: live ? I18n.t("Mirroring", "Mirroring") : busy ? I18n.t("Menyambung…", "Connecting…") : I18n.t("Siap", "Ready");
                 font-size: 11px;
                 font-weight: 600;
                 color: live ? Theme.accent : Theme.text-2;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
+          }
         }
         VerticalLayout {
             alignment: center;
             horizontal-stretch: 1;
             min-width: 0px;
-            Text {
+            if !compact: Text {
                 text: device == "" ? I18n.t("Belum ada perangkat", "No device") : device + (link == "" ? "" : "  ·  " + link);
                 font-size: 11.5px;
                 color: Theme.text-2;
@@ -97,6 +177,7 @@ component TopBar inherits Glass {
             y: (parent.height - self.height) / 2;
             icon: "\u{E72C}";
             label: compact ? "" : I18n.t("Mulai ulang", "Restart");
+            tip: I18n.t("Mulai ulang koneksi", "Restart the connection");
             clicked => { root.restart(); }
         }
         if !live && !busy: GlassButton {
@@ -104,17 +185,20 @@ component TopBar inherits Glass {
             primary: true;
             icon: "\u{E768}";
             label: compact ? "" : I18n.t("Mulai", "Start");
+            tip: I18n.t("Mulai mirroring", "Start mirroring");
             clicked => { root.start(); }
         }
         if live || busy: GlassButton {
             y: (parent.height - self.height) / 2;
             icon: "\u{E71A}";
             label: compact ? "" : "Stop";
+            tip: I18n.t("Hentikan mirroring", "Stop mirroring");
             clicked => { root.stop(); }
         }
         GlassButton {
             y: (parent.height - self.height) / 2;
             icon: muted ? "\u{E74F}" : "\u{E767}";
+            tip: muted ? I18n.t("Suara mati — klik untuk nyalakan", "Sound off — click to turn on") : I18n.t("Suara di PC — klik untuk bisukan", "Sound on PC — click to mute");
             active: !muted;
             clicked => { root.mute(); }
         }
@@ -122,10 +206,12 @@ component TopBar inherits Glass {
             y: (parent.height - self.height) / 2;
             icon: "\u{E7AD}";
             clicked => { root.rotate(); }
+            tip: I18n.t("Putar tampilan", "Rotate view");
         }
         if !compact: GlassButton {
             y: (parent.height - self.height) / 2;
             label: fit == "contain" ? "AUTO" : fit == "cover" ? "EDGE" : "FILL";
+            tip: I18n.t("Mode tampilan: Auto-Fit / Tepi-ke-tepi / Regang", "View mode: Auto-fit / Edge to edge / Stretch");
             active: true;
             clicked => { root.fit-next(); }
         }
@@ -133,33 +219,53 @@ component TopBar inherits Glass {
             y: (parent.height - self.height) / 2;
             icon: "\u{E713}";
             active: settings-open;
+            tip: I18n.t("Pengaturan", "Settings");
             clicked => { root.settings(); }
+        }
+        Rectangle {
+            width: 1px;
+            background: Theme.dark ? #ffffff1f : #0000001a;
+        }
+        Rectangle { width: 2px; }
+        TrafficLights {
+            maximized: root.maximized;
+            act(a) => { root.window-action(a); }
         }
     }
 }
 
-component BottomBar inherits Glass {
+// ZenLink dock: a floating glass capsule centred under the picture,
+// only as wide as its buttons (scrolls when the window is narrower).
+component BottomBar inherits Rectangle {
     callback action(string);
     in property <bool> compact;
     height: 46px;
-    border-radius: 16px;
-    fl := Flickable {
-        content-width: max(self.width, row.min-width);
-        interactive: row.min-width > self.width;
-    row := HorizontalLayout {
-        width: fl.content-width;
+    dock := Glass {
+        width: min(root.width, row.min-width);
+        x: (root.width - self.width) / 2;
         height: root.height;
-        padding: 8px;
-        spacing: 6px;
-        alignment: center;
-        Chip { icon: "\u{E76B}"; label: compact ? "" : I18n.t("Geser kiri", "Swipe left"); clicked => { root.action("swipe-left"); } }
-        Chip { icon: "\u{E80F}"; label: compact ? "" : "Home"; clicked => { root.action("home"); } }
-        Chip { icon: "\u{E8A9}"; label: compact ? "" : I18n.t("Terbaru", "Recent"); clicked => { root.action("switcher"); } }
-        Chip { icon: "\u{E76C}"; label: compact ? "" : I18n.t("Geser kanan", "Swipe right"); clicked => { root.action("swipe-right"); } }
-        Chip { icon: "\u{E9E9}"; label: compact ? "" : I18n.t("Kontrol", "Control"); clicked => { root.action("control-center"); } }
-        Chip { icon: "\u{EA8F}"; label: compact ? "" : I18n.t("Notifikasi", "Alerts"); clicked => { root.action("notifications"); } }
-        Chip { icon: "\u{E72E}"; label: compact ? "" : I18n.t("Kunci", "Lock"); clicked => { root.action("lock"); } }
-    }
+        border-radius: self.height / 2;
+        fl := Flickable {
+            content-width: max(self.width, row.min-width);
+            interactive: row.min-width > self.width;
+            row := HorizontalLayout {
+                width: fl.content-width;
+                height: dock.height;
+                padding: 7px;
+                padding-left: 9px;
+                padding-right: 9px;
+                spacing: 6px;
+                alignment: center;
+                Chip { icon: "\u{E76B}"; tip: I18n.t("Geser ke kiri (kembali)", "Swipe left (back)"); label: compact ? "" : I18n.t("Geser kiri", "Swipe left"); clicked => { root.action("swipe-left"); } }
+                Chip { icon: "\u{E80F}"; tip: I18n.t("Layar Utama", "Home screen"); label: compact ? "" : "Home"; clicked => { root.action("home"); } }
+                Chip { icon: "\u{E8A9}"; tip: I18n.t("App terbaru", "Recent apps"); label: compact ? "" : I18n.t("Terbaru", "Recent"); clicked => { root.action("switcher"); } }
+                Chip { icon: "\u{E76C}"; tip: I18n.t("Geser ke kanan", "Swipe right"); label: compact ? "" : I18n.t("Geser kanan", "Swipe right"); clicked => { root.action("swipe-right"); } }
+                Rectangle { width: 1px; background: Theme.dark ? #ffffff1f : #0000001a; }
+                Chip { icon: "\u{E9E9}"; tip: I18n.t("Pusat Kontrol", "Control Center"); label: compact ? "" : I18n.t("Kontrol", "Control"); clicked => { root.action("control-center"); } }
+                Chip { icon: "\u{EA8F}"; tip: I18n.t("Notifikasi", "Notifications"); label: compact ? "" : I18n.t("Notifikasi", "Alerts"); clicked => { root.action("notifications"); } }
+                Chip { icon: "\u{E72E}"; tip: I18n.t("Kunci layar", "Lock screen"); label: compact ? "" : I18n.t("Kunci", "Lock"); clicked => { root.action("lock"); } }
+            }
+        }
     }
 }
 
@@ -219,7 +325,14 @@ component SettingsPanel inherits Glass {
         HorizontalLayout {
             padding: 12px;
             padding-bottom: 4px;
-            Text { text: I18n.t("Pengaturan & Kontrol", "Settings & Controls"); font-size: 14px; font-weight: 700; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+            spacing: 10px;
+            Image { source: @image-url("../../../../ui/logo-256.png"); width: 30px; height: 30px; }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text { text: "ZenLink"; font-size: 15px; font-weight: 800; color: Theme.text; }
+                Text { text: I18n.t("Pengaturan & kontrol", "Settings & controls"); font-size: 11px; color: Theme.accent; font-weight: 600; }
+            }
             GlassButton { icon: "\u{E711}"; clicked => { root.close(); } }
         }
         ScrollView {
@@ -230,7 +343,10 @@ component SettingsPanel inherits Glass {
                 spacing: 10px;
 
                 Card {
-                    title: I18n.t("TAMPILAN", "APPEARANCE");
+                    title: I18n.t("Tampilan", "Appearance");
+                    icon: "\u{E790}";
+                    tint-a: #f472b6;
+                    tint-b: #db2777;
                     info: I18n.t("Liquid Glass memakai blur asli Windows di belakang jendela (bukan gambar palsu). 0% mematikan kaca: jendela jadi solid dan GPU tidak mengerjakan blur.",
                         "Liquid Glass uses Windows' own blur behind the window (not a painted fake). 0% turns the glass off: the window is solid and the GPU does no blur work.");
                     Seg {
@@ -265,7 +381,10 @@ component SettingsPanel inherits Glass {
                 }
 
                 Card {
-                    title: I18n.t("LAYAR & RASIO", "DISPLAY FIT & ASPECT");
+                    title: I18n.t("Layar & rasio", "Display & aspect");
+                    icon: "\u{E7F4}";
+                    tint-a: #a78bfa;
+                    tint-b: #7c3aed;
                     info: I18n.t("Auto-Fit menampilkan seluruh layar perangkat. Tepi-ke-tepi mengisi area dan memotong pinggir. Jendela otomatis mengikuti ukuran dan orientasi (potret/lanskap) perangkat.",
                         "Auto-Fit shows the whole device screen. Edge-to-Edge fills the area and crops the sides. The window follows the device's size and orientation (portrait / landscape).");
                     Seg {
@@ -288,8 +407,90 @@ component SettingsPanel inherits Glass {
                     }
                 }
 
+
                 Card {
-                    title: I18n.t("POTONG TEPI (HALUS)", "EDGE CROP (FINE TUNING)");
+                    title: I18n.t("Audio perangkat → PC", "Device audio → PC");
+                    icon: "\u{E767}";
+                    tint-a: #fb923c;
+                    tint-b: #ea580c;
+                    info: I18n.t("Suara diputar lewat WASAPI di PC ini. Lip sync menahan gambar sedikit supaya pas dengan suara. Buffer rendah = lebih rapat, tinggi = lebih tahan gangguan.",
+                        "Sound plays through WASAPI on this PC. Lip sync holds the picture a little so it matches the sound. Low buffer is tighter, high rides out hiccups.");
+                    Seg {
+                        options: ["pc", "device"];
+                        labels: [I18n.t("Di PC ini", "On this PC"), I18n.t("Hanya perangkat", "Device only")];
+                        value: prefs.audio-out;
+                        changed(v) => { root.prefs.audio-out = v; root.changed(root.prefs); }
+                    }
+                    Row {
+                        label: I18n.t("Volume PC", "PC volume");
+                        Text { text: round(prefs.volume) + "%"; font-size: 12px; color: Theme.text-2; vertical-alignment: center; }
+                    }
+                    GlassSlider { value: prefs.volume; changed(v) => { root.prefs.volume = v; root.changed(root.prefs); } }
+                    Row {
+                        label: "Lip sync";
+                        Toggle { checked: prefs.lip-sync; toggled(v) => { root.prefs.lip-sync = v; root.changed(root.prefs); } }
+                    }
+                    Seg {
+                        options: ["low", "normal", "high"];
+                        labels: [I18n.t("Rendah", "Low"), "Normal", I18n.t("Tinggi", "High")];
+                        value: prefs.audio-buffer;
+                        changed(v) => { root.prefs.audio-buffer = v; root.changed(root.prefs); }
+                    }
+                }
+
+                Card {
+                    title: I18n.t("Kontrol & pintasan", "Control & shortcuts");
+                    icon: "\u{E765}";
+                    tint-a: #38bdf8;
+                    tint-b: #0284c7;
+                    info: I18n.t("Klik dan seret = sentuh. Tombol Back mouse = kembali. Alt+U buka kunci, Alt+L kunci, Alt+V tempel, Alt+C salin teks layar, Alt+D redup, Alt+H putar.",
+                        "Click and drag = touch. Mouse Back button = back. Alt+U unlock, Alt+L lock, Alt+V paste, Alt+C copy screen text, Alt+D dim, Alt+H rotate.");
+                    Row { label: I18n.t("Sentuh dengan mouse", "Touch with the mouse"); Toggle { checked: prefs.touch; toggled(v) => { root.prefs.touch = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("Keyboard PC", "PC keyboard"); Toggle { checked: prefs.keyboard; toggled(v) => { root.prefs.keyboard = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("Gestur", "Gestures"); Toggle { checked: prefs.gestures; toggled(v) => { root.prefs.gestures = v; root.changed(root.prefs); } } }
+                }
+
+                Card {
+                    title: I18n.t("Koneksi & driver", "Connection & driver");
+                    icon: "\u{E88E}";
+                    tint-a: #34d399;
+                    tint-b: #059669;
+                    info: I18n.t("Apple Driver memakai driver bawaan Apple. ZenLink Studio memakai libusb0 untuk bitrate tinggi. Perubahan driver selalu minta konfirmasi dan izin administrator.",
+                        "Apple Driver uses Apple's own driver. ZenLink Studio uses libusb0 for high bitrate. Driver changes always ask for confirmation and administrator approval.");
+                    Text { text: connection; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
+                    Text { text: driver-text; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        GlassButton { label: I18n.t("Periksa driver", "Check drivers"); clicked => { root.driver-action("refresh"); } }
+                        GlassButton { label: I18n.t("Atur Wi-Fi", "Set up Wi-Fi"); clicked => { root.driver-action("wifi"); } }
+                    }
+                }
+
+                Card {
+                    title: I18n.t("Lanjutan", "Advanced");
+                    icon: "\u{E713}";
+                    tint-a: #a1a1aa;
+                    tint-b: #52525b;
+                    Row { label: I18n.t("Mulai otomatis saat dicolok", "Start when plugged in"); Toggle { checked: prefs.auto-start; toggled(v) => { root.prefs.auto-start = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("Tutup ke tray", "Close to the tray"); Toggle { checked: prefs.close-to-tray; toggled(v) => { root.prefs.close-to-tray = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("Selalu di atas", "Always on top"); Toggle { checked: prefs.on-top; toggled(v) => { root.prefs.on-top = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("Statistik di header", "Stats in the header"); Toggle { checked: prefs.stats; toggled(v) => { root.prefs.stats = v; root.changed(root.prefs); } } }
+                }
+
+                Card {
+                    title: I18n.t("Statistik (terukur)", "Stats (measured)");
+                    icon: "\u{E9D9}";
+                    tint-a: #facc15;
+                    tint-b: #ca8a04;
+                    info: I18n.t("Semua angka diukur langsung: fps decode, fps tampil, frame terlewat (diganti frame lebih baru sebelum tampil), waktu decode frame terakhir.",
+                        "All numbers are measured: decoded fps, presented fps, skipped frames (replaced by a newer frame before display), last frame decode time.");
+                    Text { text: stats-full; font-size: 11.5px; color: Theme.text-2; font-family: "Cascadia Mono"; wrap: word-wrap; }
+                }
+                Card {
+                    title: I18n.t("Potong tepi (halus)", "Edge crop (fine)");
+                    icon: "\u{E7A8}";
+                    tint-a: #94a3b8;
+                    tint-b: #64748b;
                     info: I18n.t("Buang garis hitam atau pinggiran dari gambar, dalam piksel asli perangkat. Sentuhan tetap tepat di posisinya.",
                         "Trim black bars or borders off the picture, in device pixels. Touches still land in the right place.");
                     for side[i] in [
@@ -328,70 +529,6 @@ component SettingsPanel inherits Glass {
                         }
                     }
                 }
-
-                Card {
-                    title: I18n.t("AUDIO (PERANGKAT → PC)", "AUDIO (DEVICE → PC)");
-                    info: I18n.t("Suara diputar lewat WASAPI di PC ini. Lip sync menahan gambar sedikit supaya pas dengan suara. Buffer rendah = lebih rapat, tinggi = lebih tahan gangguan.",
-                        "Sound plays through WASAPI on this PC. Lip sync holds the picture a little so it matches the sound. Low buffer is tighter, high rides out hiccups.");
-                    Seg {
-                        options: ["pc", "device"];
-                        labels: [I18n.t("Di PC ini", "On this PC"), I18n.t("Hanya perangkat", "Device only")];
-                        value: prefs.audio-out;
-                        changed(v) => { root.prefs.audio-out = v; root.changed(root.prefs); }
-                    }
-                    Row {
-                        label: I18n.t("Volume PC", "PC volume");
-                        Text { text: round(prefs.volume) + "%"; font-size: 12px; color: Theme.text-2; vertical-alignment: center; }
-                    }
-                    GlassSlider { value: prefs.volume; changed(v) => { root.prefs.volume = v; root.changed(root.prefs); } }
-                    Row {
-                        label: "Lip sync";
-                        Toggle { checked: prefs.lip-sync; toggled(v) => { root.prefs.lip-sync = v; root.changed(root.prefs); } }
-                    }
-                    Seg {
-                        options: ["low", "normal", "high"];
-                        labels: [I18n.t("Rendah", "Low"), "Normal", I18n.t("Tinggi", "High")];
-                        value: prefs.audio-buffer;
-                        changed(v) => { root.prefs.audio-buffer = v; root.changed(root.prefs); }
-                    }
-                }
-
-                Card {
-                    title: I18n.t("KONTROL", "CONTROL");
-                    info: I18n.t("Klik dan seret = sentuh. Tombol Back mouse = kembali. Alt+U buka kunci, Alt+L kunci, Alt+V tempel, Alt+C salin teks layar, Alt+D redup, Alt+H putar.",
-                        "Click and drag = touch. Mouse Back button = back. Alt+U unlock, Alt+L lock, Alt+V paste, Alt+C copy screen text, Alt+D dim, Alt+H rotate.");
-                    Row { label: I18n.t("Sentuh dengan mouse", "Touch with the mouse"); Toggle { checked: prefs.touch; toggled(v) => { root.prefs.touch = v; root.changed(root.prefs); } } }
-                    Row { label: I18n.t("Keyboard PC", "PC keyboard"); Toggle { checked: prefs.keyboard; toggled(v) => { root.prefs.keyboard = v; root.changed(root.prefs); } } }
-                    Row { label: I18n.t("Gestur", "Gestures"); Toggle { checked: prefs.gestures; toggled(v) => { root.prefs.gestures = v; root.changed(root.prefs); } } }
-                }
-
-                Card {
-                    title: I18n.t("KONEKSI & DRIVER", "CONNECTION & DRIVER");
-                    info: I18n.t("Apple Driver memakai driver bawaan Apple. ZenLink Studio memakai libusb0 untuk bitrate tinggi. Perubahan driver selalu minta konfirmasi dan izin administrator.",
-                        "Apple Driver uses Apple's own driver. ZenLink Studio uses libusb0 for high bitrate. Driver changes always ask for confirmation and administrator approval.");
-                    Text { text: connection; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
-                    Text { text: driver-text; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
-                    HorizontalLayout {
-                        spacing: 6px;
-                        GlassButton { label: I18n.t("Periksa driver", "Check drivers"); clicked => { root.driver-action("refresh"); } }
-                        GlassButton { label: I18n.t("Atur Wi-Fi", "Set up Wi-Fi"); clicked => { root.driver-action("wifi"); } }
-                    }
-                }
-
-                Card {
-                    title: I18n.t("LANJUTAN", "ADVANCED");
-                    Row { label: I18n.t("Mulai otomatis saat dicolok", "Start when plugged in"); Toggle { checked: prefs.auto-start; toggled(v) => { root.prefs.auto-start = v; root.changed(root.prefs); } } }
-                    Row { label: I18n.t("Tutup ke tray", "Close to the tray"); Toggle { checked: prefs.close-to-tray; toggled(v) => { root.prefs.close-to-tray = v; root.changed(root.prefs); } } }
-                    Row { label: I18n.t("Selalu di atas", "Always on top"); Toggle { checked: prefs.on-top; toggled(v) => { root.prefs.on-top = v; root.changed(root.prefs); } } }
-                    Row { label: I18n.t("Statistik di header", "Stats in the header"); Toggle { checked: prefs.stats; toggled(v) => { root.prefs.stats = v; root.changed(root.prefs); } } }
-                }
-
-                Card {
-                    title: I18n.t("STATISTIK (TERUKUR)", "STATS (MEASURED)");
-                    info: I18n.t("Semua angka diukur langsung: fps decode, fps tampil, frame terlewat (diganti frame lebih baru sebelum tampil), waktu decode frame terakhir.",
-                        "All numbers are measured: decoded fps, presented fps, skipped frames (replaced by a newer frame before display), last frame decode time.");
-                    Text { text: stats-full; font-size: 11.5px; color: Theme.text-2; font-family: "Cascadia Mono"; wrap: word-wrap; }
-                }
             }
         }
     }
@@ -402,9 +539,9 @@ export component AppWindow inherits Window {
     icon: @image-url("../../../../ui/logo-256.png");
     background: transparent;
     // Phone-shaped until the first frame tells the real size.
-    preferred-width: 460px;
+    preferred-width: 480px;
     preferred-height: 820px;
-    min-width: 360px;
+    min-width: 400px;
     min-height: 420px;
     default-font-family: "Segoe UI Variable Text";
 
@@ -442,36 +579,25 @@ export component AppWindow inherits Window {
     callback action(string);
     callback driver-action(string);
     callback settings-toggled(bool);
+    callback window-action(string);
+    no-frame: true;
 
     // Narrow window: icon-only buttons. Set from Rust (window width), not
     // from layout, so the layout cannot feed back into it.
     in property <bool> compact: false;
+    in property <bool> maximized: false;
     // Picture column too narrow for labelled shortcuts.
     in property <bool> compact-bar: false;
     Rectangle {
         background: Theme.base;
-        // Soft colour wash: the "liquid" under the glass panels.
-        Rectangle {
-            opacity: Theme.glass;
-            background: @radial-gradient(circle, Theme.dark ? #ff73bc33 : #f46bac44 0%, transparent 70%);
-            width: parent.width * 1.2;
-            height: parent.height * 0.9;
-            x: -parent.width * 0.45;
-            y: -parent.height * 0.35;
-        }
-        Rectangle {
-            opacity: Theme.glass;
-            background: @radial-gradient(circle, Theme.dark ? #7c6cff2c : #8c7cff3a 0%, transparent 70%);
-            width: parent.width * 1.2;
-            height: parent.height;
-            x: parent.width * 0.35;
-            y: parent.height * 0.4;
-        }
+        border-radius: 12px;
+        clip: true;
         VerticalLayout {
             padding: 8px;
             spacing: 8px;
             TopBar {
                 compact: root.compact;
+                maximized: root.maximized;
                 device: root.device;
                 phase: root.phase;
                 link: root.link;
@@ -479,6 +605,7 @@ export component AppWindow inherits Window {
                 settings-open: root.settings-open;
                 muted: root.muted;
                 fit: root.prefs.fit;
+                window-action(a) => { root.window-action(a); }
                 start => { root.start-cast(); }
                 stop => { root.stop-cast(); }
                 restart => { root.restart(); }
@@ -502,8 +629,8 @@ export component AppWindow inherits Window {
                     stage := Rectangle {
                         vertical-stretch: 1;
                         border-radius: 22px;
-                        background: root.phase == "streaming" ? #000 : Theme.panel;
-                        border-width: root.phase == "streaming" ? 0px : 1px;
+                        background: root.phase == "streaming" ? Theme.stage : Theme.panel;
+                        border-width: 1px;
                         border-color: Theme.edge;
                         clip: true;
                         stage-ta := TouchArea { }
@@ -535,6 +662,55 @@ export component AppWindow inherits Window {
                     close => { root.settings-open = false; root.settings-toggled(false); }
                     driver-action(a) => { root.driver-action(a); }
                 }
+            }
+        }
+        // Resize from every edge and corner (no system frame).
+        for e in [
+            { id: "n", x: 10px, y: 0px, w: -20px, h: 5px, c: MouseCursor.ns-resize },
+            { id: "s", x: 10px, y: -5px, w: -20px, h: 5px, c: MouseCursor.ns-resize },
+            { id: "w", x: 0px, y: 10px, w: 5px, h: -20px, c: MouseCursor.ew-resize },
+            { id: "e", x: -5px, y: 10px, w: 5px, h: -20px, c: MouseCursor.ew-resize },
+            { id: "nw", x: 0px, y: 0px, w: 10px, h: 10px, c: MouseCursor.nwse-resize },
+            { id: "se", x: -10px, y: -10px, w: 10px, h: 10px, c: MouseCursor.nwse-resize },
+            { id: "ne", x: -10px, y: 0px, w: 10px, h: 10px, c: MouseCursor.nesw-resize },
+            { id: "sw", x: 0px, y: -10px, w: 10px, h: 10px, c: MouseCursor.nesw-resize },
+        ]: TouchArea {
+            x: e.x < 0 ? parent.width + e.x : e.x;
+            y: e.y < 0 ? parent.height + e.y : e.y;
+            width: e.w < 0 ? parent.width + e.w : e.w;
+            height: e.h < 0 ? parent.height + e.h : e.h;
+            mouse-cursor: e.c;
+            pointer-event(ev) => {
+                if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                    root.window-action("resize-" + e.id);
+                }
+            }
+        }
+        // Hover tooltip: below the control, or above it near the bottom.
+        tip := Rectangle {
+            property <bool> above: Tip.bottom + 40px > root.height;
+            width: min(tipT.preferred-width + 20px, 280px);
+            height: tipT.preferred-height + 12px;
+            x: max(8px, min(root.width - self.width - 8px, Tip.x - self.width / 2));
+            y: above ? Tip.top - self.height - 6px : Tip.bottom + 6px;
+            border-radius: 9px;
+            background: Theme.dark ? #26283af2 : #ffffffee;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 12px;
+            drop-shadow-offset-y: 3px;
+            drop-shadow-color: #0000003a;
+            opacity: Tip.shown ? 1 : 0;
+            visible: self.opacity > 0.01;
+            animate opacity { delay: Tip.shown ? 350ms : 0ms; duration: 120ms; }
+            tipT := Text {
+                text: Tip.text;
+                font-size: 11.5px;
+                color: Theme.text;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                width: parent.width - 20px;
             }
         }
         if root.toast != "": Glass {

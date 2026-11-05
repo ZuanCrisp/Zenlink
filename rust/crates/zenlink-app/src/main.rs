@@ -61,7 +61,7 @@ struct App {
     fitted: Option<(u32, u32, bool)>,
     meter_at: Option<Instant>,
     dark: bool,
-    backdrop: Option<(bool, bool)>,
+    backdrop: Option<(bool, bool, i32)>,
     on_top: Option<bool>,
     dots: Option<dots::Dots>,
     dots_at: Option<Instant>,
@@ -112,13 +112,15 @@ fn apply_look(ui: &AppWindow) {
     ui.global::<Theme>().set_glass(p.glass / 100.0);
     ui.global::<I18n>().set_id(p.lang.as_str() != "en");
     let glass_on = p.glass > 0.0;
+    let glass_k = p.glass / 100.0;
     APP.with_borrow_mut(|a| {
         a.dark = dark;
-        if a.backdrop != Some((glass_on, dark)) {
+        let glass_q = (glass_k * 20.0).round() as i32; // re-apply in 5% steps
+        if a.backdrop != Some((glass_on, dark, glass_q)) {
             if let Some(h) = hwnd_of(ui.window()) {
                 let mode = if glass_on { backdrop::Backdrop::Accent } else { backdrop::Backdrop::None };
-                backdrop::apply(h, mode, dark);
-                a.backdrop = Some((glass_on, dark));
+                backdrop::apply(h, mode, dark, glass_k);
+                a.backdrop = Some((glass_on, dark, glass_q));
             }
         }
         if a.on_top != Some(p.on_top) {
@@ -231,22 +233,25 @@ fn work_area(ui: &AppWindow) -> Option<(f32, f32, f32, f32)> {
 }
 
 /// Size the window around the picture (portrait or landscape).
+/// Gap between the picture and the glass stage edge (logical px).
+const PIC_INSET: f32 = 6.0;
+
 fn fit_window(ui: &AppWindow, shown: (u32, u32)) {
     let Some((wx, wy, ww, wh)) = work_area(ui) else { return };
-    let chrome_w = ui.get_chrome_w();
-    let chrome_h = ui.get_chrome_h();
+    let chrome_w = ui.get_chrome_w() + 2.0 * PIC_INSET;
+    let chrome_h = ui.get_chrome_h() + 2.0 * PIC_INSET;
     let aspect = shown.0 as f32 / shown.1.max(1) as f32;
     // Leave room for the title bar and the taskbar edge.
     // Comfortable, not maximised: portrait ~72% of the screen height,
     // landscape at most ~60% of the screen width.
     let max_h = wh * 0.62 - chrome_h;
-    let max_w = ww * 0.55 - chrome_w;
+    let max_w = ww * 0.46 - chrome_w;
     let (mut sw, mut sh) = (max_h * aspect, max_h);
     if sw > max_w {
         sw = max_w;
         sh = sw / aspect;
     }
-    let size = LogicalSize::new((sw + chrome_w).max(360.0), (sh + chrome_h).max(420.0));
+    let size = LogicalSize::new((sw + chrome_w).max(400.0), (sh + chrome_h).max(440.0));
     ui.window().set_size(size);
     keep_on_screen(ui, (wx, wy, ww, wh), size);
 }
@@ -255,7 +260,7 @@ fn fit_window(ui: &AppWindow, shown: (u32, u32)) {
 fn keep_on_screen(ui: &AppWindow, (wx, wy, ww, wh): (f32, f32, f32, f32), size: LogicalSize) {
     let sf = ui.window().scale_factor();
     let pos = ui.window().position().to_logical(sf);
-    let (w, h) = (size.width + 16.0, size.height + 40.0); // frame + title bar
+    let (w, h) = (size.width, size.height); // frameless: client = window
     let x = pos.x.min(wx + ww - w).max(wx);
     let y = pos.y.min(wy + wh - h).max(wy);
     if (x - pos.x).abs() > 0.5 || (y - pos.y).abs() > 0.5 {
@@ -268,7 +273,9 @@ fn main() -> Result<(), slint::PlatformError> {
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("femtovg".into())
-        .with_winit_window_attributes_hook(|attrs| attrs.with_transparent(true).with_system_backdrop(BackdropType::None))
+        .with_winit_window_attributes_hook(|attrs| {
+            attrs.with_transparent(true).with_decorations(false).with_system_backdrop(BackdropType::None)
+        })
         .select()?;
 
     let ui = AppWindow::new()?;
@@ -372,9 +379,12 @@ fn main() -> Result<(), slint::PlatformError> {
             } else {
                 let s = ui.window().size().to_logical(ui.window().scale_factor());
                 let dw = if open { 368.0 } else { -368.0 };
-                ui.window().set_size(LogicalSize::new((s.width + dw).max(360.0), s.height));
+                ui.window().set_size(LogicalSize::new((s.width + dw).max(400.0), s.height));
             }
         });
+    }
+    if ui.get_settings_open() {
+        ui.invoke_settings_toggled(true);
     }
     {
         let weak = ui.as_weak();
@@ -429,6 +439,50 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // Frameless window: move, resize, minimise, maximise, close.
+    {
+        let weak = ui.as_weak();
+        let last_drag = std::cell::Cell::new(None::<Instant>);
+        ui.on_window_action(move |a| {
+            use slint::winit_030::winit::window::ResizeDirection as R;
+            let Some(ui) = weak.upgrade() else { return };
+            let w = ui.window();
+            match a.as_str() {
+                "close" => {
+                    let _ = w.hide();
+                    let _ = slint::quit_event_loop();
+                }
+                "min" => w.set_minimized(true),
+                "max" => w.set_maximized(!w.is_maximized()),
+                "drag" => {
+                    // Second press within 400 ms = double-click: maximise / restore.
+                    let now = Instant::now();
+                    if last_drag.get().map(|t| now - t < Duration::from_millis(400)).unwrap_or(false) {
+                        last_drag.set(None);
+                        w.set_maximized(!w.is_maximized());
+                    } else {
+                        last_drag.set(Some(now));
+                        w.with_winit_window(|ww| ww.drag_window());
+                    }
+                }
+                r if r.starts_with("resize-") => {
+                    let dir = match &r[7..] {
+                        "n" => R::North,
+                        "s" => R::South,
+                        "w" => R::West,
+                        "e" => R::East,
+                        "nw" => R::NorthWest,
+                        "ne" => R::NorthEast,
+                        "sw" => R::SouthWest,
+                        _ => R::SouthEast,
+                    };
+                    w.with_winit_window(|ww| ww.drag_resize_window(dir));
+                }
+                _ => {}
+            }
+        });
+    }
+
     // Frame timer: native view placement, window fitting, stats.
     let timer = slint::Timer::default();
     {
@@ -476,6 +530,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let lw = ui.window().size().width as f32 / sf;
             if (lw < 640.0) != ui.get_compact() {
                 ui.set_compact(lw < 640.0);
+                ui.set_maximized(ui.window().is_maximized());
             }
             let bar = ui.get_stage_w() < 600.0;
             if bar != ui.get_compact_bar() {
@@ -498,8 +553,26 @@ fn main() -> Result<(), slint::PlatformError> {
                 v.set_rotation(rot);
                 input.rotation.store(rot, Relaxed);
                 v.set_background(0x000000);
-                let (x, y, w, h) = (ui.get_stage_x() * sf, ui.get_stage_y() * sf, ui.get_stage_w() * sf, ui.get_stage_h() * sf);
-                v.set_bounds(x.round() as i32, y.round() as i32, w.round() as i32, h.round() as i32, streaming, (22.0 * sf).round() as i32);
+                let (mut x, mut y, mut w, mut h) = (ui.get_stage_x() * sf, ui.get_stage_y() * sf, ui.get_stage_w() * sf, ui.get_stage_h() * sf);
+                // Auto-Fit: shrink the native view to the picture itself, so the
+                // glass stage shows around it instead of black letterbox bars.
+                // Even inset on every side inside the glass stage.
+                let inset = PIC_INSET * sf;
+                if p.fit != "fill" {
+                    x += inset;
+                    y += inset;
+                    w = (w - 2.0 * inset).max(1.0);
+                    h = (h - 2.0 * inset).max(1.0);
+                }
+                let pic = v.shown_size();
+                if p.fit != "cover" && p.fit != "fill" && pic.0 > 0 && pic.1 > 0 && w > 0.0 && h > 0.0 {
+                    let aspect = pic.0 as f32 / pic.1 as f32;
+                    let (pw, ph) = if w / h > aspect { (h * aspect, h) } else { (w, w / aspect) };
+                    x += (w - pw) / 2.0;
+                    y += (h - ph) / 2.0;
+                    (w, h) = (pw, ph);
+                }
+                v.set_bounds(x.round() as i32, y.round() as i32, w.round() as i32, h.round() as i32, streaming, ((22.0 - PIC_INSET) * sf).round() as i32);
                 let shown = v.shown_size();
                 if streaming && p.fit_window && shown.0 > 0 {
                     let key = (shown.0, shown.1, ui.get_settings_open());

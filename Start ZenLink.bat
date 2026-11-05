@@ -62,6 +62,14 @@ call :check_env
 echo Setup complete. Run Create-Desktop-Shortcut.bat for a desktop shortcut.
 
 :launch
+rem ZenLink Next (Rust window, native GPU video). It starts the Python
+rem backend from .venv by itself. Set ZENLINK_UI=classic for the old window.
+set "NEXT=%~dp0ZenLinkNext.exe"
+if not exist "%NEXT%" set "NEXT=%~dp0rust\target\release\ZenLinkNext.exe"
+if /i not "%ZENLINK_UI%"=="classic" if exist "%NEXT%" (
+    start "" "%NEXT%"
+    exit /b 0
+)
 if exist "%PYW%" (
     start "" "%PYW%" -m zenlink
 ) else (

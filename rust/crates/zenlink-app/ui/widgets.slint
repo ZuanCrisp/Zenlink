@@ -1,12 +1,21 @@
 import { Theme, I18n } from "theme.slint";
 
 // A glass surface: translucent fill, bright top edge, soft shadow.
+// Hover tooltip, drawn once on top of everything by AppWindow.
+export global Tip {
+    in-out property <string> text;
+    in-out property <length> x;      // centre of the hovered control
+    in-out property <length> top;    // its top edge
+    in-out property <length> bottom; // its bottom edge
+    in-out property <bool> shown;
+}
+
 export component Glass inherits Rectangle {
     in property <bool> strong: false;
     background: strong ? Theme.raise : Theme.panel;
     border-radius: 18px;
     border-width: 1px;
-    border-color: Theme.edge;
+    border-color: Theme.glass > 0.01 ? Theme.rim : Theme.edge;
     drop-shadow-blur: Theme.glass > 0 ? 24px : 10px;
     drop-shadow-offset-y: 8px;
     drop-shadow-color: Theme.shadow;
@@ -18,7 +27,18 @@ export component Glass inherits Rectangle {
         width: parent.width - 2px;
         border-top-left-radius: parent.border-radius - 1px;
         border-top-right-radius: parent.border-radius - 1px;
-        background: @linear-gradient(180deg, Theme.dark ? #ffffff12 : #ffffffa0 0%, #ffffff00 100%);
+        background: @linear-gradient(180deg, Theme.dark ? #ffffff17 : #ffffff8c 0%, #ffffff00 100%);
+        opacity: Theme.glass;
+    }
+    // Lens refraction: a soft bright band along the bottom inner edge.
+    Rectangle {
+        x: 1px;
+        width: parent.width - 2px;
+        height: min(parent.height * 0.3, 24px);
+        y: parent.height - self.height - 1px;
+        border-bottom-left-radius: parent.border-radius - 1px;
+        border-bottom-right-radius: parent.border-radius - 1px;
+        background: @linear-gradient(0deg, Theme.dark ? #ffffff0f : #ffffff66 0%, #ffffff00 100%);
         opacity: Theme.glass;
     }
     @children
@@ -41,13 +61,18 @@ export component GlassButton inherits Rectangle {
     in property <string> tip;
     callback clicked();
     min-height: 32px;
+    // Icon-only: square-ish 34x32.
     min-width: label == "" ? 34px : 0px;
     border-radius: 10px;
     background: primary ? (ta.has-hover ? Theme.btn-hover : Theme.btn)
         : active ? Theme.accent-soft
         : ta.has-hover ? Theme.hover : Theme.raise;
     border-width: 1px;
-    border-color: primary ? transparent : Theme.line;
+    border-color: primary ? (Theme.glass > 0.01 ? @linear-gradient(135deg, #ffffff99 0%, #ffffff00 50%, #ffffff4d 100%) : transparent)
+        : Theme.glass > 0.01 ? Theme.rim : Theme.line;
+    drop-shadow-blur: primary ? 12px : 0px;
+    drop-shadow-color: primary ? #ec489959 : transparent;
+    drop-shadow-offset-y: 3px;
     opacity: enabled ? 1 : 0.45;
     animate background { duration: 120ms; }
     HorizontalLayout {
@@ -57,7 +82,8 @@ export component GlassButton inherits Rectangle {
         alignment: center;
         if icon != "": Icon {
             text: icon;
-            font-size: 13px;
+            // Sized for the 32px button: icon fills ~half, centred.
+            font-size: 15px;
             color: primary ? Theme.btn-text : active ? Theme.accent : Theme.text;
         }
         if label != "": Text {
@@ -70,8 +96,19 @@ export component GlassButton inherits Rectangle {
     }
     ta := TouchArea {
         enabled: root.enabled;
-        clicked => { root.clicked(); }
+        clicked => { Tip.shown = false; root.clicked(); }
         mouse-cursor: pointer;
+        changed has-hover => {
+            if self.has-hover && root.tip != "" {
+                Tip.text = root.tip;
+                Tip.x = root.absolute-position.x + root.width / 2;
+                Tip.top = root.absolute-position.y;
+                Tip.bottom = root.absolute-position.y + root.height;
+                Tip.shown = true;
+            } else if Tip.text == root.tip {
+                Tip.shown = false;
+            }
+        }
     }
     states [
         pressed when ta.pressed: { opacity: 0.8; }
@@ -214,38 +251,56 @@ export component Row inherits HorizontalLayout {
 export component Card inherits Glass {
     in property <string> title;
     in property <string> info;
+    in property <string> icon;
+    // Badge colour pair (ZenLink pink by default).
+    in property <color> tint-a: #f472b6;
+    in property <color> tint-b: #db2777;
     property <bool> open: false;
     strong: false;
-    border-radius: 16px;
+    border-radius: 18px;
     VerticalLayout {
         padding: 12px;
-        padding-top: 10px;
-        spacing: 9px;
+        padding-top: 11px;
+        spacing: 10px;
         HorizontalLayout {
-            spacing: 6px;
+            spacing: 9px;
+            if root.icon != "": Rectangle {
+                width: 26px;
+                height: 26px;
+                border-radius: 8px;
+                background: @linear-gradient(145deg, root.tint-a 0%, root.tint-b 100%);
+                border-width: 1px;
+                border-color: #ffffff59;
+                drop-shadow-blur: 6px;
+                drop-shadow-offset-y: 2px;
+                drop-shadow-color: root.tint-b.with-alpha(0.35);
+                Icon { text: root.icon; font-size: 13px; color: white; }
+            }
             Text {
                 text: root.title;
-                font-size: 10.5px;
-                font-weight: 700;
-                letter-spacing: 0.8px;
-                color: Theme.text-2;
+                font-size: 13.5px;
+                font-weight: 650;
+                color: Theme.text;
                 vertical-alignment: center;
                 horizontal-stretch: 1;
+                overflow: elide;
             }
             if root.info != "": Rectangle {
-                width: 22px;
-                height: 22px;
-                border-radius: 11px;
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
                 background: root.open ? Theme.accent-soft : itA.has-hover ? Theme.hover : transparent;
                 Icon { text: "\u{E946}"; font-size: 12px; color: root.open ? Theme.accent : Theme.text-3; }
                 itA := TouchArea { mouse-cursor: pointer; clicked => { root.open = !root.open; } }
             }
         }
         if root.open: Rectangle {
-            border-radius: 10px;
+            border-radius: 12px;
             background: Theme.accent-soft;
+            border-width: 1px;
+            border-color: Theme.accent.with-alpha(0.18);
             VerticalLayout {
-                padding: 9px;
+                padding: 10px;
                 Text { text: root.info; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
             }
         }
@@ -262,14 +317,29 @@ export component Chip inherits Rectangle {
     background: ta.pressed ? Theme.accent-soft : ta.has-hover ? Theme.hover : Theme.raise;
     border-width: 1px;
     border-color: Theme.line;
-    min-width: 34px;
+    min-width: 36px;
     HorizontalLayout {
         padding-left: root.label == "" ? 10px : 11px;
         padding-right: root.label == "" ? 10px : 12px;
         spacing: 6px;
         alignment: center;
-        Icon { text: root.icon; font-size: 12px; }
-        if root.label != "": Text { text: root.label; font-size: 12px; color: Theme.text; vertical-alignment: center; }
+        Icon { text: root.icon; font-size: 14px; }
+        if root.label != "": Text { text: root.label; font-size: 12.5px; color: Theme.text; vertical-alignment: center; }
     }
-    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+    in property <string> tip;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Tip.shown = false; root.clicked(); }
+        changed has-hover => {
+            if self.has-hover && root.tip != "" {
+                Tip.text = root.tip;
+                Tip.x = root.absolute-position.x + root.width / 2;
+                Tip.top = root.absolute-position.y;
+                Tip.bottom = root.absolute-position.y + root.height;
+                Tip.shown = true;
+            } else if Tip.text == root.tip {
+                Tip.shown = false;
+            }
+        }
+    }
 }
