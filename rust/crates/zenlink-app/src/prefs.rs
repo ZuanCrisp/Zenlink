@@ -64,7 +64,10 @@ pub fn load() -> Prefs {
     };
     s("theme", &mut p.theme, &["light", "dark", "system"]);
     b("glassOn", &mut p.glass_on);
-    f("glassThick", &mut p.glass, 0.0, 100.0);
+    // Version 2 made 30% the default thickness; older files saved 0%.
+    if v.get("version").and_then(Value::as_u64).unwrap_or(1) >= 2 {
+        f("glassThick", &mut p.glass, 0.0, 100.0);
+    }
     b("lens", &mut p.lens);
     s("lang", &mut p.lang, &["id", "en"]);
     s("fit", &mut p.fit, &["contain", "cover", "fill"]);
@@ -91,7 +94,7 @@ pub fn load() -> Prefs {
 
 pub fn save(p: &Prefs) {
     let v = json!({
-        "theme": p.theme.as_str(), "glassOn": p.glass_on, "glassThick": p.glass, "lens": p.lens, "lang": p.lang.as_str(), "fit": p.fit.as_str(),
+        "version": 2, "theme": p.theme.as_str(), "glassOn": p.glass_on, "glassThick": p.glass, "lens": p.lens, "lang": p.lang.as_str(), "fit": p.fit.as_str(),
         "fitWindow": p.fit_window, "rotation": p.rotation.as_str(),
         "cropL": p.crop_l, "cropT": p.crop_t, "cropR": p.crop_r, "cropB": p.crop_b,
         "audioOut": p.audio_out.as_str(), "volume": p.volume, "lipSync": p.lip_sync,

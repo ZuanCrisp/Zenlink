@@ -70,6 +70,8 @@ struct App {
     /// A mode choice was just sent: keep the chooser closed until the
     /// backend's state catches up.
     mode_sent: Option<Instant>,
+    /// Result of the last "Check drivers", shown under the service line.
+    drivers_text: Option<String>,
 }
 
 thread_local! {
@@ -191,7 +193,7 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     let just_sent = APP.with_borrow(|a| a.mode_sent.map(|t| t.elapsed() < Duration::from_secs(3)).unwrap_or(false));
     if needs && !just_sent && !ui.get_chooser_open() {
         ui.set_chooser_cancelable(false);
-        ui.set_chooser_open(true);
+        open_chooser(ui);
     }
     if let Some(p) = str_of(st, &["connection", "pending"]) {
         let name = if p == "apple" { "Apple Driver" } else { "ZenLink Studio" };
@@ -199,9 +201,10 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     }
     let service = st.get("service").and_then(Value::as_bool).unwrap_or(true);
     let native_audio = st.get("nativeAudio").and_then(Value::as_bool).unwrap_or(false);
+    let checked = APP.with_borrow(|a| a.drivers_text.clone().map(|t| format!("\n{t}")).unwrap_or_default());
     ui.set_driver_text(
         format!(
-            "Apple Mobile Device Service: {}\n{}: {}",
+            "Apple Mobile Device Service: {}\n{}: {}{checked}",
             if service { tr("berjalan", "running") } else { tr("tidak berjalan", "not running") },
             tr("Audio native", "Native audio"),
             if native_audio { tr("tersedia", "available") } else { tr("tidak tersedia", "not available") },
@@ -280,6 +283,52 @@ fn fit_window(ui: &AppWindow, shown: (u32, u32)) {
     let size = LogicalSize::new((sw + chrome_w).max(400.0), (sh + chrome_h).max(440.0));
     ui.window().set_size(size);
     keep_on_screen(ui, (wx, wy, ww, wh), size);
+}
+
+/// Show the connection mode chooser, widening the window so the sheet fits.
+fn open_chooser(ui: &AppWindow) {
+    ui.set_chooser_open(true);
+    let Some((wx, wy, ww, wh)) = work_area(ui) else { return };
+    let cur = ui.window().size().to_logical(ui.window().scale_factor());
+    let w = cur.width.max(600.0f32.min(ww - 16.0));
+    let h = cur.height.max(820.0f32.min(wh - 16.0));
+    if (w, h) != (cur.width, cur.height) {
+        let size = LogicalSize::new(w, h);
+        ui.window().set_size(size);
+        keep_on_screen(ui, (wx, wy, ww, wh), size);
+    }
+}
+
+/// Short message above the dock for 3.5 s.
+fn show_toast(ui: &AppWindow, text: String) {
+    ui.set_toast("".into());
+    ui.set_toast(text.into());
+    let w = ui.as_weak();
+    slint::Timer::single_shot(Duration::from_millis(3500), move || {
+        if let Some(ui) = w.upgrade() {
+            ui.set_toast("".into());
+        }
+    });
+}
+
+/// "Check drivers" result, one line per device.
+fn drivers_summary(ui: &AppWindow, d: &Value) -> String {
+    let id = ui.global::<I18n>().get_id();
+    let mut lines = Vec::new();
+    for dev in d.get("devices").and_then(Value::as_array).into_iter().flatten() {
+        let fam = dev.get("family").and_then(Value::as_str).unwrap_or("iPhone");
+        let mode = match dev.get("mode").and_then(Value::as_str).unwrap_or("") {
+            "apple" => "Apple Driver",
+            "replaced" => "ZenLink Studio (libusb0)",
+            "coexist" => if id { "campuran, perlu diperbaiki" } else { "mixed, needs repair" },
+            _ => if id { "tidak dikenal" } else { "unknown" },
+        };
+        lines.push(format!("{fam}: {mode}"));
+    }
+    if lines.is_empty() {
+        lines.push(if id { "Tidak ada iPhone/iPad di USB".into() } else { "No iPhone/iPad on USB".into() });
+    }
+    lines.join("\n")
 }
 
 /// Move the window back inside the work area if a resize pushed it out.
@@ -481,14 +530,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     let Some(ui) = w.upgrade() else { return };
                     if failed {
                         APP.with_borrow_mut(|a| a.mode_sent = None);
-                        ui.set_toast(tr_ui(&ui, "Mode belum tersimpan, coba lagi.", "The mode was not saved, try again.").into());
-                        ui.set_chooser_open(true);
-                        let w = ui.as_weak();
-                        slint::Timer::single_shot(Duration::from_secs(3), move || {
-                            if let Some(ui) = w.upgrade() {
-                                ui.set_toast("".into());
-                            }
-                        });
+                        show_toast(&ui, tr_ui(&ui, "Mode belum tersimpan, coba lagi.", "The mode was not saved, try again."));
+                        open_chooser(&ui);
                     }
                 });
             });
@@ -497,23 +540,40 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let api = api.clone();
         let weak = ui.as_weak();
-        ui.on_driver_action(move |a| {
+        ui.on_driver_action(move |a: slint::SharedString| {
             if a.as_str() == "mode" {
                 if let Some(ui) = weak.upgrade() {
                     ui.set_chooser_cancelable(true);
-                    ui.set_chooser_open(true);
+                    open_chooser(&ui);
                 }
                 return;
             }
-            let api = api.clone();
+            if let Some(ui) = weak.upgrade() {
+                show_toast(&ui, if a.as_str() == "wifi" { tr_ui(&ui, "Menyiapkan Wi-Fi…", "Setting up Wi-Fi…") } else { tr_ui(&ui, "Memeriksa driver…", "Checking drivers…") });
+            }
+            let (api, w) = (api.clone(), weak.clone());
             let a = a.to_string();
-            std::thread::spawn(move || match a.as_str() {
-                "wifi" => {
-                    let _ = api.post("/api/wifi/prepare", &json!({}));
-                }
-                _ => {
-                    let _ = api.get("/api/drivers");
-                }
+            std::thread::spawn(move || {
+                let r = if a == "wifi" { api.post("/api/wifi/prepare", &json!({})) } else { api.get("/api/drivers") };
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = w.upgrade() else { return };
+                    let Some(r) = r else {
+                        show_toast(&ui, tr_ui(&ui, "Backend tidak menjawab.", "The backend did not answer."));
+                        return;
+                    };
+                    if a == "wifi" {
+                        let ok = r.get("ok").and_then(Value::as_bool).unwrap_or(false);
+                        let msg = r.get("message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| {
+                            if ok { tr_ui(&ui, "Wi-Fi siap. Sekarang bisa tanpa kabel.", "Wi-Fi is ready. You can unplug the cable.") }
+                            else { tr_ui(&ui, "Wi-Fi belum bisa disiapkan.", "Wi-Fi could not be set up.") }
+                        });
+                        show_toast(&ui, msg);
+                    } else {
+                        let t = drivers_summary(&ui, &r);
+                        APP.with_borrow_mut(|x| x.drivers_text = Some(t));
+                        show_toast(&ui, tr_ui(&ui, "Driver sudah diperiksa.", "Drivers checked."));
+                    }
+                });
             });
         });
     }
