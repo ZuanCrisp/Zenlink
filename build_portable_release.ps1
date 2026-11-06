@@ -113,6 +113,10 @@ Test-FrozenExe (Join-Path $app "ZenLink.exe")
 foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat") {
     Copy-Item $f $app
 }
+# ZenLink Next (Rust window, native GPU video). It starts ZenLink.exe next to
+# it as its backend (--headless). Build it first: cargo build --release.
+$next = Join-Path $PSScriptRoot "rust\target\release\ZenLinkNext.exe"
+if (Test-Path $next) { Copy-Item $next $app } else { Write-Warning "ZenLinkNext.exe not built: the installer ships without ZenLink Next." }
 
 Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta
 # Same app as one .exe: it unpacks itself to a temporary folder on start and

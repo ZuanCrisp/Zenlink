@@ -273,6 +273,9 @@ fn work_area(ui: &AppWindow) -> Option<(f32, f32, f32, f32)> {
 /// Size the window around the picture (portrait or landscape).
 /// Gap between the picture and the glass stage edge (logical px).
 const PIC_INSET: f32 = 6.0;
+/// Narrowest window that still fits the header (logo, name, buttons,
+/// window controls).
+const MIN_W: f32 = 470.0;
 /// Stage width (logical px) while there is no picture yet.
 const IDLE_STAGE_W: f32 = 440.0;
 
@@ -291,7 +294,7 @@ fn fit_window(ui: &AppWindow, shown: (u32, u32)) {
         sw = max_w;
         sh = sw / aspect;
     }
-    let size = LogicalSize::new((sw + chrome_w).max(400.0), (sh + chrome_h).max(440.0));
+    let size = LogicalSize::new((sw + chrome_w).max(MIN_W), (sh + chrome_h).max(440.0));
     ui.window().set_size(size);
     keep_on_screen(ui, (wx, wy, ww, wh), size);
 }
@@ -301,7 +304,10 @@ fn open_chooser(ui: &AppWindow) {
     ui.set_chooser_open(true);
     let Some((wx, wy, ww, wh)) = work_area(ui) else { return };
     let cur = ui.window().size().to_logical(ui.window().scale_factor());
-    let w = cur.width.max(600.0f32.min(ww - 16.0));
+    // Never narrower than the idle stage plus the open settings panel (the
+    // window may not have taken that size yet when this runs at launch).
+    let want = if ui.get_settings_open() { IDLE_STAGE_W + 16.0 + 368.0 } else { 600.0 };
+    let w = cur.width.max(want.max(600.0).min(ww - 16.0));
     let h = cur.height.max(820.0f32.min(wh - 16.0));
     if (w, h) != (cur.width, cur.height) {
         let size = LogicalSize::new(w, h);
@@ -699,7 +705,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     w.set_fullscreen(on);
                     ui.set_fullscreen(on);
                     // Leaving full screen: fit the window to the picture again.
-                    APP.with_borrow_mut(|a| a.fitted = None);
+                    // Windows drops the glass backdrop and corners when the
+                    // window style changes: apply the theme again now and
+                    // once the change has settled.
+                    APP.with_borrow_mut(|a| {
+                        a.fitted = None;
+                        a.backdrop = None;
+                    });
+                    let w2 = ui.as_weak();
+                    slint::Timer::single_shot(Duration::from_millis(350), move || {
+                        if w2.upgrade().is_some() {
+                            APP.with_borrow_mut(|a| a.backdrop = None);
+                        }
+                    });
                 }
                 "drag" => {
                     // Second press within 400 ms = double-click: maximise / restore.
@@ -784,7 +802,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // the picture keeps its size; ends when the slide settles.
             if let Some(stage) = APP.with_borrow(|a| a.hold_stage) {
                 let chrome = ui.get_chrome_w();
-                let target = (stage + chrome).max(400.0);
+                let target = (stage + chrome).max(MIN_W);
                 let lh = ui.window().size().height as f32 / sf;
                 if (lw - target).abs() > 0.5 && !ui.window().is_maximized() && !ui.window().is_fullscreen() {
                     let size = LogicalSize::new(target, lh);

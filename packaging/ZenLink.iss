@@ -1,6 +1,6 @@
 ; ZenLink installer (Inno Setup 6). Built by build_portable_release.ps1.
 #ifndef AppVersion
-  #define AppVersion "2.2.2"
+  #define AppVersion "2.2.3"
 #endif
 #ifndef SourceDir
   #define SourceDir "..\dist\ZenLink"
@@ -50,6 +50,7 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "Start ZenLink.bat,run.bat
 
 [Icons]
 Name: "{group}\ZenLink"; Filename: "{app}\ZenLink.exe"
+Name: "{group}\ZenLink Next (Preview)"; Filename: "{app}\ZenLinkNext.exe"; Check: FileExists(ExpandConstant('{app}\ZenLinkNext.exe'))
 Name: "{group}\Uninstall ZenLink"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\ZenLink"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
 
@@ -61,6 +62,7 @@ Filename: "ms-windows-store://pdp/?ProductId=9NP83LWLPZ9K"; Description: "Instal
 Filename: "{app}\ZenLink.exe"; Description: "{cm:LaunchProgram,ZenLink}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+Filename: "{sys}\taskkill.exe"; Parameters: "/im ZenLinkNext.exe /f"; Flags: runhidden; RunOnceId: "KillZenLinkNext"
 Filename: "{sys}\taskkill.exe"; Parameters: "/im ZenLink.exe /f"; Flags: runhidden; RunOnceId: "KillZenLink"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""ZenLink (AirPlay)"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; RunOnceId: "DelFirewall"; Check: FirewallRuleExists
 
