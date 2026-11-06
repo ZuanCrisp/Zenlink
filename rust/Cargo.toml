@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/zenlink-core", "crates/zenlink-video", "crates/zenlink-app"]
 
 [workspace.package]
-version = "2.2.3"
+version = "2.2.31"
 edition = "2021"
 license = "GPL-3.0-only"
 authors = ["Zenvy Zenshiro"]

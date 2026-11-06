@@ -216,7 +216,10 @@ fn publish(gpu: &Gpu, ring: &SharedRing, stats: &Stats, mft: &Mft, sample: &IMFS
         }
         let idx = {
             let mut r = ring.lock().unwrap();
-            let idx = r.free_slot();
+            let (idx, dropped) = r.free_slot();
+            if dropped > 0 {
+                stats.replaced.fetch_add(dropped, Relaxed);
+            }
             let ok = matches!(&r.slots[idx], Some(s) if s.w == w && s.h == h);
             if !ok {
                 r.slots[idx] = Some(Slot { tex: gpu.nv12_texture(w, h, false)?, w, h, src: mft.src });
@@ -260,12 +263,10 @@ fn publish(gpu: &Gpu, ring: &SharedRing, stats: &Stats, mft: &Mft, sample: &IMFS
             b2.Unlock2D()?;
         }
         let mut r = ring.lock().unwrap();
-        if r.fresh {
-            stats.replaced.fetch_add(1, Relaxed);
+        let dropped = r.push(idx);
+        if dropped > 0 {
+            stats.replaced.fetch_add(dropped, Relaxed);
         }
-        r.latest = Some(idx);
-        r.seq += 1;
-        r.fresh = true;
         stats.width.store((mft.src.right - mft.src.left) as u32, Relaxed);
         stats.height.store((mft.src.bottom - mft.src.top) as u32, Relaxed);
         Ok(())

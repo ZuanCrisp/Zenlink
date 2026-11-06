@@ -172,7 +172,12 @@ class CastManager:
 
     def _watch(self) -> None:
         while True:
-            if not self.driver_busy and time.monotonic() - self._drivers_at > 4.0:
+            # Never while casting: the scan reads every driver package and
+            # holds the interpreter for up to ~10 ms, which the video relay
+            # and the sound output (same process) showed as a stutter every
+            # 4 s. Drivers cannot change mid-cast anyway (changes are refused).
+            if (self._session is None and not self.driver_busy
+                    and time.monotonic() - self._drivers_at > 4.0):
                 self.refresh_drivers(publish=True)
             if self._session is None and not self.driver_busy:
                 self.refresh_devices()

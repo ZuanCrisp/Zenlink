@@ -107,8 +107,10 @@ class DeviceListTests(unittest.TestCase):
     def test_wireless_prefers_wifi_and_flags_cable_only(self):
         got = {d["id"]: d for d in self.devices.connected_devices("wireless")["devices"]}
         self.assertTrue(got["A"]["wifi"])
-        self.assertEqual(got["B"].get("need"), "wifi")
-        self.assertFalse(got["B"]["ready"])
+        # A trusted device on the cable stays usable over the cable in Wi-Fi
+        # mode (an iPhone could not connect after an iPad had Wi-Fi set up).
+        self.assertTrue(got["B"]["ready"])
+        self.assertFalse(got["B"]["wifi"])
 
     def test_lan_found_device_without_setup_needs_wifi(self):
         lan_dev = [{"udid": "C", "ip": "192.168.1.9", "name": "iPhone", "productType": "iPhone18,3",
@@ -513,6 +515,36 @@ class NativeAudioTests(unittest.TestCase):
         n.set_jitter_ms(0)
         n.margin = 128
         self.assertLess(n._target() // 4, int(RATE * 0.02))
+
+    def test_cable_margin_never_shrinks_into_underruns(self):
+        # The margin used to shrink every 5 s down to 2.7 ms, so the sound
+        # broke every so often by itself. Now it stays >= 10 ms.
+        from zenlink import audio_out
+        from zenlink.audio_out import MIN_MARGIN, NativeAudio
+
+        n = NativeAudio()
+        n.set_jitter_ms(0)
+        self.assertGreaterEqual(n.margin, MIN_MARGIN)
+        n._stream = object()  # feed() only queues while a stream is open
+        n._started = True
+        n._calm_since = audio_out.time.monotonic() - 3600
+        n._buf = bytearray(4 * 48000)
+        n._callback(bytearray(4 * 480), 480, None, None)
+        self.assertGreaterEqual(n.margin, MIN_MARGIN)
+        n._stream = None
+
+
+class DriverScanTests(unittest.TestCase):
+    def test_package_scan_is_cached_until_the_inf_folder_changes(self):
+        from zenlink.drivers import status
+
+        status._PACKAGES_CACHE.clear()
+        first = status.libusb0_packages()
+        self.assertIn("key", status._PACKAGES_CACHE)
+        status._PACKAGES_CACHE["found"] = {"FAKE": "oem0.inf"}
+        self.assertEqual(status.libusb0_packages(), {"FAKE": "oem0.inf"})  # served from the cache
+        status._PACKAGES_CACHE["key"] = None  # folder "changed": read again
+        self.assertEqual(status.libusb0_packages(), first)
 
     def test_concurrent_start_opens_one_stream(self):
         from zenlink.audio_out import NativeAudio

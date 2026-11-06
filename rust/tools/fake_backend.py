@@ -13,6 +13,7 @@ import asyncio
 import base64
 import json
 import struct
+import random
 import time
 
 import av
@@ -43,6 +44,8 @@ def main():
     ap.add_argument("--needs-choice", action="store_true", help="start with no connection mode (chooser shows)")
     ap.add_argument("--steps", type=float, default=0, help="seconds per connect phase (connecting, activating) before streaming")
     ap.add_argument("--fail", action="store_true", help="fail during activating (with --steps)")
+    ap.add_argument("--jitter", type=float, default=0,
+                    help="send each frame up to this many ms late (random, not cumulative), like a real link")
     ap.add_argument("--need", help="device needs this first (restore, bind, removefilter, trust, ...)")
     a = ap.parse_args()
     clips = [load(a.video)] + ([load(a.video2)] if a.video2 else [])
@@ -141,6 +144,8 @@ def main():
                 await resp.write(struct.pack(">IB", len(data) + 1, 0 if key else 1) + data)
                 n += 1
                 wait = t0 + n / fps - time.perf_counter()
+                if a.jitter:
+                    wait += random.uniform(0, a.jitter / 1000)
                 if wait > 0:
                     await asyncio.sleep(wait)
         return resp

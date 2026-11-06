@@ -6,7 +6,10 @@ either capture backend (48 kHz stereo s16le) is fed into a small ring buffer
 that the audio callback drains:
 
 * playback starts once one packet plus a margin is queued;
-* an underrun adds 2 ms of margin (up to 30 ms), 5 s without one takes 1 ms off;
+* an underrun adds 5 ms of margin (up to 30 ms), 30 s without one takes 1 ms
+  off, never below 10 ms. It used to start at 2.7 ms and shrink every 5 s:
+  the margin kept shrinking until the sound broke, then grew again, so the
+  sound broke every so often on its own (more often with any backend hiccup);
 * anything queued beyond twice the target is dropped, so sound never trails.
 """
 
@@ -21,6 +24,8 @@ log = logging.getLogger(__name__)
 
 RATE = 48000
 BYTES_PER_FRAME = 4  # s16 stereo
+MIN_MARGIN = 480     # frames (10 ms): smallest margin the buffer shrinks to
+CALM_S = 30.0        # seconds without an underrun before the margin shrinks
 
 
 class NativeAudio:
@@ -37,7 +42,7 @@ class NativeAudio:
         self.volume = 1.0
         self.muted = False
         self.packet = 0          # frames, largest recent packet
-        self.margin = 128        # frames
+        self.margin = MIN_MARGIN  # frames
         self.floor = 0           # frames: minimum margin (Wi-Fi jitter buffer)
         self._calm_since = time.monotonic()
         self.underruns = 0
@@ -168,9 +173,9 @@ class NativeAudio:
                 if self._started:
                     self._started = False
                     self.underruns += 1
-                    self.margin = min(max(1440, self.floor + 2400), self.margin + (480 if self.floor else 96))
+                    self.margin = min(max(1440, self.floor + 2400), self.margin + (480 if self.floor else 240))
                     self._calm_since = now
-            if now - self._calm_since > 5 and self.margin > max(128, self.floor):
+            if now - self._calm_since > CALM_S and self.margin > max(MIN_MARGIN, self.floor):
                 self.margin -= 48
                 self._calm_since = now
         if data is None or self.muted or self.volume <= 0:

@@ -173,6 +173,9 @@ def libusb0_status() -> dict:
     return status
 
 
+_PACKAGES_CACHE: dict = {}
+
+
 def libusb0_packages() -> dict[str, str]:
     """libusb-win32 device-driver packages in the driver store, by USB PID.
 
@@ -182,9 +185,18 @@ def libusb0_packages() -> dict[str, str]:
     because pnputil's text output is translated on non-English Windows."""
     inf_dir = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "INF")
     try:
-        names = sorted(n for n in os.listdir(inf_dir) if re.fullmatch(r"oem\d+\.inf", n, re.IGNORECASE))
+        entries = sorted(
+            (e.name, e.stat().st_mtime_ns, e.stat().st_size)
+            for e in os.scandir(inf_dir) if re.fullmatch(r"oem\d+\.inf", e.name, re.IGNORECASE)
+        )
     except OSError:
         return {}
+    # Reading and searching ~200 INF files takes ~300 ms of interpreter time;
+    # the packages only change when one is added, removed or rewritten.
+    key = (inf_dir, tuple(entries))
+    if _PACKAGES_CACHE.get("key") == key:
+        return dict(_PACKAGES_CACHE["found"])
+    names = [n for n, _, _ in entries]
     found: dict[str, str] = {}
     for name in names:
         try:
@@ -200,6 +212,7 @@ def libusb0_packages() -> dict[str, str]:
             continue
         for pid in re.findall(r"VID_05AC&PID_([0-9A-F]{4})(?![0-9A-F&])", text, re.IGNORECASE):
             found.setdefault(pid.upper(), name)
+    _PACKAGES_CACHE.update(key=key, found=dict(found))
     return found
 
 

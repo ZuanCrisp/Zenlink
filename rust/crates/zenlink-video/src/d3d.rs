@@ -91,16 +91,29 @@ pub struct Slot {
     pub src: RECT,
 }
 
-/// Triple buffer: the decoder writes a slot that is neither the newest nor
-/// the one on screen, then publishes it as the newest.
+/// Frames handed from the decoder to the screen, oldest first.
+///
+/// A short queue instead of "newest wins": frames from the phone arrive with
+/// network / backend jitter, so two can land within one screen refresh. Newest
+/// wins dropped the first and the next refresh showed the same picture again,
+/// a visible stutter every few seconds when the phone's 60 fps drifts against
+/// a 60 Hz screen (and in OBS capture). The queue shows each frame once, one
+/// per refresh, and only skips one when it falls more than a frame behind.
+pub const SLOTS: usize = 6;
+/// Frames that may wait for the screen (each is one refresh of added delay).
+pub const MAX_QUEUE: usize = 3;
+/// A backlog of two or more frames kept this long is cut by one frame.
+pub const CATCH_UP: std::time::Duration = std::time::Duration::from_millis(250);
+
 #[derive(Default)]
 pub struct Ring {
-    pub slots: [Option<Slot>; 3],
-    pub latest: Option<usize>,
+    pub slots: [Option<Slot>; SLOTS],
+    /// Decoded frames not shown yet, oldest first.
+    pub queue: std::collections::VecDeque<usize>,
+    /// The slot on screen (shown again until a newer frame is due).
     pub showing: Option<usize>,
     pub seq: u64,
-    /// The newest frame has not been shown yet.
-    pub fresh: bool,
+    behind_since: Option<std::time::Instant>,
 }
 
 unsafe impl Send for Ring {}
@@ -108,7 +121,130 @@ unsafe impl Send for Ring {}
 pub type SharedRing = std::sync::Arc<Mutex<Ring>>;
 
 impl Ring {
-    pub fn free_slot(&self) -> usize {
-        (0..3).find(|i| Some(*i) != self.latest && Some(*i) != self.showing).unwrap_or(0)
+    /// A slot that is neither waiting nor on screen. Returns how many waiting
+    /// frames had to be dropped to free one (never, with SLOTS > MAX_QUEUE + 1).
+    pub fn free_slot(&mut self) -> (usize, u64) {
+        let mut dropped = 0;
+        loop {
+            if let Some(i) = (0..SLOTS).find(|i| !self.queue.contains(i) && Some(*i) != self.showing) {
+                return (i, dropped);
+            }
+            if self.queue.pop_front().is_none() {
+                return (0, dropped);
+            }
+            dropped += 1;
+        }
+    }
+
+    /// Queue a decoded frame. Returns how many old frames were dropped.
+    pub fn push(&mut self, idx: usize) -> u64 {
+        self.queue.retain(|&i| i != idx);
+        self.queue.push_back(idx);
+        self.seq += 1;
+        let mut dropped = 0;
+        while self.queue.len() > MAX_QUEUE {
+            self.queue.pop_front();
+            dropped += 1;
+        }
+        dropped
+    }
+
+    /// Frame for this screen refresh: the next waiting one, or the one already
+    /// on screen. Returns (slot, frames skipped to catch up).
+    pub fn next(&mut self) -> (Option<usize>, u64) {
+        let mut skipped = 0;
+        if let Some(i) = self.queue.pop_front() {
+            self.showing = Some(i);
+        }
+        if self.queue.len() >= 2 {
+            let since = *self.behind_since.get_or_insert_with(std::time::Instant::now);
+            if since.elapsed() >= CATCH_UP {
+                if let Some(i) = self.queue.pop_front() {
+                    self.showing = Some(i);
+                    skipped = 1;
+                }
+                self.behind_since = None;
+            }
+        } else {
+            self.behind_since = None;
+        }
+        (self.showing, skipped)
+    }
+
+    /// Forget every frame (casting stopped).
+    pub fn clear(&mut self) {
+        self.queue.clear();
+        self.showing = None;
+        self.behind_since = None;
+    }
+}
+
+#[cfg(test)]
+mod ring_tests {
+    use super::*;
+
+    #[test]
+    fn shows_each_frame_once_in_order() {
+        let mut r = Ring::default();
+        let (a, _) = r.free_slot();
+        r.push(a);
+        let (b, _) = r.free_slot();
+        assert_ne!(a, b);
+        r.push(b); // two frames within one refresh: both are kept
+        assert_eq!(r.next(), (Some(a), 0));
+        assert_eq!(r.next(), (Some(b), 0));
+        assert_eq!(r.next(), (Some(b), 0)); // nothing new: same picture again
+    }
+
+    #[test]
+    fn free_slot_skips_waiting_and_showing() {
+        let mut r = Ring::default();
+        for _ in 0..MAX_QUEUE {
+            let (i, d) = r.free_slot();
+            assert_eq!(d, 0);
+            r.push(i);
+        }
+        r.next();
+        let (i, d) = r.free_slot();
+        assert_eq!(d, 0);
+        assert!(!r.queue.contains(&i) && Some(i) != r.showing);
+    }
+
+    #[test]
+    fn queue_is_bounded() {
+        let mut r = Ring::default();
+        let mut dropped = 0;
+        for _ in 0..10 {
+            let (i, d) = r.free_slot();
+            dropped += d + r.push(i);
+        }
+        assert_eq!(r.queue.len(), MAX_QUEUE);
+        assert_eq!(dropped, 10 - MAX_QUEUE as u64);
+    }
+
+    #[test]
+    fn catches_up_on_a_lasting_backlog() {
+        let mut r = Ring::default();
+        for _ in 0..3 {
+            let (i, _) = r.free_slot();
+            r.push(i);
+        }
+        assert_eq!(r.next().1, 0); // 2 left: backlog starts
+        std::thread::sleep(CATCH_UP + std::time::Duration::from_millis(20));
+        let (i, _) = r.free_slot();
+        r.push(i); // 3 waiting
+        let (_, skipped) = r.next();
+        assert_eq!(skipped, 1);
+        assert_eq!(r.queue.len(), 1);
+    }
+
+    #[test]
+    fn clear_forgets_everything() {
+        let mut r = Ring::default();
+        let (i, _) = r.free_slot();
+        r.push(i);
+        r.next();
+        r.clear();
+        assert_eq!(r.next(), (None, 0));
     }
 }

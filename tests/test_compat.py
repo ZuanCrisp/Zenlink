@@ -339,7 +339,8 @@ class FrozenBuildTests(unittest.TestCase):
         self.assertIn('"--recursive-copy-metadata", "pymobiledevice3"', script)
         # pytun_pmd3 loads wintun.dll when pymobiledevice3's tunnel module is imported.
         self.assertIn('"--collect-all", "pytun_pmd3"', script)
-        self.assertEqual(script.count("Test-FrozenExe ("), 2, "both the folder exe and the one-file exe are tested")
+        calls = [l for l in script.splitlines() if l.strip().startswith("Test-FrozenExe ")]
+        self.assertEqual(len(calls), 2, "both the folder exe and the one-file exe are tested")
 
     def test_selftest_covers_the_device_paths(self):
         import importlib.util

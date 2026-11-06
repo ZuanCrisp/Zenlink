@@ -5556,7 +5556,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-app"
-version = "2.2.3"
+version = "2.2.31"
 dependencies = [
  "log",
  "serde_json",
@@ -5569,7 +5569,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-core"
-version = "2.2.3"
+version = "2.2.31"
 dependencies = [
  "base64 0.22.1",
  "log",
@@ -5580,7 +5580,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-video"
-version = "2.2.3"
+version = "2.2.31"
 dependencies = [
  "log",
  "windows",

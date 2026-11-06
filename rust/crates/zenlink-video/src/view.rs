@@ -383,8 +383,7 @@ impl VideoView {
             stop.store(true, Relaxed);
         }
         let mut r = self.inner.ring.lock().unwrap();
-        r.latest = None;
-        r.fresh = false;
+        r.clear();
         self.inner.stats.width.store(0, Relaxed);
         self.inner.stats.height.store(0, Relaxed);
     }
@@ -498,15 +497,16 @@ fn render_session(inner: &Inner) -> Result<()> {
                 continue;
             }
             let frame = {
+                // One queued frame per refresh (see Ring): no frame is
+                // thrown away just because two arrived close together.
                 let mut r = inner.ring.lock().unwrap();
-                if let Some(i) = r.latest {
-                    r.showing = Some(i);
-                    r.fresh = false;
-                    let s = r.slots[i].as_ref().unwrap();
-                    Some((s.tex.clone(), s.w, s.h, s.src, r.seq))
-                } else {
-                    r.showing = None;
-                    None
+                let (slot, skipped) = r.next();
+                if skipped > 0 {
+                    inner.stats.replaced.fetch_add(skipped, Relaxed);
+                }
+                match slot.and_then(|i| r.slots[i].as_ref()) {
+                    Some(s) => Some((s.tex.clone(), s.w, s.h, s.src, r.seq)),
+                    None => None,
                 }
             };
             let back: ID3D11Texture2D = sc.GetBuffer(0)?;

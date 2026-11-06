@@ -1239,6 +1239,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 if due {
                     a.meter_at = Some(Instant::now());
                     let s = v.stats();
+                    if streaming && s.width > 0 && std::env::var_os("ZL_STATS_LOG").is_some() {
+                        // Measuring frame pacing (tests): once a second, to the log.
+                        log::info!("stats decoded={:.1} presented={:.1} dropped_total={}", s.decoded_fps, s.presented_fps, s.replaced);
+                    }
                     if streaming && s.width > 0 {
                         ui.set_stats_line(format!("{}×{}  ·  {:.0} fps  ·  {:.1} Mbps  ·  decode {:.1} ms", s.width, s.height, s.presented_fps.min(s.decoded_fps), s.mbps, s.decode_ms).into());
                         ui.set_stats_full(
