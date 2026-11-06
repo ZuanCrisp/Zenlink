@@ -546,6 +546,34 @@ class NativeAudioTests(unittest.TestCase):
         self.assertGreaterEqual(n._margin_cap(), 4096)
 
 
+class DeviceOnlySoundTests(unittest.TestCase):
+    """"Device only" must hand the sound back (HPA0): while the host asks for
+    it (HPA1) iOS keeps its own speaker silent."""
+
+    def _session(self):
+        from zenlink.usbdirect import session as us
+        from zenlink.usbdirect.hub import MediaHub
+
+        s = us.UsbDirectSession("x", MediaHub(), lambda *_: None, audio_to_pc=True)
+        s._ep_out, s._dev = object(), object()
+        s._audio_clock = us.HostClock(1)
+        s._device_audio_clock = 7
+        s._audio_on = True
+        sent = []
+        s._write = lambda data, timeout=2000: sent.append(data)
+        return s, sent
+
+    def test_toggle_sends_hpa0_then_hpa1_once(self):
+        from zenlink.usbdirect import wire
+
+        s, sent = self._session()
+        s.set_audio_to_pc(False)
+        s.set_audio_to_pc(False)  # no repeat
+        s.set_audio_to_pc(True)
+        kinds = [wire.u32(p, 16) for p in sent]  # outgoing: length, asyn, clock, subtype
+        self.assertEqual(kinds, [wire.HPA0, wire.HPA1])
+
+
 class SkewMeterTests(unittest.TestCase):
     """The SKEW answer paces the device's audio, and video players sync to it."""
 

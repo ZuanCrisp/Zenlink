@@ -59,6 +59,15 @@ struct App {
     device_rotation: u32,
     /// (shown w, shown h, settings open) the window was last fitted to.
     fitted: Option<(u32, u32, bool)>,
+    /// Logical window size ZenLink itself last set while fitting; any other
+    /// size while streaming means the user resized the window.
+    fit_set: Option<(f32, f32)>,
+    /// Picture size the user chose by resizing, relative to the default fit
+    /// (0 = never resized). Kept when the picture turns or settings change.
+    user_scale: f32,
+    /// Picture prefs the window was fitted for (fit, rotation, crop, follow):
+    /// only these may resize the window, not volume or other settings.
+    fit_prefs: Option<String>,
     meter_at: Option<Instant>,
     dark: bool,
     backdrop: Option<(bool, bool, i32, bool)>,
@@ -405,14 +414,17 @@ const MIN_W: f32 = 470.0;
 /// Stage width (logical px) while there is no picture yet.
 const IDLE_STAGE_W: f32 = 440.0;
 
-fn fit_window(ui: &AppWindow, shown: (u32, u32)) {
-    let Some((wx, wy, ww, wh)) = work_area(ui) else { return };
+/// Picture prefs that change the window's fitted size.
+fn fit_prefs_key(p: &Prefs) -> String {
+    format!("{}|{}|{}|{}|{}|{}|{}", p.fit, p.rotation, p.fit_window, p.crop_l, p.crop_t, p.crop_r, p.crop_b)
+}
+
+/// Default fitted picture size (logical px, without chrome) for `shown`.
+fn default_fit(ui: &AppWindow, shown: (u32, u32)) -> Option<(f32, f32)> {
+    let (_, _, ww, wh) = work_area(ui)?;
     let chrome_w = ui.get_chrome_w() + 2.0 * PIC_INSET;
     let chrome_h = ui.get_chrome_h() + 2.0 * PIC_INSET;
     let aspect = shown.0 as f32 / shown.1.max(1) as f32;
-    // Leave room for the title bar and the taskbar edge.
-    // Comfortable, not maximised: portrait ~72% of the screen height,
-    // landscape at most ~60% of the screen width.
     let max_h = wh * 0.62 - chrome_h;
     let max_w = ww * 0.46 - chrome_w;
     let (mut sw, mut sh) = (max_h * aspect, max_h);
@@ -420,9 +432,25 @@ fn fit_window(ui: &AppWindow, shown: (u32, u32)) {
         sw = max_w;
         sh = sw / aspect;
     }
+    Some((sw.max(1.0), sh.max(1.0)))
+}
+
+/// Fit the window to the picture. `scale` > 0: the size the user chose by
+/// resizing, relative to the default fit (kept within the screen).
+fn fit_window(ui: &AppWindow, shown: (u32, u32), scale: f32) -> Option<(f32, f32)> {
+    let (wx, wy, ww, wh) = work_area(ui)?;
+    let chrome_w = ui.get_chrome_w() + 2.0 * PIC_INSET;
+    let chrome_h = ui.get_chrome_h() + 2.0 * PIC_INSET;
+    let (mut sw, mut sh) = default_fit(ui, shown)?;
+    if scale > 0.0 {
+        let k = scale.min((ww - chrome_w) / sw).min((wh - chrome_h) / sh).max(0.2);
+        sw *= k;
+        sh *= k;
+    }
     let size = LogicalSize::new((sw + chrome_w).max(MIN_W), (sh + chrome_h).max(440.0));
     ui.window().set_size(size);
     keep_on_screen(ui, (wx, wy, ww, wh), size);
+    Some((size.width, size.height))
 }
 
 /// Show the connection mode chooser, widening the window so the sheet fits.
@@ -773,7 +801,16 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() {
                 apply_look(&ui);
                 push_audio(&api, &p, ui.get_muted());
-                APP.with_borrow_mut(|a| a.fitted = None);
+                // Only picture settings refit the window. Any other setting
+                // (volume, lip sync, theme...) used to shrink a window the
+                // user had resized back to the default fit.
+                let key = fit_prefs_key(&p);
+                APP.with_borrow_mut(|a| {
+                    if a.fit_prefs.as_deref() != Some(key.as_str()) {
+                        a.fit_prefs = Some(key);
+                        a.fitted = None;
+                    }
+                });
             }
         });
     }
@@ -1166,7 +1203,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 let end = if ui.get_settings_open() { 16.0 + 368.0 } else { 16.0 };
                 if (chrome - end).abs() < 0.01 {
-                    APP.with_borrow_mut(|a| a.hold_stage = None);
+                    APP.with_borrow_mut(|a| {
+                        a.hold_stage = None;
+                        a.fit_set = Some((target, lh));
+                    });
                 }
             }
             // Labelled dock is ~690 px wide (measured): icons only below that.
@@ -1213,12 +1253,31 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 v.set_bounds(x.round() as i32, y.round() as i32, w.round() as i32, h.round() as i32, streaming, ((22.0 - PIC_INSET) * sf).round() as i32);
                 let shown = v.shown_size();
+                if a.fit_prefs.is_none() {
+                    a.fit_prefs = Some(fit_prefs_key(&p));
+                }
                 let free = a.full_restore.is_none() && !ui.window().is_maximized();
                 if streaming && p.fit_window && shown.0 > 0 && free {
                     let key = (shown.0, shown.1, ui.get_settings_open());
                     if a.fitted != Some(key) {
                         a.fitted = Some(key);
-                        fit_window(&ui, shown);
+                        a.fit_set = fit_window(&ui, shown, a.user_scale);
+                    } else if a.hold_stage.is_none() {
+                        // Not a size ZenLink set: the user resized the window.
+                        // Remember how big they want the picture.
+                        let cur = ui.window().size().to_logical(sf);
+                        let moved = a.fit_set.map(|(w, h)| (cur.width - w).abs() > 2.0 || (cur.height - h).abs() > 2.0).unwrap_or(false);
+                        if moved {
+                            if let Some((dw, dh)) = default_fit(&ui, shown) {
+                                let cw = ui.get_chrome_w() + 2.0 * PIC_INSET;
+                                let ch = ui.get_chrome_h() + 2.0 * PIC_INSET;
+                                let k = ((cur.width - cw) / dw).min((cur.height - ch) / dh);
+                                if k.is_finite() && k > 0.0 {
+                                    a.user_scale = k.clamp(0.2, 4.0);
+                                }
+                            }
+                            a.fit_set = Some((cur.width, cur.height));
+                        }
                     }
                 }
                 // Dot field: ~30 fps, only while there is no picture.

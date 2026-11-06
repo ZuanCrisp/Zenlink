@@ -189,8 +189,12 @@ class UsbDirectSession:
     """One capture session for one device. run() blocks; stop() ends it."""
 
     def __init__(self, serial: str, hub: MediaHub, on_state: Callable[[str, str], None],
-                 display_size: tuple[int, int] = (3840, 2160)) -> None:
+                 display_size: tuple[int, int] = (3840, 2160), audio_to_pc: bool = True) -> None:
         self.serial = serial
+        # While the host asks for sound (HPA1), iOS sends it here and its own
+        # speaker stays silent. "Device only" therefore must not ask for it.
+        self.audio_to_pc = audio_to_pc
+        self._audio_on = False
         self.hub = hub
         self.on_state = on_state
         self.display_size = display_size
@@ -601,6 +605,24 @@ class UsbDirectSession:
         finally:
             self._stop_reader()
 
+    def set_audio_to_pc(self, on: bool) -> None:
+        """Move the device's sound to this PC (on) or back to the device (off)
+        while streaming: HPA1 asks for it, HPA0 hands it back."""
+        self.audio_to_pc = bool(on)
+        if self._ep_out is None or self._dev is None or self._audio_clock is None:
+            return  # not set up yet: CWPA follows audio_to_pc
+        if on == self._audio_on:
+            return
+        try:
+            if on:
+                self._write(wire.hpa1(self._device_audio_clock))
+            else:
+                self._write(wire.asyn(wire.HPA0, self._device_audio_clock))
+            self._audio_on = on
+            log.info("usb direct: sound %s", "to this PC" if on else "back on the device")
+        except usb.core.USBError as error:
+            log.info("usb direct: could not move the sound: %s", error)
+
     def _close_stream(self) -> None:
         if self._ep_out is None or self._dev is None:
             return
@@ -639,7 +661,10 @@ class UsbDirectSession:
             self._write(wire.hpd1(w, h))
             self._write(wire.hpd1(w, h))
             self._write(wire.reply_clock(correlation, self._audio_clock.id))
+            # Same handshake either way (known to work); "device only" hands
+            # the sound back once the picture runs.
             self._write(wire.hpa1(device_clock))
+            self._audio_on = True
         elif sub == wire.CVRP:
             device_clock = wire.u64(body)
             self._need = wire.need(device_clock)
@@ -686,6 +711,8 @@ class UsbDirectSession:
                         self._streaming = True
                         log.info("usb direct: first frame, %s %sx%s", self.info["codec"], self.info["width"], self.info["height"])
                         self.on_state("streaming", "")
+                        if not self.audio_to_pc:
+                            self.set_audio_to_pc(False)
         elif sub == wire.EAT:
             try:
                 sample = wire.SampleBuffer.parse(p[16:], wire.MEDIA_SOUND)

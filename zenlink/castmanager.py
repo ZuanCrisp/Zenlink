@@ -383,7 +383,7 @@ class CastManager:
         from zenlink.usbdirect.session import UsbDirectSession
 
         self.hub = MediaHub()
-        return UsbDirectSession(entry["serial"], self.hub, self._on_session_state)
+        return UsbDirectSession(entry["serial"], self.hub, self._on_session_state, audio_to_pc=self.audio_enabled)
 
     def stop(self) -> dict:
         session = self._session
@@ -473,6 +473,11 @@ class CastManager:
             self.audio.muted = bool(muted)
         if enabled is not None:
             self.audio_enabled = bool(enabled)
+            # ZenLink Studio over the cable: the device plays its own sound
+            # only while ZenLink does not ask for it.
+            mover = getattr(self._session, "set_audio_to_pc", None)
+            if mover is not None:
+                mover(self.audio_enabled)
             if not self.audio_enabled:
                 self._stop_sound()
             elif self.state.get("phase") == "streaming":
