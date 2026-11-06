@@ -29,6 +29,7 @@ use input::{Cmd, Input};
 slint::include_modules!();
 
 static SIDECAR: OnceLock<Mutex<Option<Sidecar>>> = OnceLock::new();
+static DEMO_T0: OnceLock<Instant> = OnceLock::new();
 
 /// Minimal file logger: %TEMP%\zenlink-next-v25.log (truncated on start).
 struct FileLog(Mutex<std::fs::File>);
@@ -83,6 +84,8 @@ struct App {
     dots: Option<dots::Dots>,
     // Stage width (logical) to keep while the settings panel slides.
     hold_stage: Option<f32>,
+    /// Settings slide: from, to, start, duration (B-22).
+    slide: Option<(f32, f32, Instant, Duration)>,
     dots_at: Option<Instant>,
     /// A mode choice was just sent: keep the chooser closed until the
     /// backend's state catches up.
@@ -135,6 +138,42 @@ fn is_full() -> bool {
 }
 
 /// Physical bounds of the monitor the window is on.
+/// The first time the window is on screen: keep the default size inside
+/// the monitor's work area (small or high-DPI laptop screens).
+fn clamp_to_work_area(ui: &AppWindow) {
+    let Some((wx, wy, ww, wh)) = work_area(ui) else {
+        return;
+    };
+    let cur = ui.window().size().to_logical(ui.window().scale_factor());
+    let (w, h) = (cur.width.min(ww * 0.95), cur.height.min(wh * 0.95));
+    if (w, h) != (cur.width, cur.height) {
+        let size = LogicalSize::new(w, h);
+        ui.window().set_size(size);
+        keep_on_screen(ui, (wx, wy, ww, wh), size);
+    }
+}
+
+/// CSS `cubic-bezier(0.05, 0.7, 0.1, 1)` (the v2.2.31 settings slide curve)
+/// at time `x` in 0..=1.
+fn slide_ease(x: f32) -> f32 {
+    let (x1, y1, x2, y2) = (0.05f32, 0.7f32, 0.1f32, 1.0f32);
+    let bez = |t: f32, a: f32, b: f32| {
+        let u = 1.0 - t;
+        3.0 * u * u * t * a + 3.0 * u * t * t * b + t * t * t
+    };
+    // x(t) is monotonic: bisection finds t for x.
+    let (mut lo, mut hi) = (0.0f32, 1.0f32);
+    for _ in 0..24 {
+        let mid = (lo + hi) / 2.0;
+        if bez(mid, x1, x2) < x {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    bez((lo + hi) / 2.0, y1, y2)
+}
+
 fn monitor_rect(ui: &AppWindow) -> Option<(i32, i32, u32, u32)> {
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
@@ -1668,7 +1707,12 @@ fn main() -> Result<(), slint::PlatformError> {
             // (see the frame timer), keeping the picture size steady.
             let sf = ui.window().scale_factor();
             let stage = ui.window().size().to_logical(sf).width - ui.get_chrome_w();
+            // Same timing as the v2.2.31 Slint animation: 320 ms open, 240 ms close.
+            let dur = Duration::from_millis(if open { 320 } else { 240 });
+            let to = if open { 1.0 } else { 0.0 };
+            let from = ui.get_sp();
             APP.with_borrow_mut(|a| {
+                a.slide = Some((from, to, Instant::now(), dur));
                 a.hold_stage = Some(stage);
                 if let Some((w, h, _)) = a.fitted {
                     a.fitted = Some((w, h, open));
@@ -1676,6 +1720,7 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         });
     }
+    ui.set_sp(if ui.get_settings_open() { 1.0 } else { 0.0 });
     if ui.get_settings_open() {
         // Settings start open: the window is the usual idle stage plus the
         // panel, not the panel squeezed into the default window (the window
@@ -2202,8 +2247,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         let input = input.clone();
         let (t, g) = (touch_on.clone(), gestures_on.clone());
+        let clamped = std::cell::Cell::new(false);
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(16), move || {
             let Some(ui) = weak.upgrade() else { return };
+            if !clamped.replace(true) {
+                clamp_to_work_area(&ui);
+            }
             APP.with_borrow_mut(|a| {
                 if a.view.is_none() {
                     let Some(h) = hwnd_of(ui.window()) else { return };
@@ -2275,7 +2324,48 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.set_fullscreen(full);
             // Settings slide: window width follows the animated chrome so
             // the picture keeps its size; ends when the slide settles.
+            // ZL_SETTINGS_DEMO=1 (tests): open and close Settings every 1.5 s,
+            // so the slide can be measured without touching the mouse.
+            if std::env::var_os("ZL_SETTINGS_DEMO").is_some() {
+                thread_local!(static DEMO: std::cell::Cell<Option<Instant>> = const { std::cell::Cell::new(None) });
+                let due = DEMO.with(|d| {
+                    let at = d.get().unwrap_or_else(Instant::now);
+                    let due = at.elapsed() >= Duration::from_millis(1500);
+                    d.set(Some(if due { Instant::now() } else { at }));
+                    due
+                });
+                if due {
+                    let open = !ui.get_settings_open();
+                    ui.set_settings_open(open);
+                    ui.invoke_settings_toggled(open);
+                }
+            }
+            if std::env::var_os("ZL_SETTINGS_DEMO").is_some() {
+                log::info!(
+                    "tick t={} window={lw:.1} stage_w={:.1} chrome={:.1} hold={:?}",
+                    DEMO_T0.get_or_init(Instant::now).elapsed().as_millis(),
+                    ui.get_stage_w(),
+                    ui.get_chrome_w(),
+                    APP.with_borrow(|a| a.hold_stage)
+                );
+            }
+            // Settings slide: progress and window width change on the same
+            // tick, so the layout never sees a panel wider than the window.
+            if let Some((from, to, at, dur)) = APP.with_borrow(|a| a.slide) {
+                let k = (at.elapsed().as_secs_f32() / dur.as_secs_f32()).min(1.0);
+                ui.set_sp(from + (to - from) * slide_ease(k));
+                if k >= 1.0 {
+                    APP.with_borrow_mut(|a| a.slide = None);
+                }
+            }
             if let Some(stage) = APP.with_borrow(|a| a.hold_stage) {
+                if std::env::var_os("ZL_STATS_LOG").is_some() {
+                    log::info!(
+                        "slide window={lw:.1} stage_w={:.1} chrome={:.1} held={stage:.1}",
+                        ui.get_stage_w(),
+                        ui.get_chrome_w()
+                    );
+                }
                 let chrome = ui.get_chrome_w();
                 let target = (stage + chrome).max(MIN_W);
                 let lh = ui.window().size().height as f32 / sf;
@@ -2460,5 +2550,24 @@ mod icon_tests {
     fn windows_10_falls_back_to_mdl2() {
         assert_eq!(super::pick_icon_font(false), "Segoe MDL2 Assets");
         assert_eq!(super::pick_icon_font(true), "Segoe Fluent Icons");
+    }
+}
+
+#[cfg(test)]
+mod slide_tests {
+    use super::slide_ease;
+
+    #[test]
+    fn slide_curve_matches_the_css_bezier() {
+        assert!(slide_ease(0.0).abs() < 1e-4);
+        assert!((slide_ease(1.0) - 1.0).abs() < 1e-4);
+        // Fast start, slow end (ease-out like the Slint curve it replaces).
+        assert!(slide_ease(0.25) > 0.6, "{}", slide_ease(0.25));
+        let mut last = 0.0;
+        for i in 1..=100 {
+            let y = slide_ease(i as f32 / 100.0);
+            assert!(y >= last - 1e-5, "monotonic at {i}");
+            last = y;
+        }
     }
 }

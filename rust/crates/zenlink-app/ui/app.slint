@@ -1510,9 +1510,12 @@ export component AppWindow inherits Window {
     title: "ZenLink Next";
     icon: @image-url("../../../../ui/logo-256.png");
     background: transparent;
-    // Phone-shaped until the first frame tells the real size.
-    preferred-width: 480px;
-    preferred-height: 820px;
+    // Roomy start (user's choice, 2026-11-07): taller, so the Android setup
+    // card fits without scrolling (the header's own minimum sets the width,
+    // 824 px at 100%). Rust shrinks it to the screen's work area on small
+    // screens; the first frame refits it to the picture.
+    preferred-width: 620px;
+    preferred-height: 900px;
     min-width: 470px; // header fits (logo, name, buttons, window controls)
     min-height: 420px;
     default-font-family: "Segoe UI Variable Text";
@@ -1589,10 +1592,12 @@ export component AppWindow inherits Window {
     // Everything around the picture: paddings, bars, settings.
     // Settings slide: 0 = closed, 1 = open. Spring-like ease-out (fast start,
     // soft landing), shared by the panel and the window width in Rust.
-    property <float> sp: settings-open ? 1 : 0;
+    // Settings slide progress, 0 = closed, 1 = open. Driven from Rust on the
+    // same tick as the window width (B-22): a Slint animation ran ahead of
+    // the window by a frame and the picture jumped while the panel slid.
+    in property <float> sp: 1;
     // Materialize curves (shayann07/liquidglass, Apache-2.0): in 320 ms,
     // out 240 ms.
-    animate sp { duration: settings-open ? 320ms : 240ms; easing: cubic-bezier(0.05, 0.7, 0.1, 1); }
     out property <length> chrome-w: 16px + 368px * sp;
     out property <length> chrome-h: 16px + 46px + 8px + 8px + 46px;
 

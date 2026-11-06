@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **A4 part 2 (Android settings and controls) and the B-17 OBS pacing fix done; next A5**, see `docs/ROADMAP.md`.
+Current phase: **A4 fixes from the user test (B-22..B-25) done; next A5 (smart encoder + profiles)**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is
@@ -172,3 +172,26 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Cause: `hevc_ok()` ran Media Foundation (multithreaded COM) on the UI thread before winit created the window; winit then panicked: `OleInitialize failed! Result was: RPC_E_CHANGED_MODE` (backtrace from `CreateWindowExW`).
 - Fix: the HEVC lookup runs on its own short-lived thread (`main.rs` `hevc_ok`).
 - Verification: the release exe starts and plays the Android fixture (`decoded=30.6 presented=157.2` in the stats log, no errors).
+
+### B-22: Settings slide jitters / blinks when opening or closing            Status: fixed (unverified)
+- Reported: 2026-11-07 by the user ("kalau tutup buka setting, animasinya kek rada ngeblink ato ngebug").
+- Cause (measured with `ZL_SETTINGS_DEMO=1 ZL_STATS_LOG=1`, which opens and closes Settings every 1.5 s and logs every tick): the panel width came from a Slint animation (`sp`), while the window width was set from a 16 ms timer that read that animation. By the time Slint drew, the animation had moved on, so the panel was wider or narrower than the window and the picture area jumped. Stage width, which should stay constant: closing 421 -> 612 -> 484 -> 455 -> 433 -> 454 px; opening 454 -> 284 -> 392 -> 418 -> 454 px. The same code is in v2.2.31.
+- Fix: `sp` is set from Rust (`main.rs` `slide`, `slide_ease` = the same `cubic-bezier(0.05, 0.7, 0.1, 1)`, 320 ms open / 240 ms close) on the same tick as the window width.
+- Verification: same measurement after the fix: opening keeps the stage at 453.5-454.5 px (rounding); closing keeps it at 421 px until the window reaches its 470 px minimum, then it widens smoothly to 454 px (the minimum window width, unchanged). Test `slide_curve_matches_the_css_bezier`. Unverified: the user's eyes on their screen.
+
+### B-23: Mouse clicks did not touch the Android phone            Status: fixed (unverified)
+- Reported: 2026-11-07 by the user: the keyboard works, clicks on the picture do nothing.
+- Cause: touch needs the video size (scrcpy ignores a touch made for another size). The size comes in the session packet, which the server sends before the first config packet. `first_config()` read and dropped that packet, so the size stayed 0 and `Shared::pointer` sent nothing. Keys need no size, so they worked.
+- Fix: `first_config` stores the session size (`android.rs`).
+- Verification: test `session_size_before_the_config_is_kept_for_touch` (fails before the fix). Unverified on the phone.
+
+### B-24: Android Quick settings / Notifications buttons did not close the panel            Status: fixed (unverified)
+- Reported: 2026-11-07 by the user: pressing the button again does not close the panel.
+- Cause: the buttons only sent "expand"; there was no state to send "collapse".
+- Fix: the bar remembers the open panel; the same button again sends COLLAPSE_PANELS, the other one switches; a touch, Back, Home or Recents forgets it (the phone closes the panel itself).
+- Verification: test `panel_buttons_toggle`. Unverified on the phone.
+
+### B-25: Default window size more roomy            Status: fixed (verified)
+- Reported: 2026-11-07 by the user (screenshot of the window with Settings open, wanting that size at start).
+- Fix: `app.slint` preferred size 620 x 900 (was 480 x 820); on first show the window is kept inside the monitor's work area (95%) for small or high-DPI screens (`clamp_to_work_area`). With Settings open at start (the default) the width is the idle stage plus the panel, as before.
+- Verification: measured at 100% scaling on a 2560x1440 screen: the window opens at 824 x 900 (was 824 x 820) on the Android screen and the platform screen.

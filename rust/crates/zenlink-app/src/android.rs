@@ -83,6 +83,9 @@ pub struct Shared {
     /// Video frame size from the last session packet (touch coordinates).
     frame_w: AtomicU32,
     frame_h: AtomicU32,
+    /// Panel the bottom bar opened ("notifications" / "quick-settings"):
+    /// pressing the same button again closes it, like the Apple bar.
+    panel: Mutex<Option<&'static str>>,
 }
 
 /// The session the window's mouse and keyboard go to.
@@ -172,10 +175,16 @@ impl Shared {
             buttons: 0,
         };
         match e {
-            PointerEvent::Down(u, v) => self.send(&[touch(ACTION_DOWN, at(u, v), 1.0)]),
+            PointerEvent::Down(u, v) => {
+                self.forget_panel();
+                self.send(&[touch(ACTION_DOWN, at(u, v), 1.0)])
+            }
             PointerEvent::Move(u, v) => self.send(&[touch(ACTION_MOVE, at(u, v), 1.0)]),
             PointerEvent::Up(u, v) => self.send(&[touch(ACTION_UP, at(u, v), 0.0)]),
-            PointerEvent::Back | PointerEvent::Secondary => self.back(),
+            PointerEvent::Back | PointerEvent::Secondary => {
+                self.forget_panel();
+                self.back()
+            }
             PointerEvent::Middle => self.send(&Control::key_tap(keycode::HOME, 0)),
             PointerEvent::Wheel(u, v, notches) => self.send(&[Control::Scroll {
                 pos: at(u, v),
@@ -184,6 +193,11 @@ impl Shared {
                 buttons: 0,
             }]),
         }
+    }
+
+    /// The phone closes a panel by itself on a touch, BACK or HOME.
+    fn forget_panel(&self) {
+        *self.panel.lock().unwrap() = None;
     }
 
     /// BACK (or screen on), press and release.
@@ -200,11 +214,39 @@ impl Shared {
     /// (the window handles it, e.g. mute).
     pub fn action(&self, name: &str) -> bool {
         match name {
-            "back" => self.back(),
-            "home" => self.send(&Control::key_tap(keycode::HOME, 0)),
-            "switcher" => self.send(&Control::key_tap(keycode::APP_SWITCH, 0)),
-            "notifications" => self.send(&[Control::ExpandNotifications]),
-            "quick-settings" => self.send(&[Control::ExpandSettings]),
+            "back" => {
+                self.forget_panel();
+                self.back()
+            }
+            "home" => {
+                self.forget_panel();
+                self.send(&Control::key_tap(keycode::HOME, 0))
+            }
+            "switcher" => {
+                self.forget_panel();
+                self.send(&Control::key_tap(keycode::APP_SWITCH, 0))
+            }
+            "notifications" | "quick-settings" => {
+                let name = if name == "notifications" {
+                    "notifications"
+                } else {
+                    "quick-settings"
+                };
+                let mut open = self.panel.lock().unwrap();
+                if *open == Some(name) {
+                    *open = None;
+                    drop(open);
+                    self.send(&[Control::CollapsePanels]);
+                } else {
+                    *open = Some(name);
+                    drop(open);
+                    self.send(&[if name == "notifications" {
+                        Control::ExpandNotifications
+                    } else {
+                        Control::ExpandSettings
+                    }]);
+                }
+            }
             "vol-down" => self.send(&Control::key_tap(keycode::VOLUME_DOWN, 0)),
             "vol-up" => self.send(&Control::key_tap(keycode::VOLUME_UP, 0)),
             "lock" => self.send(&Control::key_tap(keycode::POWER, 0)),
@@ -265,7 +307,9 @@ fn codec_info(codec: u32, config: &[u8]) -> Option<CodecInfo> {
 }
 
 /// Reads up to the first config packet; media before it cannot be decoded.
-fn first_config<R: Read>(v: &mut VideoReader<R>) -> io::Result<CodecInfo> {
+/// The session packet before it carries the video size, which touch input
+/// needs (the server ignores touches made for another size).
+fn first_config<R: Read>(v: &mut VideoReader<R>, shared: &Shared) -> io::Result<CodecInfo> {
     if v.codec != CODEC_H264 && v.codec != CODEC_H265 {
         return Err(io::Error::other(format!(
             "codec {} is not supported yet",
@@ -273,9 +317,14 @@ fn first_config<R: Read>(v: &mut VideoReader<R>) -> io::Result<CodecInfo> {
         )));
     }
     for _ in 0..64 {
-        if let Packet::Config(c) = v.next_packet()? {
-            return codec_info(v.codec, &c)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no parameter sets"));
+        match v.next_packet()? {
+            Packet::Session { width, height, .. } => shared.set_frame(width, height),
+            Packet::Config(c) => {
+                return codec_info(v.codec, &c).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidData, "no parameter sets")
+                });
+            }
+            Packet::Media { .. } => {}
         }
     }
     Err(io::Error::new(
@@ -426,7 +475,7 @@ impl VideoSource for DeviceSource {
         if self.shared.stop.load(Relaxed) {
             return None;
         }
-        let info = match first_config(&mut m.video) {
+        let info = match first_config(&mut m.video, &self.shared) {
             Ok(i) => i,
             Err(e) => {
                 self.fail(e.to_string());
@@ -642,7 +691,7 @@ impl VideoSource for FixtureSource {
         };
         let opened = read_device_meta(&mut r).and_then(|name| {
             let mut v = VideoReader::new(r)?;
-            let info = first_config(&mut v)?;
+            let info = first_config(&mut v, &self.shared)?;
             Ok((name, v, info))
         });
         let (name, video, info) = match opened {
@@ -857,7 +906,7 @@ mod tests {
         let mut r = &data[..];
         assert_eq!(read_device_meta(&mut r).unwrap(), "Synthetic test stream");
         let mut v = VideoReader::new(r).unwrap();
-        let info = first_config(&mut v).unwrap();
+        let info = first_config(&mut v, &Shared::default()).unwrap();
         assert_eq!(info.codec, Codec::H264);
         let (mut frames, mut keys, mut last) = (0, 0, 0);
         while let Ok(p) = v.next_packet() {
@@ -992,11 +1041,59 @@ mod tests {
     }
 
     #[test]
+    fn session_size_before_the_config_is_kept_for_touch() {
+        // scrcpy sends the session packet (video size) before the config;
+        // first_config used to swallow it, so every touch was dropped.
+        let w = wire(&[
+            Packet::Session {
+                width: 720,
+                height: 1600,
+                client_resized: false,
+            },
+            Packet::Config(CONFIG.to_vec()),
+        ]);
+        let mut r = &w[..];
+        read_device_meta(&mut r).unwrap();
+        let mut v = VideoReader::new(r).unwrap();
+        let shared = Shared::default();
+        first_config(&mut v, &shared).unwrap();
+        assert_eq!(shared.frame(), Some((720, 1600)));
+    }
+
+    #[test]
+    fn panel_buttons_toggle() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let tx = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (mut rx, _) = l.accept().unwrap();
+        let shared = Shared::default();
+        *shared.control.lock().unwrap() = Some(tx);
+        shared.action("notifications");
+        shared.action("notifications");
+        shared.action("quick-settings");
+        shared.action("notifications");
+        shared.set_frame(100, 100);
+        shared.pointer(PointerEvent::Down(0.5, 0.5), 0); // touching the phone forgets the panel
+        shared.action("quick-settings");
+        let mut b = [0u8; 5];
+        rx.read_exact(&mut b).unwrap();
+        assert_eq!(
+            b,
+            [5, 7, 6, 5, 2],
+            "open, close, settings, switch to notifications, touch"
+        );
+        let mut rest = [0u8; 32];
+        rx.read_exact(&mut rest[..31]).unwrap();
+        let mut last = [0u8; 1];
+        rx.read_exact(&mut last).unwrap();
+        assert_eq!(last, [6], "opens again after a touch");
+    }
+
+    #[test]
     fn av1_is_refused_for_now() {
         let mut w = Vec::new();
         w.extend_from_slice(&zenlink_android::mirror::CODEC_AV1.to_be_bytes());
         let mut v = VideoReader::new(&w[..]).unwrap();
-        assert!(first_config(&mut v).is_err());
+        assert!(first_config(&mut v, &Shared::default()).is_err());
     }
 
     #[test]
@@ -1010,7 +1107,7 @@ mod tests {
         w.extend_from_slice(&CODEC_H265.to_be_bytes());
         write_packet(&mut w, &Packet::Config(config)).unwrap();
         let mut v = VideoReader::new(&w[..]).unwrap();
-        let info = first_config(&mut v).unwrap();
+        let info = first_config(&mut v, &Shared::default()).unwrap();
         assert_eq!(info.codec, Codec::Hevc);
         assert_eq!(info.description[22], 3, "VPS, SPS, PPS arrays");
     }
