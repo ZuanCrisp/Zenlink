@@ -862,48 +862,38 @@ pub fn load_server() -> Result<Vec<u8>, String> {
     Err(format!("{SERVER_FILE} not found"))
 }
 
-/// Portable.exe: Google's official, unmodified `adb` (platform-tools) packed
-/// in by the build (`ZENLINK_ADB_DIR`, B-28) and unpacked on first use.
+/// Portable.exe: Google's official, unmodified `adb` (platform-tools),
+/// deflate-compressed by build.rs from `ZENLINK_ADB_DIR` (B-28):
+/// `(file name, original size, compressed bytes)`.
 #[cfg(feature = "embedded-backend")]
-static PACKED_ADB: [(&str, &[u8]); 4] = [
-    (
-        "adb.exe",
-        include_bytes!(concat!(env!("ZENLINK_ADB_DIR"), "/adb.exe")),
-    ),
-    (
-        "AdbWinApi.dll",
-        include_bytes!(concat!(env!("ZENLINK_ADB_DIR"), "/AdbWinApi.dll")),
-    ),
-    (
-        "AdbWinUsbApi.dll",
-        include_bytes!(concat!(env!("ZENLINK_ADB_DIR"), "/AdbWinUsbApi.dll")),
-    ),
-    (
-        "NOTICE.txt",
-        include_bytes!(concat!(env!("ZENLINK_ADB_DIR"), "/NOTICE.txt")),
-    ),
-];
+static PACKED_ADB: [(&str, u64, &[u8]); 4] = include!(concat!(env!("OUT_DIR"), "/packed_adb.rs"));
 
 /// Unpacks the packed `adb` to `platform-tools` in the data folder
-/// (`zenlink_core::local_data_dir`).
-/// A file with the right size stays (a running adb server keeps its exe
-/// locked), so this writes only after an update.
+/// (`zenlink_core::local_data_dir`). A file with the right size stays (a
+/// running adb server keeps its exe locked), so this writes only after an
+/// update. The unpacked files are byte-for-byte the originals.
 #[cfg(feature = "embedded-backend")]
 fn unpack_adb() -> Option<PathBuf> {
     let dir = zenlink_core::local_data_dir()?.join("platform-tools");
     std::fs::create_dir_all(&dir).ok()?;
-    for (name, data) in PACKED_ADB.iter() {
+    for (name, size, packed) in PACKED_ADB.iter() {
         let path = dir.join(name);
         let same = std::fs::metadata(&path)
-            .map(|m| m.len() == data.len() as u64)
+            .map(|m| m.len() == *size)
             .unwrap_or(false);
-        if !same {
-            let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
-            std::fs::write(&tmp, data).ok()?;
-            if std::fs::rename(&tmp, &path).is_err() {
-                let _ = std::fs::remove_file(&tmp);
-                return None;
-            }
+        if same {
+            continue;
+        }
+        let data = miniz_oxide::inflate::decompress_to_vec(packed).ok()?;
+        if data.len() as u64 != *size {
+            log::warn!("android: packed {name} is damaged");
+            return None;
+        }
+        let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
+        std::fs::write(&tmp, &data).ok()?;
+        if std::fs::rename(&tmp, &path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+            return None;
         }
     }
     Some(dir.join("adb.exe"))

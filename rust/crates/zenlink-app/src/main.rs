@@ -2159,6 +2159,8 @@ fn main() -> Result<(), slint::PlatformError> {
 
     let ui = AppWindow::new()?;
     ui.global::<Theme>().set_icons(icon_font().into());
+    ui.global::<AppInfo>()
+        .set_version(env!("CARGO_PKG_VERSION").into());
     ui.set_prefs(prefs::load());
     let api = Api::new();
     let input = Input::new(api.clone());

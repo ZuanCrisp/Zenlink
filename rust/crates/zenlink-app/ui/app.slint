@@ -1722,9 +1722,46 @@ component SettingsPanel inherits Glass {
                         }
                     }
                 }
+                Card {
+                    title: I18n.t("Tentang & kredit", "About & credits");
+                    icon: "\u{E946}";
+                    tint-a: #ec4899;
+                    tint-b: #a855f7;
+                    Text {
+                        text: "ZenLink v" + AppInfo.version + "  ·  Next";
+                        font-size: 12.5px;
+                        font-weight: 700;
+                        color: Theme.text;
+                    }
+                    Text {
+                        text: I18n.t("© 2026 Zenvy Zenshiro · GPL-3.0-or-later · tanpa garansi.", "© 2026 Zenvy Zenshiro · GPL-3.0-or-later · no warranty.");
+                        font-size: 11px;
+                        color: Theme.text-2;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: I18n.t(
+                            "Android: server scrcpy (Genymobile & Romain Vimont, Apache-2.0) dan adb resmi Google (Android platform-tools, tidak diubah; NOTICE.txt di third_party). Apple: pymobiledevice3 (GPL-3.0), pane-iphone-mirror-windows (GPL-3.0), quicktime_video_hack (MIT), libusb-win32, UxPlay/playfair (GPL-3.0). Suara AAC: FFmpeg (LGPL). Detail: README dan docs/THIRD_PARTY.md.",
+                            "Android: the scrcpy server (Genymobile & Romain Vimont, Apache-2.0) and Google's official adb (Android platform-tools, unmodified; NOTICE.txt in third_party). Apple: pymobiledevice3 (GPL-3.0), pane-iphone-mirror-windows (GPL-3.0), quicktime_video_hack (MIT), libusb-win32, UxPlay/playfair (GPL-3.0). AAC sound: FFmpeg (LGPL). Details: README and docs/THIRD_PARTY.md.");
+                        font-size: 11px;
+                        color: Theme.text-2;
+                        wrap: word-wrap;
+                    }
+                    Text {
+                        text: I18n.t("Android adalah merek dagang Google LLC. iPhone, iPad dan AirPlay adalah merek dagang Apple Inc. ZenLink tidak berafiliasi dengan Google atau Apple.", "Android is a trademark of Google LLC. iPhone, iPad and AirPlay are trademarks of Apple Inc. ZenLink is not affiliated with Google or Apple.");
+                        font-size: 10.5px;
+                        color: Theme.text-3;
+                        wrap: word-wrap;
+                    }
+                }
             }
         }
     }
+}
+
+// Shown in Settings › About (set from Cargo's version at start).
+export global AppInfo {
+    in property <string> version;
 }
 
 export component AppWindow inherits Window {

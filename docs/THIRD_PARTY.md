@@ -59,18 +59,42 @@ Design references for the Rust window are listed in `docs/rust/THIRD_PARTY.md`.
   - Both files and the licence are kept next to the server.
 - Licence: **Apache-2.0** (`third_party/scrcpy/LICENSE`), Copyright (C) 2018 Genymobile,
   Copyright (C) 2018-2026 Romain Vimont. Apache-2.0 is compatible with GPL-3.0.
-  Credit in the README, About, and installer follows in phase A6.
+  Credited in the README, in Settings › About & credits, and in the installed
+  `THIRD_PARTY.md` with `third_party\scrcpy\LICENSE`.
 - Checked by `tests/test_scrcpy_pin.py` (SHA-256) and the Rust test
   `scrcpy::tests::bundled_server_is_present_with_the_pinned_size`.
 
-## Android platform-tools `adb` (planned, phase A3)
+## Android platform-tools `adb`, in `third_party\platform-tools\`
 
-- Decision and evidence: `docs/android/ADB.md`. Not bundled yet.
-- To bundle: `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll`, unmodified and
-  Google-signed, from the official platform-tools zip
-  (https://dl.google.com/android/repository/platform-tools-latest-windows.zip,
-  listed in https://dl.google.com/android/repository/repository2-3.xml).
-- Licence: the Android SDK platform-tools are distributed under Google's Android
-  Software Development Kit License Agreement plus the Apache-2.0 / other notices in
-  the zip's `NOTICE.txt`. Redistribution next to a GPL-3.0 program has to be audited
-  before bundling (master prompt section 13); open item in `docs/BUGS-v2.5.md` (B-10).
+- What: `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll` and `NOTICE.txt` from
+  Google's Android SDK Platform-Tools, **unmodified**. ZenLink starts this adb
+  only when no ADB server runs; it never stops another program's server.
+  Decision and evidence: `docs/android/ADB.md`.
+- Version: platform-tools **37.0.1** (`source.properties` `Pkg.Revision=37.0.1`).
+  - Source: Google's official platform-tools for Windows
+    (https://dl.google.com/android/repository/platform-tools-latest-windows.zip,
+    listed in https://dl.google.com/android/repository/repository2-3.xml),
+    installed through the Android SDK manager in `E:\AndroidDev\sdk`.
+  - `adb.exe` SHA-256 `B4A6B455702684652CCCF7B46258B29E653538904359A58FD4931CF3EF286B3F`;
+    the build prints all four SHA-256s.
+  - Authenticode: `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` are validly
+    signed by **Google LLC**. `build_portable_release.ps1` stops if not.
+- Where: installer and source zip in `third_party\platform-tools\`. Portable.exe
+  packs the same files and unpacks them to `%LOCALAPPDATA%\ZenLink-Next\platform-tools`.
+- Licence (audit for B-10, 2026-11-07; a reading of the texts, not legal advice):
+  - The platform-tools package comes with the Android SDK License Agreement
+    (`package.xml`, `android-sdk-license`). §3.4 forbids redistributing the
+    SDK "except to the extent required by applicable third party licenses".
+  - §3.5: "Use, reproduction and distribution of components of the SDK
+    licensed under an open source software license are governed solely by
+    the terms of that open source software license".
+  - `NOTICE.txt` lists adb's components (Android Open Source Project, mainly
+    Apache-2.0, plus the notices of its libraries). adb is AOSP code
+    (`packages/modules/adb`).
+  - So the redistribution rests on §3.5 and Apache-2.0: ship the files
+    unmodified with `NOTICE.txt` and credit them. Other projects do the same,
+    for example scrcpy's Windows release ships these three files.
+  - Apache-2.0 programs can be shipped next to a GPL-3.0 program; adb runs as
+    a separate process.
+  - The owner decides whether this reading is enough before a public release
+    (B-10).

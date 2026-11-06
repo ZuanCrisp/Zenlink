@@ -65,9 +65,17 @@ if ($LASTEXITCODE) { throw "pip failed" }
 
 Write-Host "[2/4] Building ZenLinkService.exe (PyInstaller) and ZenLink.exe (Rust)..." -ForegroundColor Magenta
 $sep = ";"
+# Sound needs only the x64 PortAudio (sounddevice picks libportaudio64bit.dll
+# on 64-bit Python; ASIO only with SD_ENABLE_ASIO, which ZenLink never sets).
+# The 32-bit, ARM64, ASIO and macOS copies are left out (docs/SIZE_AUDIT.md B7).
+$sdData = (& $py -c "import _sounddevice_data, os; print(os.path.dirname(_sounddevice_data.__file__))").Trim()
+$portaudio = Join-Path $sdData "portaudio-binaries\libportaudio64bit.dll"
+if (-not (Test-Path $portaudio)) { throw "Missing $portaudio" }
 $pyiArgs = @(
     "-m", "PyInstaller", "packaging\launch.py",
     "--name", "ZenLinkService", "--onedir", "--windowed", "--noconfirm", "--clean",
+    # Never pack executables (AGENTS.md: no UPX, antivirus false positives).
+    "--noupx",
     "--icon", "assets\zenlink.ico",
     "--contents-directory", ".",
     "--version-file", "packaging\version_info.txt",
@@ -84,7 +92,8 @@ $pyiArgs = @(
     "--collect-all", "pmd_net_addr",
     "--collect-all", "pytun_pmd3",  # wintun.dll, loaded when the tunnel module is imported
     "--collect-all", "webview",
-    "--collect-all", "_sounddevice_data",
+    "--hidden-import", "_sounddevice_data",
+    "--add-binary", "${portaudio}${sep}_sounddevice_data\portaudio-binaries",
     "--collect-all", "zeroconf",
     "--add-binary", "zenlink\airplay\playfair.dll${sep}zenlink\airplay",
     # Sound: minimal FFmpeg AAC decoder (native\zlaac). PyAV (full FFmpeg,
@@ -107,6 +116,19 @@ $pyiArgs = @(
     "--exclude-module", "PIL.ImageQt",
     "--exclude-module", "PIL.ImageTk",
     "--exclude-module", "pydoc",
+    # Never imported by the headless backend (trace + lazy-import scan in
+    # docs/SIZE_AUDIT.md, B1/B4/B5): pydantic comes with pymobiledevice3's
+    # remote server, setuptools/PyInstaller/pefile are build tools, sqlite3
+    # has no user. The frozen self-test checks every device-path module.
+    "--exclude-module", "pydantic",
+    "--exclude-module", "pydantic_core",
+    "--exclude-module", "setuptools",
+    "--exclude-module", "pkg_resources",
+    "--exclude-module", "_distutils_hack",
+    "--exclude-module", "PyInstaller",
+    "--exclude-module", "pefile",
+    "--exclude-module", "sqlite3",
+    "--exclude-module", "_sqlite3",
     "--exclude-module", "lib2to3"
 )
 # Version resource (Author: Zenvy Zenshiro)
@@ -152,6 +174,11 @@ function Test-FrozenExe([string]$exe) {
 Test-FrozenExe (Join-Path $app "ZenLinkService.exe")
 # The full FFmpeg from PyAV must not come back (Phase 1 size win).
 if (Get-ChildItem $app -Recurse -Filter "avcodec-*.dll") { throw "PyAV/FFmpeg DLLs found in $app" }
+# Size audit: removed parts must stay out, the one PortAudio must be in.
+foreach ($gone in "pydantic_core", "sqlite3.dll", "_sqlite3.pyd", "libportaudio32bit.dll", "libportaudioarm64.dll", "libportaudio64bit-asio.dll") {
+    if (Get-ChildItem $app -Recurse -Filter $gone) { throw "$gone found in $app (see docs/SIZE_AUDIT.md)" }
+}
+if (-not (Test-Path (Join-Path $app "_sounddevice_data\portaudio-binaries\libportaudio64bit.dll"))) { throw "PortAudio x64 missing in $app" }
 foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat") {
     Copy-Item $f $app
 }
@@ -163,6 +190,8 @@ foreach ($f in $adbFiles) { Copy-Item (Join-Path $PlatformTools $f) $adbDest }
 $scrcpyDest = Join-Path $app "third_party\scrcpy"
 New-Item -ItemType Directory -Force $scrcpyDest | Out-Null
 Copy-Item "third_party\scrcpy\LICENSE" $scrcpyDest
+# Credits and licences of everything bundled (scrcpy, adb, FFmpeg, ...).
+Copy-Item "docs\THIRD_PARTY.md" $app
 & cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app
 if ($LASTEXITCODE) { throw "cargo failed" }
 # CARGO_TARGET_DIR lets the release build while a dev ZenLink.exe from

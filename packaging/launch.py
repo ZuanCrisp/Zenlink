@@ -29,6 +29,17 @@ SELFTEST_MODULES = (
     "zenlink.usbdirect.session",
     "zenlink.castmanager",
     "zenlink.server",
+    # Sound (PortAudio loads at import), AirPlay discovery, USB Direct.
+    "sounddevice",
+    "zenlink.audio_out",
+    "zeroconf",
+    "usb.core",
+    "usb.backend.libusb0",
+    "zenlink.ocr",
+    "zenlink.secret",
+    "zenlink.firewall",
+    "zenlink.drivers.status",
+    "zenlink.drivers.manager",
 )
 
 

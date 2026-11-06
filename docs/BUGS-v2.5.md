@@ -68,11 +68,11 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: Phase 0 isolation commit; renamed to "ZenLink Next" on 2026-11-06 at the user's request. It uses 47421 / 47422 / 7100, `ZenLink-Next` data folders, `zenlink-next-v25.log`, AppId `{5AE777B3-F756-4FAC-B6E7-A2125D89D76D}`, `AppName=ZenLink Next`, `{autopf}\ZenLink Next`, firewall rule "ZenLink Next (AirPlay)", AirPlay name "ZenLinkStudioNext", window/tray/AppUserModelID "ZenLink Next". Uninstallers stop only processes running from the beta's own folder.
 - Verification: `tests/test_next_isolation.py` and `zenlink-core` `isolation_tests` pass. Side-by-side run: see `lanjutan.md`. unverified: AirPlay on port 7100 with a real iPhone/iPad; installer install/uninstall next to an installed stable v2.2.31.
 
-### B-10: Licence audit before bundling Android platform-tools `adb`            Status: open
+### B-10: Licence audit before bundling Android platform-tools `adb`            Status: open (audited, needs the owner's decision)
 - Reported: 2026-11-06, phase A1 (master prompt section 13, AGENTS.md §6 item 9).
 - Cause: the ADB decision (`docs/android/ADB.md`) bundles Google's `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` next to a GPL-3.0 program. The platform-tools zip comes with Google's SDK licence and a `NOTICE.txt`; whether redistribution as a separate program is allowed was not audited yet.
-- Fix: n/a until phase A3 (read the SDK licence and `NOTICE.txt` of the version that is bundled, record the result in `docs/THIRD_PARTY.md`).
-- Verification: unverified: needs the audit; nothing is bundled yet.
+- Fix: audited 2026-11-07 for platform-tools 37.0.1 (`docs/THIRD_PARTY.md`): SDK licence §3.4 forbids redistribution except where third-party licences require it; §3.5 puts open-source components (adb is AOSP, Apache-2.0 per `NOTICE.txt`) under their own licence alone. The files ship unmodified with `NOTICE.txt` and credits (B-28).
+- Verification: the reading is recorded. Open: the owner's decision before a public release (not legal advice).
 
 ### B-11: Android device names, identity and list (phase A1)            Status: fixed (unverified)
 - Reported: 2026-11-06, phase A1 gate (master prompt section 4).
@@ -214,4 +214,10 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Cause: `docs/android/ADB.md` (A1) decided to bundle Google's `adb`, but `build_portable_release.ps1` and `packaging/ZenLink.iss` never copied it, nor `third_party/scrcpy/scrcpy-server-v5.0.1`. `find_adb` / `load_server` look next to the exe and in parent folders, so the source checkout worked, and adb came from `ANDROID_HOME=E:\AndroidDev\sdk` set in the untracked `Start ZenLink.local.bat`. Running `rust\target\release\ZenLink.exe` without that variable shows "ADB not found". An installed or portable build on another PC would have had no Android at all.
 - Fix: the scrcpy server is built into `ZenLink.exe` (`include_bytes!`, 733,930 B; test `builtin_server_matches_the_pinned_release`). The build script takes Google's platform-tools (`-PlatformTools`, or ANDROID_HOME / ANDROID_SDK_ROOT / Android Studio's SDK), checks that `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` are validly signed by Google LLC, prints the revision and SHA-256s, and puts them with `NOTICE.txt` in `third_party\platform-tools` (installer and source zip). Portable.exe packs them (`ZENLINK_ADB_DIR`) and unpacks them to `<data folder>\platform-tools` on first use. Local platform-tools: 37.0.1, all three signatures Valid (Google LLC), 2026-11-07.
 - Verification: unverified: needs a full `build_portable_release.ps1` run, then the Android screen of the installed and the portable build on a PC without the Android SDK (adb found, server starts).
+
+### B-29: "Close to the tray" and "Start when plugged in" do nothing in the Rust window            Status: open
+- Reported: 2026-11-07, found in the release audit (README claim check).
+- Cause: `prefs.rs` stores `closeToTray` and `autoStart` and Settings › Advanced shows both toggles, but nothing in `zenlink-app` reads them; only the classic window implemented them (`zenlink/window.py`, `zenlink/tray.py`). Same in v2.2.31 (`E:\ZenLink v2.2.31\rust\crates\zenlink-app\src\prefs.rs` only, read-only check).
+- Fix: open. Either implement a Rust tray (Shell_NotifyIcon) and auto-start on plug-in, or hide both toggles. The README no longer claims a tray.
+- Verification: code search (`close_to_tray`, `auto_start` have no reader in `src/main.rs`).
 
