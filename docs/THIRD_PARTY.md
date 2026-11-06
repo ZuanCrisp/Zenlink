@@ -36,3 +36,36 @@ Design references for the Rust window are listed in `docs/rust/THIRD_PARTY.md`.
   `e25671cd96b10bad896aa42ab91a695a9e573395262baed4e4a2ff178d6a3a78`) through
   `native/zlaac/tools/make_eld_fixture.cpp`. No FDK code or binary is part of
   ZenLink or its repository.
+
+## scrcpy server, in `third_party/scrcpy/`
+
+- What: the official scrcpy server (`scrcpy-server-v5.0.1`), pushed to the
+  Android device at `/data/local/tmp/scrcpy-server.jar` and run there with
+  `app_process`. ZenLink has its own Rust client (`rust/crates/zenlink-android`);
+  no scrcpy client code or window is used.
+- Version: scrcpy **5.0.1**, pinned in `zenlink_android::scrcpy::SCRCPY_VERSION`.
+  The server and the client protocol must match exactly.
+- Source: https://github.com/Genymobile/scrcpy/releases/tag/v5.0.1, asset
+  `scrcpy-server-v5.0.1` (733,930 bytes).
+  - SHA-256 `764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536`,
+    as listed in the release's `SHA256SUMS.txt`.
+  - `SHA256SUMS.txt.asc` verified: "Good signature from Romain Vimont", primary key
+    `4569 58E8 5A18 5DD5 C2D1 E4E8 0C82 2B29 8461 FA03`.
+  - Both files and the licence are kept next to the server.
+- Licence: **Apache-2.0** (`third_party/scrcpy/LICENSE`), Copyright (C) 2018 Genymobile,
+  Copyright (C) 2018-2026 Romain Vimont. Apache-2.0 is compatible with GPL-3.0.
+  Credit in the README, About, and installer follows in phase A6.
+- Checked by `tests/test_scrcpy_pin.py` (SHA-256) and the Rust test
+  `scrcpy::tests::bundled_server_is_present_with_the_pinned_size`.
+
+## Android platform-tools `adb` (planned, phase A3)
+
+- Decision and evidence: `docs/android/ADB.md`. Not bundled yet.
+- To bundle: `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll`, unmodified and
+  Google-signed, from the official platform-tools zip
+  (https://dl.google.com/android/repository/platform-tools-latest-windows.zip,
+  listed in https://dl.google.com/android/repository/repository2-3.xml).
+- Licence: the Android SDK platform-tools are distributed under Google's Android
+  Software Development Kit License Agreement plus the Apache-2.0 / other notices in
+  the zip's `NOTICE.txt`. Redistribution next to a GPL-3.0 program has to be audited
+  before bundling (master prompt section 13); open item in `docs/BUGS-v2.5.md` (B-10).

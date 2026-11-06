@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **Phase 1 (slim FFmpeg) done; next A1**, see `docs/ROADMAP.md`.
+Current phase: **A1 (Android foundation) done; next A2**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is
@@ -67,3 +67,15 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Cause: v2.2.31 hard-codes port 47321 (backend), 47322 (local Apple stream), 7000 (AirPlay), `%APPDATA%\ZenLink`, `%LOCALAPPDATA%\ZenLink`, the installer AppId, the "ZenLink (AirPlay)" firewall rule, `%TEMP%\zenlink-next.log`, and its uninstallers kill `ZenLink.exe`/`ZenLinkService.exe` by name (which would close the stable app).
 - Fix: Phase 0 isolation commit; renamed to "ZenLink Next" on 2026-11-06 at the user's request. It uses 47421 / 47422 / 7100, `ZenLink-Next` data folders, `zenlink-next-v25.log`, AppId `{5AE777B3-F756-4FAC-B6E7-A2125D89D76D}`, `AppName=ZenLink Next`, `{autopf}\ZenLink Next`, firewall rule "ZenLink Next (AirPlay)", AirPlay name "ZenLinkStudioNext", window/tray/AppUserModelID "ZenLink Next". Uninstallers stop only processes running from the beta's own folder.
 - Verification: `tests/test_next_isolation.py` and `zenlink-core` `isolation_tests` pass. Side-by-side run: see `lanjutan.md`. unverified: AirPlay on port 7100 with a real iPhone/iPad; installer install/uninstall next to an installed stable v2.2.31.
+
+### B-10: Licence audit before bundling Android platform-tools `adb`            Status: open
+- Reported: 2026-11-06, phase A1 (master prompt section 13, AGENTS.md §6 item 9).
+- Cause: the ADB decision (`docs/android/ADB.md`) bundles Google's `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` next to a GPL-3.0 program. The platform-tools zip comes with Google's SDK licence and a `NOTICE.txt`; whether redistribution as a separate program is allowed was not audited yet.
+- Fix: n/a until phase A3 (read the SDK licence and `NOTICE.txt` of the version that is bundled, record the result in `docs/THIRD_PARTY.md`).
+- Verification: unverified: needs the audit; nothing is bundled yet.
+
+### B-11: Android device names, identity and list (phase A1)            Status: fixed (unverified)
+- Reported: 2026-11-06, phase A1 gate (master prompt section 4).
+- Cause: n/a (new code).
+- Fix: `rust/crates/zenlink-android` (adb host-protocol client, `devices -l` parser, getprop parser, naming, identity, discovery); notes in `docs/android/`.
+- Verification: 43 Rust tests pass (`cargo test --release -p zenlink-android`), including a fake in-process ADB server; `tests/test_scrcpy_pin.py` passes. Unverified on hardware: needs real Android phones over USB and Wi-Fi (with the user's consent) to confirm names and identity.
