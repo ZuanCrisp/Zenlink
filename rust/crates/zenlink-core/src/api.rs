@@ -34,12 +34,22 @@ impl CodecInfo {
     pub fn from_json(bytes: &[u8]) -> Option<Self> {
         let raw: RawCodec = serde_json::from_slice(bytes).ok()?;
         let name = raw.codec?.trim().to_ascii_lowercase();
-        let codec = if name.starts_with("avc") { Codec::H264 } else { Codec::Hevc };
-        let description = base64::engine::general_purpose::STANDARD.decode(raw.description?).ok()?;
+        let codec = if name.starts_with("avc") {
+            Codec::H264
+        } else {
+            Codec::Hevc
+        };
+        let description = base64::engine::general_purpose::STANDARD
+            .decode(raw.description?)
+            .ok()?;
         if description.is_empty() {
             return None;
         }
-        Some(Self { codec, description, keyframes_on_request: raw.keyframes_on_request.unwrap_or(true) })
+        Some(Self {
+            codec,
+            description,
+            keyframes_on_request: raw.keyframes_on_request.unwrap_or(true),
+        })
     }
 }
 
@@ -66,7 +76,11 @@ impl Api {
     }
 
     pub fn get(&self, path: &str) -> Option<Value> {
-        let mut r = self.agent.get(format!("{}{path}", base_url())).call().ok()?;
+        let mut r = self
+            .agent
+            .get(format!("{}{path}", base_url()))
+            .call()
+            .ok()?;
         if r.status() != 200 {
             return None;
         }
@@ -74,7 +88,11 @@ impl Api {
     }
 
     pub fn post(&self, path: &str, body: &Value) -> Option<Value> {
-        let mut r = self.agent.post(format!("{}{path}", base_url())).send_json(body).ok()?;
+        let mut r = self
+            .agent
+            .post(format!("{}{path}", base_url()))
+            .send_json(body)
+            .ok()?;
         if !r.status().is_success() {
             return None;
         }
@@ -89,7 +107,10 @@ impl Api {
             .http_status_as_error(false)
             .build()
             .into();
-        let mut r = agent.post(format!("{}{path}", base_url())).send_json(body).ok()?;
+        let mut r = agent
+            .post(format!("{}{path}", base_url()))
+            .send_json(body)
+            .ok()?;
         r.body_mut().read_json::<Value>().ok()
     }
 
@@ -102,7 +123,11 @@ impl Api {
     }
 
     pub fn codec(&self) -> Option<CodecInfo> {
-        let mut r = self.agent.get(format!("{}/cast/codec", base_url())).call().ok()?;
+        let mut r = self
+            .agent
+            .get(format!("{}/cast/codec", base_url()))
+            .call()
+            .ok()?;
         if r.status() != 200 {
             return None;
         }
@@ -174,11 +199,19 @@ mod tests {
 
     #[test]
     fn codec_json() {
-        let c = CodecInfo::from_json(br#"{"codec":"hvc1.1.6.L153.B0 ","description":"AQID","keyframesOnRequest":false}"#).unwrap();
+        let c = CodecInfo::from_json(
+            br#"{"codec":"hvc1.1.6.L153.B0 ","description":"AQID","keyframesOnRequest":false}"#,
+        )
+        .unwrap();
         assert_eq!(c.codec, Codec::Hevc);
         assert_eq!(c.description, vec![1, 2, 3]);
         assert!(!c.keyframes_on_request);
-        assert_eq!(CodecInfo::from_json(br#"{"codec":"avc1.640028","description":"AQ=="}"#).unwrap().codec, Codec::H264);
+        assert_eq!(
+            CodecInfo::from_json(br#"{"codec":"avc1.640028","description":"AQ=="}"#)
+                .unwrap()
+                .codec,
+            Codec::H264
+        );
     }
 
     #[test]

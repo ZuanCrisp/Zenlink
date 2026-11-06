@@ -23,8 +23,15 @@ static EMBEDDED: &[u8] = include_bytes!(env!("ZENLINK_BACKEND_EXE"));
 #[cfg(feature = "embedded-backend")]
 fn unpack_embedded() -> Option<PathBuf> {
     let dir = crate::local_data_dir()?.join("service");
-    let path = dir.join(format!("ZenLinkService-{}-{}.exe", env!("CARGO_PKG_VERSION"), EMBEDDED.len()));
-    if std::fs::metadata(&path).map(|m| m.len() == EMBEDDED.len() as u64).unwrap_or(false) {
+    let path = dir.join(format!(
+        "ZenLinkService-{}-{}.exe",
+        env!("CARGO_PKG_VERSION"),
+        EMBEDDED.len()
+    ));
+    if std::fs::metadata(&path)
+        .map(|m| m.len() == EMBEDDED.len() as u64)
+        .unwrap_or(false)
+    {
         return Some(path);
     }
     std::fs::create_dir_all(&dir).ok()?;
@@ -73,10 +80,15 @@ impl Sidecar {
             Some(p) => Command::new(p),
             None => {
                 let here = std::env::current_exe().map_err(|e| e.to_string())?;
-                command_for(here.parent().unwrap_or(Path::new("."))).ok_or("ZenLink backend not found")?
+                command_for(here.parent().unwrap_or(Path::new(".")))
+                    .ok_or("ZenLink backend not found")?
             }
         };
-        cmd.args(["--headless", "--parent-pid", &std::process::id().to_string()]);
+        cmd.args([
+            "--headless",
+            "--parent-pid",
+            &std::process::id().to_string(),
+        ]);
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

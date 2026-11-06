@@ -68,7 +68,10 @@ struct Inner {
 impl Inner {
     /// Visible source size after crop, and the crop's left/top offset.
     fn visible(&self) -> (u32, u32, u32, u32) {
-        let (w, h) = (self.stats.width.load(Relaxed), self.stats.height.load(Relaxed));
+        let (w, h) = (
+            self.stats.width.load(Relaxed),
+            self.stats.height.load(Relaxed),
+        );
         let c: Vec<u32> = self.crop.iter().map(|a| a.load(Relaxed)).collect();
         let l = c[0].min(w / 2);
         let r = c[2].min(w / 2);
@@ -85,10 +88,20 @@ impl Inner {
         }
         let (vw, vh, l, t) = self.visible();
         let rot = self.rotation.load(Relaxed);
-        let r = picture_rect(rc.right, rc.bottom, vw, vh, rot, fit_of(self.fit.load(Relaxed)));
+        let r = picture_rect(
+            rc.right,
+            rc.bottom,
+            vw,
+            vh,
+            rot,
+            fit_of(self.fit.load(Relaxed)),
+        );
         let u = (x - r.left as f32) / (r.right - r.left).max(1) as f32;
         let v = (y - r.top as f32) / (r.bottom - r.top).max(1) as f32;
-        let (fw, fh) = (self.stats.width.load(Relaxed).max(1) as f32, self.stats.height.load(Relaxed).max(1) as f32);
+        let (fw, fh) = (
+            self.stats.width.load(Relaxed).max(1) as f32,
+            self.stats.height.load(Relaxed).max(1) as f32,
+        );
         // Crop is in source orientation; the shown picture may be rotated.
         let (cw, ch, cl, ct, w, h) = if rot == 90 || rot == 270 {
             (vh as f32, vw as f32, t as f32, l as f32, fh, fw)
@@ -114,20 +127,37 @@ pub fn picture_rect(cw: i32, ch: i32, sw: u32, sh: u32, rotation: u32, fit: Fit)
         std::mem::swap(&mut pw, &mut ph);
     }
     if pw <= 0.0 || ph <= 0.0 || cw <= 0 || ch <= 0 || fit == Fit::Fill {
-        return RECT { left: 0, top: 0, right: cw, bottom: ch };
+        return RECT {
+            left: 0,
+            top: 0,
+            right: cw,
+            bottom: ch,
+        };
     }
     let (sx, sy) = (cw as f32 / pw, ch as f32 / ph);
-    let s = if fit == Fit::Cover { sx.max(sy) } else { sx.min(sy) };
+    let s = if fit == Fit::Cover {
+        sx.max(sy)
+    } else {
+        sx.min(sy)
+    };
     let (dw, dh) = ((pw * s).round() as i32, (ph * s).round() as i32);
     let (x, y) = ((cw - dw) / 2, (ch - dh) / 2);
-    RECT { left: x, top: y, right: x + dw, bottom: y + dh }
+    RECT {
+        left: x,
+        top: y,
+        right: x + dw,
+        bottom: y + dh,
+    }
 }
 
 /// Clip `dest` to the `cw` x `ch` view and trim `src` by the same share of
 /// the picture (Cover fit overflows the view; the video processor refuses a
 /// destination outside its output). `rot` is clockwise, as D3D11 rotates.
 fn clip_to_view(src: RECT, dest: RECT, cw: i32, ch: i32, rot: u32) -> (RECT, RECT) {
-    let (dw, dh) = ((dest.right - dest.left).max(1) as f32, (dest.bottom - dest.top).max(1) as f32);
+    let (dw, dh) = (
+        (dest.right - dest.left).max(1) as f32,
+        (dest.bottom - dest.top).max(1) as f32,
+    );
     // Share of the shown picture cut from each side: left, top, right, bottom.
     let cut = [
         (-dest.left).max(0) as f32 / dw,
@@ -153,9 +183,26 @@ fn clip_to_view(src: RECT, dest: RECT, cw: i32, ch: i32, rot: u32) -> (RECT, REC
         right: src.right - (sw * sr).round() as i32,
         bottom: src.bottom - (sh * sb).round() as i32,
     };
-    let dest2 = RECT { left: dest.left.max(0), top: dest.top.max(0), right: dest.right.min(cw), bottom: dest.bottom.min(ch) };
-    if src2.right <= src2.left || src2.bottom <= src2.top || dest2.right <= dest2.left || dest2.bottom <= dest2.top {
-        return (src, RECT { left: 0, top: 0, right: cw, bottom: ch });
+    let dest2 = RECT {
+        left: dest.left.max(0),
+        top: dest.top.max(0),
+        right: dest.right.min(cw),
+        bottom: dest.bottom.min(ch),
+    };
+    if src2.right <= src2.left
+        || src2.bottom <= src2.top
+        || dest2.right <= dest2.left
+        || dest2.bottom <= dest2.top
+    {
+        return (
+            src,
+            RECT {
+                left: 0,
+                top: 0,
+                right: cw,
+                bottom: ch,
+            },
+        );
     }
     (src2, dest2)
 }
@@ -215,7 +262,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         }
         WM_MOUSEWHEEL => {
             let d = ((wp.0 >> 16) & 0xffff) as i16 as f32 / 120.0;
-            let mut pt = windows::Win32::Foundation::POINT { x: x as i32, y: y as i32 };
+            let mut pt = windows::Win32::Foundation::POINT {
+                x: x as i32,
+                y: y as i32,
+            };
             let _ = windows::Win32::Graphics::Gdi::ScreenToClient(hwnd, &mut pt);
             let (u, v) = inner.to_uv(hwnd, pt.x as f32, pt.y as f32);
             send(PointerEvent::Wheel(u, v, d));
@@ -298,7 +348,13 @@ impl VideoView {
                 }
             })
             .ok();
-        Ok(Self { inner, render, decode: None, meter, bounds: Mutex::new(None) })
+        Ok(Self {
+            inner,
+            render,
+            decode: None,
+            meter,
+            bounds: Mutex::new(None),
+        })
     }
 
     pub fn hwnd(&self) -> isize {
@@ -314,7 +370,9 @@ impl VideoView {
         if *last == Some(key) {
             return;
         }
-        let size_changed = last.map(|l| (l.2, l.3, l.5) != (key.2, key.3, key.5)).unwrap_or(true);
+        let size_changed = last
+            .map(|l| (l.2, l.3, l.5) != (key.2, key.3, key.5))
+            .unwrap_or(true);
         *last = Some(key);
         unsafe {
             use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
@@ -324,8 +382,20 @@ impl VideoView {
                 let rgn = CreateRoundRectRgn(0, 0, key.2 + 1, key.3 + 1, radius * 2, radius * 2);
                 SetWindowRgn(hwnd, Some(rgn), true);
             }
-            let flags = if visible { SWP_SHOWWINDOW } else { SWP_HIDEWINDOW };
-            let _ = SetWindowPos(hwnd, Some(HWND_TOP), x, y, key.2, key.3, flags | SWP_NOACTIVATE);
+            let flags = if visible {
+                SWP_SHOWWINDOW
+            } else {
+                SWP_HIDEWINDOW
+            };
+            let _ = SetWindowPos(
+                hwnd,
+                Some(HWND_TOP),
+                x,
+                y,
+                key.2,
+                key.3,
+                flags | SWP_NOACTIVATE,
+            );
         }
         drop(last);
         if size_changed && visible {
@@ -377,7 +447,11 @@ impl VideoView {
     /// Picture size as shown: after crop and rotation. 0 x 0 before the first frame.
     pub fn shown_size(&self) -> (u32, u32) {
         let (w, h, _, _) = self.inner.visible();
-        if matches!(self.inner.rotation.load(Relaxed), 90 | 270) { (h, w) } else { (w, h) }
+        if matches!(self.inner.rotation.load(Relaxed), 90 | 270) {
+            (h, w)
+        } else {
+            (w, h)
+        }
     }
 
     pub fn set_background(&self, rgb: u32) {
@@ -390,7 +464,10 @@ impl VideoView {
 
     /// Size of the picture as decoded (before rotation), 0 x 0 before the first frame.
     pub fn frame_size(&self) -> (u32, u32) {
-        (self.inner.stats.width.load(Relaxed), self.inner.stats.height.load(Relaxed))
+        (
+            self.inner.stats.width.load(Relaxed),
+            self.inner.stats.height.load(Relaxed),
+        )
     }
 
     pub fn stats(&self) -> StatsSnapshot {
@@ -400,8 +477,16 @@ impl VideoView {
     pub fn start(&mut self, api: Api) {
         self.stop();
         let stop = Arc::new(AtomicBool::new(false));
-        let (g, r, s, st) = (self.inner.gpu.clone(), self.inner.ring.clone(), self.inner.stats.clone(), stop.clone());
-        if let Ok(h) = std::thread::Builder::new().name("zenlink-decode".into()).spawn(move || decoder::run(g, r, s, st, api)) {
+        let (g, r, s, st) = (
+            self.inner.gpu.clone(),
+            self.inner.ring.clone(),
+            self.inner.stats.clone(),
+            stop.clone(),
+        );
+        if let Ok(h) = std::thread::Builder::new()
+            .name("zenlink-decode".into())
+            .spawn(move || decoder::run(g, r, s, st, api))
+        {
             self.decode = Some((stop, h));
         }
     }
@@ -444,10 +529,16 @@ fn make_processor(gpu: &Gpu, iw: u32, ih: u32, ow: u32, oh: u32) -> Result<Proce
     unsafe {
         let desc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
             InputFrameFormat: D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE,
-            InputFrameRate: DXGI_RATIONAL { Numerator: 60, Denominator: 1 },
+            InputFrameRate: DXGI_RATIONAL {
+                Numerator: 60,
+                Denominator: 1,
+            },
             InputWidth: iw,
             InputHeight: ih,
-            OutputFrameRate: DXGI_RATIONAL { Numerator: 60, Denominator: 1 },
+            OutputFrameRate: DXGI_RATIONAL {
+                Numerator: 60,
+                Denominator: 1,
+            },
             OutputWidth: ow,
             OutputHeight: oh,
             Usage: D3D11_VIDEO_USAGE_PLAYBACK_NORMAL,
@@ -458,9 +549,20 @@ fn make_processor(gpu: &Gpu, iw: u32, ih: u32, ow: u32, oh: u32) -> Result<Proce
         vc.VideoProcessorSetStreamFrameFormat(&vp, 0, D3D11_VIDEO_FRAME_FORMAT_PROGRESSIVE);
         vc.VideoProcessorSetStreamAutoProcessingMode(&vp, 0, false);
         // BT.709, studio range in; full-range RGB out.
-        vc.VideoProcessorSetStreamColorSpace(&vp, 0, &D3D11_VIDEO_PROCESSOR_COLOR_SPACE { _bitfield: 0x14 });
-        vc.VideoProcessorSetOutputColorSpace(&vp, &D3D11_VIDEO_PROCESSOR_COLOR_SPACE { _bitfield: 0 });
-        Ok(Processor { enumr, vp, key: (iw, ih, ow, oh) })
+        vc.VideoProcessorSetStreamColorSpace(
+            &vp,
+            0,
+            &D3D11_VIDEO_PROCESSOR_COLOR_SPACE { _bitfield: 0x14 },
+        );
+        vc.VideoProcessorSetOutputColorSpace(
+            &vp,
+            &D3D11_VIDEO_PROCESSOR_COLOR_SPACE { _bitfield: 0 },
+        );
+        Ok(Processor {
+            enumr,
+            vp,
+            key: (iw, ih, ow, oh),
+        })
     }
 }
 
@@ -494,7 +596,10 @@ fn render_session(inner: &Inner) -> Result<()> {
             Width: cw,
             Height: ch,
             Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
             BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
             BufferCount: 2,
             Scaling: DXGI_SCALING_STRETCH,
@@ -503,7 +608,9 @@ fn render_session(inner: &Inner) -> Result<()> {
             Flags: DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as u32,
             ..Default::default()
         };
-        let sc1 = factory.CreateSwapChainForHwnd(&gpu.device, hwnd, &desc, None, None).inspect_err(|e| log::error!("swapchain: {e}"))?;
+        let sc1 = factory
+            .CreateSwapChainForHwnd(&gpu.device, hwnd, &desc, None, None)
+            .inspect_err(|e| log::error!("swapchain: {e}"))?;
         let _ = factory.MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
         let sc: IDXGISwapChain2 = sc1.cast()?;
         sc.SetMaximumFrameLatency(1)?;
@@ -521,7 +628,14 @@ fn render_session(inner: &Inner) -> Result<()> {
             let (nw, nh) = (rc.right.max(1) as u32, rc.bottom.max(1) as u32);
             if (nw, nh) != (cw, ch) {
                 proc_ = None;
-                sc.ResizeBuffers(0, nw, nh, DXGI_FORMAT_UNKNOWN, DXGI_SWAP_CHAIN_FLAG(desc.Flags as i32)).inspect_err(|e| log::error!("resize {nw}x{nh}: {e}"))?;
+                sc.ResizeBuffers(
+                    0,
+                    nw,
+                    nh,
+                    DXGI_FORMAT_UNKNOWN,
+                    DXGI_SWAP_CHAIN_FLAG(desc.Flags as i32),
+                )
+                .inspect_err(|e| log::error!("resize {nw}x{nh}: {e}"))?;
                 (cw, ch) = (nw, nh);
                 shown_seq = u64::MAX;
             }
@@ -544,7 +658,11 @@ fn render_session(inner: &Inner) -> Result<()> {
             };
             let back: ID3D11Texture2D = sc.GetBuffer(0)?;
             let bg = inner.bg.load(Relaxed);
-            let (br, bgc, bb) = (((bg >> 16) & 255) as f32 / 255.0, ((bg >> 8) & 255) as f32 / 255.0, (bg & 255) as f32 / 255.0);
+            let (br, bgc, bb) = (
+                ((bg >> 16) & 255) as f32 / 255.0,
+                ((bg >> 8) & 255) as f32 / 255.0,
+                (bg & 255) as f32 / 255.0,
+            );
             match frame {
                 Some((tex, w, h, mut src, seq)) => {
                     let c: Vec<i32> = inner.crop.iter().map(|a| a.load(Relaxed) as i32).collect();
@@ -585,20 +703,42 @@ fn render_session(inner: &Inner) -> Result<()> {
                     vc.VideoProcessorSetStreamRotation(&p.vp, 0, rot != 0, rotation);
                     vc.VideoProcessorSetStreamSourceRect(&p.vp, 0, true, Some(&src));
                     vc.VideoProcessorSetStreamDestRect(&p.vp, 0, true, Some(&dest));
-                    let full = RECT { left: 0, top: 0, right: cw as i32, bottom: ch as i32 };
+                    let full = RECT {
+                        left: 0,
+                        top: 0,
+                        right: cw as i32,
+                        bottom: ch as i32,
+                    };
                     vc.VideoProcessorSetOutputTargetRect(&p.vp, true, Some(&full));
                     let color = D3D11_VIDEO_COLOR {
-                        Anonymous: D3D11_VIDEO_COLOR_0 { RGBA: D3D11_VIDEO_COLOR_RGBA { R: br, G: bgc, B: bb, A: 1.0 } },
+                        Anonymous: D3D11_VIDEO_COLOR_0 {
+                            RGBA: D3D11_VIDEO_COLOR_RGBA {
+                                R: br,
+                                G: bgc,
+                                B: bb,
+                                A: 1.0,
+                            },
+                        },
                     };
                     vc.VideoProcessorSetOutputBackgroundColor(&p.vp, false, &color);
 
                     let in_desc = D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
                         FourCC: 0,
                         ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
-                        Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 { Texture2D: D3D11_TEX2D_VPIV { MipSlice: 0, ArraySlice: 0 } },
+                        Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 {
+                            Texture2D: D3D11_TEX2D_VPIV {
+                                MipSlice: 0,
+                                ArraySlice: 0,
+                            },
+                        },
                     };
                     let mut iv = None;
-                    if let Err(e) = gpu.video_device.CreateVideoProcessorInputView(&tex, &p.enumr, &in_desc, Some(&mut iv)) {
+                    if let Err(e) = gpu.video_device.CreateVideoProcessorInputView(
+                        &tex,
+                        &p.enumr,
+                        &in_desc,
+                        Some(&mut iv),
+                    ) {
                         log::warn!("input view: {e}");
                         proc_ = None;
                         drop(back);
@@ -606,10 +746,17 @@ fn render_session(inner: &Inner) -> Result<()> {
                     }
                     let out_desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
                         ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
-                        Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 { Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 } },
+                        Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 {
+                            Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 },
+                        },
                     };
                     let mut ov = None;
-                    if let Err(e) = gpu.video_device.CreateVideoProcessorOutputView(&back, &p.enumr, &out_desc, Some(&mut ov)) {
+                    if let Err(e) = gpu.video_device.CreateVideoProcessorOutputView(
+                        &back,
+                        &p.enumr,
+                        &out_desc,
+                        Some(&mut ov),
+                    ) {
                         log::warn!("output view: {e}");
                         proc_ = None;
                         drop(back);
@@ -634,8 +781,11 @@ fn render_session(inner: &Inner) -> Result<()> {
                 }
                 None => {
                     let mut rtv = None;
-                    gpu.device.CreateRenderTargetView(&back, None, Some(&mut rtv)).inspect_err(|e| log::error!("rtv: {e}"))?;
-                    gpu.context.ClearRenderTargetView(rtv.as_ref().unwrap(), &[br, bgc, bb, 1.0]);
+                    gpu.device
+                        .CreateRenderTargetView(&back, None, Some(&mut rtv))
+                        .inspect_err(|e| log::error!("rtv: {e}"))?;
+                    gpu.context
+                        .ClearRenderTargetView(rtv.as_ref().unwrap(), &[br, bgc, bb, 1.0]);
                 }
             }
             drop(back);

@@ -28,7 +28,10 @@ pub const LOG_FILE_NAME: &str = "zenlink-beta.log";
 
 /// Backend URL. `ZENLINK_PORT` overrides the port (tests, a second instance).
 pub fn base_url() -> String {
-    let port = std::env::var("ZENLINK_PORT").ok().and_then(|p| p.parse::<u16>().ok()).unwrap_or(PORT);
+    let port = std::env::var("ZENLINK_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(PORT);
     format!("http://{HOST}:{port}")
 }
 

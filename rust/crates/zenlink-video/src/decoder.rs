@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 
 use windows::core::{Interface, Result, GUID};
 use windows::Win32::Foundation::RECT;
-use windows::Win32::Graphics::Direct3D11::{ID3D11Texture2D, D3D11_MAP_WRITE_DISCARD, D3D11_MAPPED_SUBRESOURCE};
+use windows::Win32::Graphics::Direct3D11::{
+    ID3D11Texture2D, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_WRITE_DISCARD,
+};
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_MULTITHREADED};
 
@@ -42,7 +44,10 @@ fn subtype(c: &Codec) -> GUID {
 impl Mft {
     pub fn new(gpu: &Gpu, codec: &Codec) -> Result<Self> {
         unsafe {
-            let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: subtype(codec) };
+            let input = MFT_REGISTER_TYPE_INFO {
+                guidMajorType: MFMediaType_Video,
+                guidSubtype: subtype(codec),
+            };
             let mut list: *mut Option<IMFActivate> = std::ptr::null_mut();
             let mut count = 0u32;
             MFTEnumEx(
@@ -71,7 +76,8 @@ impl Mft {
             if let Ok(attrs) = t.GetAttributes() {
                 let _ = attrs.SetUINT32(&MF_LOW_LATENCY, 1);
                 if attrs.GetUINT32(&MF_SA_D3D11_AWARE).unwrap_or(0) != 0
-                    && t.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, gpu.manager.as_raw() as usize).is_ok()
+                    && t.ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, gpu.manager.as_raw() as usize)
+                        .is_ok()
                 {
                     hardware = true;
                 }
@@ -85,16 +91,26 @@ impl Mft {
             // with the first frame as MF_E_TRANSFORM_STREAM_CHANGE.
             mt.SetUINT64(&MF_MT_FRAME_SIZE, (1920u64 << 32) | 1080)?;
             mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
-            t.SetInputType(0, &mt, 0).inspect_err(|e| log::warn!("decoder: set input type: {e}"))?;
+            t.SetInputType(0, &mt, 0)
+                .inspect_err(|e| log::warn!("decoder: set input type: {e}"))?;
 
-            let mut me = Self { t, hardware, provides_samples: false, out_size: 0, width: 0, height: 0, src: RECT::default() };
+            let mut me = Self {
+                t,
+                hardware,
+                provides_samples: false,
+                out_size: 0,
+                width: 0,
+                height: 0,
+                src: RECT::default(),
+            };
             // Some decoders (Microsoft's HEVC MFT) list no complete output
             // type until they have parsed the first frame; they then signal
             // MF_E_TRANSFORM_STREAM_CHANGE and drain() picks it.
             if let Err(e) = me.pick_output() {
                 log::info!("decoder: output type after the first frame ({e})");
             }
-            me.t.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0).inspect_err(|e| log::warn!("decoder: begin streaming: {e}"))?;
+            me.t.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0)
+                .inspect_err(|e| log::warn!("decoder: begin streaming: {e}"))?;
             me.t.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0)?;
             Ok(me)
         }
@@ -114,13 +130,21 @@ impl Mft {
                 let size = mt.GetUINT64(&MF_MT_FRAME_SIZE).unwrap_or(0);
                 self.width = (size >> 32) as u32;
                 self.height = (size & 0xffff_ffff) as u32;
-                self.src = RECT { left: 0, top: 0, right: self.width as i32, bottom: self.height as i32 };
+                self.src = RECT {
+                    left: 0,
+                    top: 0,
+                    right: self.width as i32,
+                    bottom: self.height as i32,
+                };
                 let mut area = MFVideoArea::default();
                 let mut got = 0u32;
                 if mt
                     .GetBlob(
                         &MF_MT_MINIMUM_DISPLAY_APERTURE,
-                        std::slice::from_raw_parts_mut(&mut area as *mut _ as *mut u8, std::mem::size_of::<MFVideoArea>()),
+                        std::slice::from_raw_parts_mut(
+                            &mut area as *mut _ as *mut u8,
+                            std::mem::size_of::<MFVideoArea>(),
+                        ),
                         Some(&mut got),
                     )
                     .is_ok()
@@ -129,10 +153,16 @@ impl Mft {
                 {
                     let x = area.OffsetX.value as i32;
                     let y = area.OffsetY.value as i32;
-                    self.src = RECT { left: x, top: y, right: x + area.Area.cx, bottom: y + area.Area.cy };
+                    self.src = RECT {
+                        left: x,
+                        top: y,
+                        right: x + area.Area.cx,
+                        bottom: y + area.Area.cy,
+                    };
                 }
                 let info = self.t.GetOutputStreamInfo(0)?;
-                self.provides_samples = info.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32) != 0;
+                self.provides_samples =
+                    info.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32) != 0;
                 self.out_size = info.cbSize;
                 return Ok(());
             }
@@ -146,7 +176,12 @@ impl Mft {
     }
 
     /// Feed one Annex B access unit. Returns false if the decoder rejected it.
-    fn input(&mut self, data: &[u8], ts: i64, sink: &mut dyn FnMut(&mut Self, IMFSample)) -> Result<()> {
+    fn input(
+        &mut self,
+        data: &[u8],
+        ts: i64,
+        sink: &mut dyn FnMut(&mut Self, IMFSample),
+    ) -> Result<()> {
         unsafe {
             let buf = MFCreateMemoryBuffer(data.len() as u32)?;
             let mut p = std::ptr::null_mut();
@@ -208,7 +243,14 @@ impl Mft {
 }
 
 /// Copy a decoded sample into a free ring slot and publish it.
-fn publish(gpu: &Gpu, ring: &SharedRing, stats: &Stats, mft: &Mft, sample: &IMFSample, upload: &mut Option<(ID3D11Texture2D, u32, u32)>) -> Result<()> {
+fn publish(
+    gpu: &Gpu,
+    ring: &SharedRing,
+    stats: &Stats,
+    mft: &Mft,
+    sample: &IMFSample,
+    upload: &mut Option<(ID3D11Texture2D, u32, u32)>,
+) -> Result<()> {
     unsafe {
         let (w, h) = (mft.width, mft.height);
         if w == 0 || h == 0 {
@@ -222,21 +264,31 @@ fn publish(gpu: &Gpu, ring: &SharedRing, stats: &Stats, mft: &Mft, sample: &IMFS
             }
             let ok = matches!(&r.slots[idx], Some(s) if s.w == w && s.h == h);
             if !ok {
-                r.slots[idx] = Some(Slot { tex: gpu.nv12_texture(w, h, false)?, w, h, src: mft.src });
+                r.slots[idx] = Some(Slot {
+                    tex: gpu.nv12_texture(w, h, false)?,
+                    w,
+                    h,
+                    src: mft.src,
+                });
             }
             if let Some(s) = r.slots[idx].as_mut() {
                 s.src = mft.src;
             }
             idx
         };
-        let dst = ring.lock().unwrap().slots[idx].as_ref().unwrap().tex.clone();
+        let dst = ring.lock().unwrap().slots[idx]
+            .as_ref()
+            .unwrap()
+            .tex
+            .clone();
         let buffer = sample.GetBufferByIndex(0)?;
         if let Ok(dxgi) = buffer.cast::<IMFDXGIBuffer>() {
             let mut raw = std::ptr::null_mut();
             dxgi.GetResource(&ID3D11Texture2D::IID, &mut raw)?;
             let src = ID3D11Texture2D::from_raw(raw);
             let sub = dxgi.GetSubresourceIndex()?;
-            gpu.context.CopySubresourceRegion(&dst, 0, 0, 0, 0, &src, sub, None);
+            gpu.context
+                .CopySubresourceRegion(&dst, 0, 0, 0, 0, &src, sub, None);
         } else {
             // Software decoder: system-memory NV12, uploaded through a dynamic texture.
             if !matches!(upload, Some((_, uw, uh)) if *uw == w && *uh == h) {
@@ -248,7 +300,11 @@ fn publish(gpu: &Gpu, ring: &SharedRing, stats: &Stats, mft: &Mft, sample: &IMFS
             let mut pitch = 0i32;
             b2.Lock2D(&mut src, &mut pitch)?;
             let mut m = D3D11_MAPPED_SUBRESOURCE::default();
-            if gpu.context.Map(up, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut m)).is_ok() {
+            if gpu
+                .context
+                .Map(up, 0, D3D11_MAP_WRITE_DISCARD, 0, Some(&mut m))
+                .is_ok()
+            {
                 let rows = h as usize + h as usize / 2;
                 for y in 0..rows {
                     std::ptr::copy_nonoverlapping(
@@ -267,8 +323,12 @@ fn publish(gpu: &Gpu, ring: &SharedRing, stats: &Stats, mft: &Mft, sample: &IMFS
         if dropped > 0 {
             stats.replaced.fetch_add(dropped, Relaxed);
         }
-        stats.width.store((mft.src.right - mft.src.left) as u32, Relaxed);
-        stats.height.store((mft.src.bottom - mft.src.top) as u32, Relaxed);
+        stats
+            .width
+            .store((mft.src.right - mft.src.left) as u32, Relaxed);
+        stats
+            .height
+            .store((mft.src.bottom - mft.src.top) as u32, Relaxed);
         Ok(())
     }
 }
@@ -306,17 +366,34 @@ pub fn run(gpu: Arc<Gpu>, ring: SharedRing, stats: Arc<Stats>, stop: Arc<AtomicB
     }
 }
 
-fn session(gpu: &Gpu, ring: &SharedRing, stats: &Stats, stop: &AtomicBool, api: &Api, mut info: CodecInfo, stream: &mut StreamReader) -> Result<()> {
+fn session(
+    gpu: &Gpu,
+    ring: &SharedRing,
+    stats: &Stats,
+    stop: &AtomicBool,
+    api: &Api,
+    mut info: CodecInfo,
+    stream: &mut StreamReader,
+) -> Result<()> {
     let mut ps: ParamSets = parse_config(&info.codec, &info.description).unwrap_or_default();
     let mut mft = Mft::new(gpu, &info.codec)?;
     stats.hardware.store(mft.hardware, Relaxed);
-    log::info!("decoder {:?} hardware={} provides_samples={} {}x{}", info.codec, mft.hardware, mft.provides_samples, mft.width, mft.height);
+    log::info!(
+        "decoder {:?} hardware={} provides_samples={} {}x{}",
+        info.codec,
+        mft.hardware,
+        mft.provides_samples,
+        mft.width,
+        mft.height
+    );
     let mut ts: i64 = 0;
     let mut got_key = false;
     let mut pending: VecDeque<(i64, Instant)> = VecDeque::new();
     let mut upload = None;
     while !stop.load(Relaxed) {
-        let Some(rec) = stream.next_record() else { return Ok(()) };
+        let Some(rec) = stream.next_record() else {
+            return Ok(());
+        };
         match rec {
             Record::Config(c) => {
                 info = c;
@@ -346,7 +423,9 @@ fn session(gpu: &Gpu, ring: &SharedRing, stats: &Stats, stop: &AtomicBool, api: 
                     let t = unsafe { s.GetSampleTime().unwrap_or(0) };
                     if let Some(pos) = pending.iter().position(|(pts, _)| *pts == t) {
                         let (_, at) = pending[pos];
-                        stats.decode_us.store(at.elapsed().as_micros() as u32, Relaxed);
+                        stats
+                            .decode_us
+                            .store(at.elapsed().as_micros() as u32, Relaxed);
                         pending.drain(..=pos);
                     }
                     match publish(gpu, ring, stats, m, &s, &mut upload) {

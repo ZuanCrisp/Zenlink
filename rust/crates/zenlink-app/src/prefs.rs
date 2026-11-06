@@ -47,7 +47,10 @@ pub fn defaults() -> Prefs {
 
 pub fn load() -> Prefs {
     let mut p = defaults();
-    let Some(v) = path().and_then(|f| std::fs::read(f).ok()).and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
+    let Some(v) = path()
+        .and_then(|f| std::fs::read(f).ok())
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
         return p;
     };
     let s = |k: &str, d: &mut slint::SharedString, allowed: &[&str]| {
@@ -77,7 +80,11 @@ pub fn load() -> Prefs {
     s("lang", &mut p.lang, &["id", "en"]);
     s("fit", &mut p.fit, &["contain", "cover", "fill"]);
     b("fitWindow", &mut p.fit_window);
-    s("rotation", &mut p.rotation, &["auto", "0", "90", "180", "270"]);
+    s(
+        "rotation",
+        &mut p.rotation,
+        &["auto", "0", "90", "180", "270"],
+    );
     f("cropL", &mut p.crop_l, 0.0, 400.0);
     f("cropT", &mut p.crop_t, 0.0, 400.0);
     f("cropR", &mut p.crop_r, 0.0, 400.0);
@@ -85,7 +92,11 @@ pub fn load() -> Prefs {
     s("audioOut", &mut p.audio_out, &["pc", "device"]);
     f("volume", &mut p.volume, 0.0, 100.0);
     b("lipSync", &mut p.lip_sync);
-    s("audioBuffer", &mut p.audio_buffer, &["low", "normal", "high"]);
+    s(
+        "audioBuffer",
+        &mut p.audio_buffer,
+        &["low", "normal", "high"],
+    );
     b("touch", &mut p.touch);
     b("keyboard", &mut p.keyboard);
     b("gestures", &mut p.gestures);

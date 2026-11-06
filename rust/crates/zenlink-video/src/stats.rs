@@ -39,12 +39,21 @@ pub struct RateMeter {
 
 impl RateMeter {
     pub fn new(s: &Stats) -> Self {
-        Self { at: Instant::now(), decoded: s.decoded.load(Relaxed), presented: s.presented.load(Relaxed), bytes: s.bytes.load(Relaxed) }
+        Self {
+            at: Instant::now(),
+            decoded: s.decoded.load(Relaxed),
+            presented: s.presented.load(Relaxed),
+            bytes: s.bytes.load(Relaxed),
+        }
     }
 
     pub fn sample(&mut self, s: &Stats) -> StatsSnapshot {
         let dt = self.at.elapsed().as_secs_f32().max(1e-3);
-        let (d, p, b) = (s.decoded.load(Relaxed), s.presented.load(Relaxed), s.bytes.load(Relaxed));
+        let (d, p, b) = (
+            s.decoded.load(Relaxed),
+            s.presented.load(Relaxed),
+            s.bytes.load(Relaxed),
+        );
         let snap = StatsSnapshot {
             decoded_fps: (d - self.decoded) as f32 / dt,
             presented_fps: (p - self.presented) as f32 / dt,
@@ -55,7 +64,12 @@ impl RateMeter {
             decode_ms: s.decode_us.load(Relaxed) as f32 / 1000.0,
             mbps: (b - self.bytes) as f32 * 8.0 / dt / 1e6,
         };
-        *self = Self { at: Instant::now(), decoded: d, presented: p, bytes: b };
+        *self = Self {
+            at: Instant::now(),
+            decoded: d,
+            presented: p,
+            bytes: b,
+        };
         snap
     }
 }

@@ -20,8 +20,19 @@ impl Dots {
 
     /// `w`, `h`: logical size; `sf`: scale factor; `t`: seconds;
     /// `mouse`: logical position in the stage, if hovering.
-    pub fn render(&mut self, w: f32, h: f32, sf: f32, t: f32, mouse: Option<(f32, f32)>, dark: bool) -> Image {
-        let (pw, ph) = ((w * sf).round().max(1.0) as u32, (h * sf).round().max(1.0) as u32);
+    pub fn render(
+        &mut self,
+        w: f32,
+        h: f32,
+        sf: f32,
+        t: f32,
+        mouse: Option<(f32, f32)>,
+        dark: bool,
+    ) -> Image {
+        let (pw, ph) = (
+            (w * sf).round().max(1.0) as u32,
+            (h * sf).round().max(1.0) as u32,
+        );
         let reuse = matches!(&self.buf, Some(b) if b.width() == pw && b.height() == ph);
         if !reuse {
             self.buf = Some(SharedPixelBuffer::new(pw, ph));
@@ -29,12 +40,23 @@ impl Dots {
         let buf = self.buf.as_mut().unwrap();
         let px = buf.make_mut_slice();
         for p in px.iter_mut() {
-            *p = Rgba8Pixel { r: 0, g: 0, b: 0, a: 0 };
+            *p = Rgba8Pixel {
+                r: 0,
+                g: 0,
+                b: 0,
+                a: 0,
+            };
         }
         let (base, hot) = if dark {
-            (Rgba(255.0, 115.0, 188.0, 0.20), Rgba(255.0, 115.0, 188.0, 1.0))
+            (
+                Rgba(255.0, 115.0, 188.0, 0.20),
+                Rgba(255.0, 115.0, 188.0, 1.0),
+            )
         } else {
-            (Rgba(244.0, 107.0, 172.0, 0.22), Rgba(244.0, 107.0, 172.0, 1.0))
+            (
+                Rgba(244.0, 107.0, 172.0, 0.22),
+                Rgba(244.0, 107.0, 172.0, 1.0),
+            )
         };
         let (cx, cy) = (w / 2.0, h / 2.0);
         let max_r = cx.hypot(cy);
@@ -46,7 +68,9 @@ impl Dots {
             while x < w {
                 let d = (x - cx).hypot(y - cy);
                 let ring = (1.0 - (d - wave).abs() / 90.0).max(0.0);
-                let near = mouse.map(|(mx, my)| (1.0 - (x - mx).hypot(y - my) / 140.0).max(0.0)).unwrap_or(0.0);
+                let near = mouse
+                    .map(|(mx, my)| (1.0 - (x - mx).hypot(y - my) / 140.0).max(0.0))
+                    .unwrap_or(0.0);
                 let k = (ring * 0.55 + near * 0.9).min(1.0);
                 let c = if k > 0.05 { hot } else { base };
                 let alpha = c.3 * (0.75 + k * 0.25);

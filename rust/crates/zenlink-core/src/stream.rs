@@ -8,7 +8,11 @@ use crate::base_url;
 #[derive(Debug)]
 pub enum Record {
     /// Length-prefixed NAL units (AVCC / HVCC sample).
-    Frame { key: bool, rebuild: bool, data: Vec<u8> },
+    Frame {
+        key: bool,
+        rebuild: bool,
+        data: Vec<u8>,
+    },
     /// New decoder configuration (rotation / size change).
     Config(CodecInfo),
 }
@@ -19,16 +23,26 @@ pub struct StreamReader {
 
 impl StreamReader {
     pub fn open() -> Result<Self, String> {
-        let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
-        let r = agent.get(format!("{}/cast/stream.bin", base_url())).call().map_err(|e| e.to_string())?;
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let r = agent
+            .get(format!("{}/cast/stream.bin", base_url()))
+            .call()
+            .map_err(|e| e.to_string())?;
         if r.status() != 200 {
             return Err(format!("stream HTTP {}", r.status()));
         }
-        Ok(Self { reader: Box::new(r.into_body().into_reader()) })
+        Ok(Self {
+            reader: Box::new(r.into_body().into_reader()),
+        })
     }
 
     pub fn from_reader(reader: impl Read + Send + 'static) -> Self {
-        Self { reader: Box::new(reader) }
+        Self {
+            reader: Box::new(reader),
+        }
     }
 
     /// Next record, `None` when the stream ends.
@@ -49,8 +63,20 @@ impl StreamReader {
                     Some(c) => return Some(Record::Config(c)),
                     None => continue,
                 },
-                0 | 2 => return Some(Record::Frame { key: true, rebuild: kind == 2, data }),
-                _ => return Some(Record::Frame { key: false, rebuild: false, data }),
+                0 | 2 => {
+                    return Some(Record::Frame {
+                        key: true,
+                        rebuild: kind == 2,
+                        data,
+                    })
+                }
+                _ => {
+                    return Some(Record::Frame {
+                        key: false,
+                        rebuild: false,
+                        data,
+                    })
+                }
             }
         }
     }
@@ -74,10 +100,22 @@ mod tests {
         bytes.extend(rec(3, br#"{"codec":"avc1","description":"AQ=="}"#));
         bytes.extend(rec(2, &[]));
         let mut s = StreamReader::from_reader(std::io::Cursor::new(bytes));
-        assert!(matches!(s.next_record(), Some(Record::Frame { key: true, rebuild: false, ref data }) if data == &[9, 9]));
-        assert!(matches!(s.next_record(), Some(Record::Frame { key: false, .. })));
+        assert!(
+            matches!(s.next_record(), Some(Record::Frame { key: true, rebuild: false, ref data }) if data == &[9, 9])
+        );
+        assert!(matches!(
+            s.next_record(),
+            Some(Record::Frame { key: false, .. })
+        ));
         assert!(matches!(s.next_record(), Some(Record::Config(_))));
-        assert!(matches!(s.next_record(), Some(Record::Frame { key: true, rebuild: true, .. })));
+        assert!(matches!(
+            s.next_record(),
+            Some(Record::Frame {
+                key: true,
+                rebuild: true,
+                ..
+            })
+        ));
         assert!(s.next_record().is_none());
     }
 }

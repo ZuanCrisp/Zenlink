@@ -36,7 +36,10 @@ fn parse_avcc(r: &[u8]) -> Option<ParamSets> {
     for _ in 0..npps {
         i = push_ps(r, i, &mut out)?;
     }
-    Some(ParamSets { annexb: out, length_size })
+    Some(ParamSets {
+        annexb: out,
+        length_size,
+    })
 }
 
 fn parse_hvcc(r: &[u8]) -> Option<ParamSets> {
@@ -55,7 +58,10 @@ fn parse_hvcc(r: &[u8]) -> Option<ParamSets> {
             i = push_ps(r, i, &mut out)?;
         }
     }
-    Some(ParamSets { annexb: out, length_size })
+    Some(ParamSets {
+        annexb: out,
+        length_size,
+    })
 }
 
 fn push_ps(r: &[u8], i: usize, out: &mut Vec<u8>) -> Option<usize> {
@@ -103,7 +109,10 @@ mod tests {
         assert_eq!(ps.length_size, 4);
         assert_eq!(ps.annexb, vec![0, 0, 0, 1, 0x67, 1, 0, 0, 0, 1, 0x68]);
         let sample = [0, 0, 0, 2, 0x65, 9, 0, 0, 0, 1, 0x06];
-        assert_eq!(to_annexb(&sample, &ps, false), vec![0, 0, 0, 1, 0x65, 9, 0, 0, 0, 1, 0x06]);
+        assert_eq!(
+            to_annexb(&sample, &ps, false),
+            vec![0, 0, 0, 1, 0x65, 9, 0, 0, 0, 1, 0x06]
+        );
         assert_eq!(to_annexb(&sample, &ps, true).len(), ps.annexb.len() + 11);
     }
 

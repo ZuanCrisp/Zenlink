@@ -22,16 +22,27 @@ use std::time::{Duration, Instant};
 use windows::core::{s, w, Interface, Result, PCWSTR};
 use windows::Win32::Foundation::{HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
-use windows::Win32::Graphics::Direct3D::{ID3DBlob, D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST};
+use windows::Win32::Graphics::Direct3D::{
+    ID3DBlob, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, D3D_DRIVER_TYPE_UNKNOWN,
+    D3D_FEATURE_LEVEL_11_0,
+};
 use windows::Win32::Graphics::Direct3D11::*;
-use windows::Win32::Graphics::DirectComposition::{DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual};
+use windows::Win32::Graphics::DirectComposition::{
+    DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual,
+};
 use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE};
 use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Dxgi::*;
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+use windows::Win32::Graphics::Gdi::{
+    GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+};
 use windows::Win32::Graphics::Imaging::*;
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
-use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED,
+};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -112,16 +123,31 @@ impl Glass {
 
 /// Screen recorders that must see ZenLink: their presence switches the
 /// glass to the wallpaper source (nothing excluded from capture).
-const RECORDERS: &[&str] = &["obs64.exe", "obs32.exe", "obs.exe", "streamlabs obs.exe", "streamlabs desktop.exe", "xsplit.core.exe"];
+const RECORDERS: &[&str] = &[
+    "obs64.exe",
+    "obs32.exe",
+    "obs.exe",
+    "streamlabs obs.exe",
+    "streamlabs desktop.exe",
+    "xsplit.core.exe",
+];
 
 fn recorder_running() -> bool {
     unsafe {
-        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else { return false };
-        let mut e = PROCESSENTRY32W { dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return false;
+        };
+        let mut e = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
         let mut found = false;
         if Process32FirstW(snap, &mut e).is_ok() {
             loop {
-                let n = String::from_utf16_lossy(&e.szExeFile[..e.szExeFile.iter().position(|&c| c == 0).unwrap_or(0)]).to_lowercase();
+                let n = String::from_utf16_lossy(
+                    &e.szExeFile[..e.szExeFile.iter().position(|&c| c == 0).unwrap_or(0)],
+                )
+                .to_lowercase();
                 if RECORDERS.contains(&n.as_str()) {
                     found = true;
                     break;
@@ -184,14 +210,33 @@ struct Gfx {
 
 const PAD: i32 = 48;
 
-fn compile(code: &str, entry: windows::core::PCSTR, target: windows::core::PCSTR) -> Result<ID3DBlob> {
+fn compile(
+    code: &str,
+    entry: windows::core::PCSTR,
+    target: windows::core::PCSTR,
+) -> Result<ID3DBlob> {
     unsafe {
         let mut blob = None;
         let mut err = None;
-        let r = D3DCompile(code.as_ptr() as _, code.len(), None, None, None, entry, target, 0, 0, &mut blob, Some(&mut err));
+        let r = D3DCompile(
+            code.as_ptr() as _,
+            code.len(),
+            None,
+            None,
+            None,
+            entry,
+            target,
+            0,
+            0,
+            &mut blob,
+            Some(&mut err),
+        );
         if let Err(e) = r {
             if let Some(err) = err {
-                let msg = std::slice::from_raw_parts(err.GetBufferPointer() as *const u8, err.GetBufferSize());
+                let msg = std::slice::from_raw_parts(
+                    err.GetBufferPointer() as *const u8,
+                    err.GetBufferSize(),
+                );
                 log::warn!("glass: shader: {}", String::from_utf8_lossy(msg));
             }
             return Err(e);
@@ -296,9 +341,14 @@ impl Gfx {
                     MipLevels: 1,
                     ArraySize: 1,
                     Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                    SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                    SampleDesc: DXGI_SAMPLE_DESC {
+                        Count: 1,
+                        Quality: 0,
+                    },
                     Usage: D3D11_USAGE_DEFAULT,
-                    BindFlags: (D3D11_BIND_SHADER_RESOURCE.0 | if rt { D3D11_BIND_RENDER_TARGET.0 } else { 0 }) as u32,
+                    BindFlags: (D3D11_BIND_SHADER_RESOURCE.0
+                        | if rt { D3D11_BIND_RENDER_TARGET.0 } else { 0 })
+                        as u32,
                     ..Default::default()
                 },
                 None,
@@ -306,11 +356,20 @@ impl Gfx {
             )?;
             let tex: ID3D11Texture2D = tex.unwrap();
             let mut srv = None;
-            self.dev.CreateShaderResourceView(&tex, None, Some(&mut srv))?;
+            self.dev
+                .CreateShaderResourceView(&tex, None, Some(&mut srv))?;
             let mut rtv = None;
             // The source copy target needs an RTV only to be cleared.
-            self.dev.CreateRenderTargetView(&tex, None, Some(&mut rtv)).ok();
-            Ok(Target { rtv: rtv.unwrap_or_else(|| unreachable_rtv()), srv: srv.unwrap(), tex, w, h })
+            self.dev
+                .CreateRenderTargetView(&tex, None, Some(&mut rtv))
+                .ok();
+            Ok(Target {
+                rtv: rtv.unwrap_or_else(|| unreachable_rtv()),
+                srv: srv.unwrap(),
+                tex,
+                w,
+                h,
+            })
         }
     }
 
@@ -318,7 +377,10 @@ impl Gfx {
         let (sw, sh) = (ww + 2 * PAD as u32, wh + 2 * PAD as u32);
         if self.src.as_ref().map(|t| (t.w, t.h)) != Some((sw, sh)) {
             self.src = Some(self.target(sw, sh, true)?);
-            unsafe { self.ctx.ClearRenderTargetView(&self.src.as_ref().unwrap().rtv, &[0.0, 0.0, 0.0, 1.0]) };
+            unsafe {
+                self.ctx
+                    .ClearRenderTargetView(&self.src.as_ref().unwrap().rtv, &[0.0, 0.0, 0.0, 1.0])
+            };
         }
         let (bw, bh) = (sw.div_ceil(f), sh.div_ceil(f));
         if self.a.as_ref().map(|t| (t.w, t.h)) != Some((bw, bh)) {
@@ -328,7 +390,13 @@ impl Gfx {
         if self.sw != (ww, wh) || self.swap.is_none() {
             unsafe {
                 if let Some(sc) = &self.swap {
-                    sc.ResizeBuffers(2, ww, wh, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SWAP_CHAIN_FLAG(0))?;
+                    sc.ResizeBuffers(
+                        2,
+                        ww,
+                        wh,
+                        DXGI_FORMAT_B8G8R8A8_UNORM,
+                        DXGI_SWAP_CHAIN_FLAG(0),
+                    )?;
                 } else {
                     let dxgi: IDXGIDevice = self.dev.cast()?;
                     let factory: IDXGIFactory2 = dxgi.GetAdapter()?.GetParent()?;
@@ -338,7 +406,10 @@ impl Gfx {
                             Width: ww,
                             Height: wh,
                             Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                            SampleDesc: DXGI_SAMPLE_DESC {
+                                Count: 1,
+                                Quality: 0,
+                            },
                             BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
                             BufferCount: 2,
                             SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
@@ -357,17 +428,35 @@ impl Gfx {
         Ok(())
     }
 
-    fn pass(&self, ps: &ID3D11PixelShader, input: &ID3D11ShaderResourceView, out: &ID3D11RenderTargetView, w: u32, h: u32, cb: &Cb) {
+    fn pass(
+        &self,
+        ps: &ID3D11PixelShader,
+        input: &ID3D11ShaderResourceView,
+        out: &ID3D11RenderTargetView,
+        w: u32,
+        h: u32,
+        cb: &Cb,
+    ) {
         unsafe {
-            self.ctx.UpdateSubresource(&self.cb, 0, None, cb as *const _ as _, 0, 0);
-            self.ctx.OMSetRenderTargets(Some(&[Some(out.clone())]), None);
-            self.ctx.RSSetViewports(Some(&[D3D11_VIEWPORT { Width: w as f32, Height: h as f32, MaxDepth: 1.0, ..Default::default() }]));
-            self.ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            self.ctx
+                .UpdateSubresource(&self.cb, 0, None, cb as *const _ as _, 0, 0);
+            self.ctx
+                .OMSetRenderTargets(Some(&[Some(out.clone())]), None);
+            self.ctx.RSSetViewports(Some(&[D3D11_VIEWPORT {
+                Width: w as f32,
+                Height: h as f32,
+                MaxDepth: 1.0,
+                ..Default::default()
+            }]));
+            self.ctx
+                .IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             self.ctx.VSSetShader(&self.vs, None);
             self.ctx.PSSetShader(ps, None);
-            self.ctx.PSSetConstantBuffers(0, Some(&[Some(self.cb.clone())]));
+            self.ctx
+                .PSSetConstantBuffers(0, Some(&[Some(self.cb.clone())]));
             self.ctx.PSSetSamplers(0, Some(&[Some(self.smp.clone())]));
-            self.ctx.PSSetShaderResources(0, Some(&[Some(input.clone())]));
+            self.ctx
+                .PSSetShaderResources(0, Some(&[Some(input.clone())]));
             self.ctx.Draw(3, 0);
             self.ctx.PSSetShaderResources(0, Some(&[None]));
             self.ctx.OMSetRenderTargets(None, None);
@@ -377,7 +466,13 @@ impl Gfx {
     /// Blur `src` by `sigma` px, then composite the glass into the swapchain.
     fn render(&mut self, p: &Params, ww: u32, wh: u32) -> Result<()> {
         let sigma = p.thick * 28.0 * p.scale.max(1.0) / 1.5;
-        let f: u32 = if sigma > 10.0 { 4 } else if sigma > 3.0 { 2 } else { 1 };
+        let f: u32 = if sigma > 10.0 {
+            4
+        } else if sigma > 3.0 {
+            2
+        } else {
+            1
+        };
         self.ensure_sizes(ww, wh, f)?;
         let src = self.src.as_ref().unwrap();
         let (a, b) = (self.a.as_ref().unwrap(), self.b.as_ref().unwrap());
@@ -394,7 +489,12 @@ impl Gfx {
         };
         for (i, s) in p.shapes.iter().take(8).enumerate() {
             cb.rc[i] = [s.x + s.w / 2.0, s.y + s.h / 2.0, s.w / 2.0, s.h / 2.0];
-            cb.rp[i] = [s.radius.min(s.w / 2.0).min(s.h / 2.0), s.bezel, s.strength, 0.0];
+            cb.rp[i] = [
+                s.radius.min(s.w / 2.0).min(s.h / 2.0),
+                s.bezel,
+                s.strength,
+                0.0,
+            ];
         }
         cb.count = p.shapes.len().min(8) as i32;
         let input = if sigma >= 0.5 {
@@ -415,7 +515,8 @@ impl Gfx {
             let sc = self.swap.as_ref().unwrap();
             let back: ID3D11Texture2D = sc.GetBuffer(0)?;
             let mut rtv = None;
-            self.dev.CreateRenderTargetView(&back, None, Some(&mut rtv))?;
+            self.dev
+                .CreateRenderTargetView(&back, None, Some(&mut rtv))?;
             let rtv = rtv.unwrap();
             self.pass(&self.ps_comp, &input, &rtv, ww, wh, &cb);
             sc.Present(1, DXGI_PRESENT(0)).ok()?;
@@ -431,8 +532,17 @@ fn unreachable_rtv() -> ID3D11RenderTargetView {
 /// The background for one monitor: either a live duplication or a static
 /// wallpaper texture of the monitor's size.
 enum Backdrop {
-    Dup { dup: IDXGIOutputDuplication, frame: Option<ID3D11Texture2D>, origin: (i32, i32) },
-    Paper { tex: ID3D11Texture2D, origin: (i32, i32), size: (i32, i32), key: String },
+    Dup {
+        dup: IDXGIOutputDuplication,
+        frame: Option<ID3D11Texture2D>,
+        origin: (i32, i32),
+    },
+    Paper {
+        tex: ID3D11Texture2D,
+        origin: (i32, i32),
+        size: (i32, i32),
+        key: String,
+    },
 }
 
 fn find_output(main: HWND) -> Result<(IDXGIAdapter1, IDXGIOutput1, RECT)> {
@@ -463,25 +573,41 @@ fn wallpaper_info() -> Option<(String, u32)> {
         let mut buf = [0u16; 520];
         let mut n = (buf.len() * 2) as u32;
         unsafe {
-            RegGetValueW(HKEY_CURRENT_USER, w!("Control Panel\\Desktop"), name, RRF_RT_REG_SZ, None, Some(buf.as_mut_ptr() as _), Some(&mut n))
-                .ok()
-                .ok()?;
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                w!("Control Panel\\Desktop"),
+                name,
+                RRF_RT_REG_SZ,
+                None,
+                Some(buf.as_mut_ptr() as _),
+                Some(&mut n),
+            )
+            .ok()
+            .ok()?;
         }
         let len = buf.iter().position(|&c| c == 0).unwrap_or(0);
         Some(String::from_utf16_lossy(&buf[..len]))
     };
     let path = read(w!("WallPaper"))?;
-    let style = read(w!("WallpaperStyle")).and_then(|s| s.trim().parse().ok()).unwrap_or(10);
+    let style = read(w!("WallpaperStyle"))
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(10);
     Some((path, style))
 }
 
 /// Wallpaper drawn the way Windows draws it, into a monitor-size BGRA buffer.
 fn wallpaper_pixels(path: &str, style: u32, mw: i32, mh: i32) -> Option<Vec<u8>> {
     unsafe {
-        let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?;
+        let wic: IWICImagingFactory =
+            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?;
         let wide: Vec<u16> = path.encode_utf16().chain(Some(0)).collect();
         let dec = wic
-            .CreateDecoderFromFilename(PCWSTR(wide.as_ptr()), None, windows::Win32::Foundation::GENERIC_READ, WICDecodeMetadataCacheOnDemand)
+            .CreateDecoderFromFilename(
+                PCWSTR(wide.as_ptr()),
+                None,
+                windows::Win32::Foundation::GENERIC_READ,
+                WICDecodeMetadataCacheOnDemand,
+            )
             .ok()?;
         let frame = dec.GetFrame(0).ok()?;
         let conv = WICConvertBitmapSource(&GUID_WICPixelFormat32bppPBGRA, &frame).ok()?;
@@ -491,19 +617,33 @@ fn wallpaper_pixels(path: &str, style: u32, mw: i32, mh: i32) -> Option<Vec<u8>>
         let (sx, sy) = (mw as f32 / fw, mh as f32 / fh);
         // Scaled size of the image on the monitor.
         let (tw, th) = match style {
-            2 => (mw as f32, mh as f32),               // stretch
-            6 => { let k = sx.min(sy); (fw * k, fh * k) } // fit
-            0 => (fw, fh),                             // centre
-            _ => { let k = sx.max(sy); (fw * k, fh * k) } // fill / span
+            2 => (mw as f32, mh as f32), // stretch
+            6 => {
+                let k = sx.min(sy);
+                (fw * k, fh * k)
+            } // fit
+            0 => (fw, fh),               // centre
+            _ => {
+                let k = sx.max(sy);
+                (fw * k, fh * k)
+            } // fill / span
         };
         let (tw, th) = (tw.round().max(1.0) as u32, th.round().max(1.0) as u32);
         let scaler = wic.CreateBitmapScaler().ok()?;
-        scaler.Initialize(&conv, tw, th, WICBitmapInterpolationModeFant).ok()?;
+        scaler
+            .Initialize(&conv, tw, th, WICBitmapInterpolationModeFant)
+            .ok()?;
         let mut img = vec![0u8; (tw * th * 4) as usize];
         scaler.CopyPixels(std::ptr::null(), tw * 4, &mut img).ok()?;
         // Background colour around a fit/centred image.
-        let bg = windows::Win32::Graphics::Gdi::GetSysColor(windows::Win32::Graphics::Gdi::COLOR_BACKGROUND);
-        let (r, g, b) = ((bg & 0xff) as u8, ((bg >> 8) & 0xff) as u8, ((bg >> 16) & 0xff) as u8);
+        let bg = windows::Win32::Graphics::Gdi::GetSysColor(
+            windows::Win32::Graphics::Gdi::COLOR_BACKGROUND,
+        );
+        let (r, g, b) = (
+            (bg & 0xff) as u8,
+            ((bg >> 8) & 0xff) as u8,
+            ((bg >> 16) & 0xff) as u8,
+        );
         let mut out = vec![0u8; (mw * mh * 4) as usize];
         for px in out.chunks_exact_mut(4) {
             px.copy_from_slice(&[b, g, r, 255]);
@@ -560,7 +700,12 @@ fn create_layer() -> Result<HWND> {
             None,
         )?;
         let corner: u32 = 1; // DWMWCP_DONOTROUND: the shader draws the outline
-        let _ = DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &corner as *const _ as _, 4);
+        let _ = DwmSetWindowAttribute(
+            h,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &corner as *const _ as _,
+            4,
+        );
         Ok(h)
     }
 }
@@ -640,11 +785,22 @@ fn run(main: HWND, rx: Receiver<Params>, mode: &AtomicU8) -> Result<()> {
         unsafe {
             let _ = GetWindowRect(main, &mut rc);
         }
-        let (ww, wh) = ((rc.right - rc.left).max(1) as u32, (rc.bottom - rc.top).max(1) as u32);
+        let (ww, wh) = (
+            (rc.right - rc.left).max(1) as u32,
+            (rc.bottom - rc.top).max(1) as u32,
+        );
         let below_ok = unsafe { GetWindow(main, GW_HWNDNEXT).ok() == Some(layer) };
         if rc != last_rect || !below_ok || !shown {
             unsafe {
-                let _ = SetWindowPos(layer, Some(main), rc.left, rc.top, ww as i32, wh as i32, SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
+                let _ = SetWindowPos(
+                    layer,
+                    Some(main),
+                    rc.left,
+                    rc.top,
+                    ww as i32,
+                    wh as i32,
+                    SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW,
+                );
             }
             shown = true;
             if rc != last_rect {
@@ -655,14 +811,19 @@ fn run(main: HWND, rx: Receiver<Params>, mode: &AtomicU8) -> Result<()> {
 
         // Monitor changes: new output (and maybe a new adapter: restart).
         let mi = unsafe {
-            let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            let mut mi = MONITORINFO {
+                cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
             let _ = GetMonitorInfoW(MonitorFromWindow(main, MONITOR_DEFAULTTONEAREST), &mut mi);
             mi.rcMonitor
         };
         if mi != mon {
             let (ad, out, m) = find_output(main)?;
             if unsafe { ad.GetDesc1()?.AdapterLuid != adapter.GetDesc1()?.AdapterLuid } {
-                return Err(windows::core::Error::from_hresult(DXGI_ERROR_DEVICE_REMOVED));
+                return Err(windows::core::Error::from_hresult(
+                    DXGI_ERROR_DEVICE_REMOVED,
+                ));
             }
             output = out;
             mon = m;
@@ -671,26 +832,46 @@ fn run(main: HWND, rx: Receiver<Params>, mode: &AtomicU8) -> Result<()> {
         }
 
         // Background source.
-        let kind_ok = matches!((&backdrop, want), (Some(Backdrop::Dup { .. }), Source::Desktop) | (Some(Backdrop::Paper { .. }), Source::Wallpaper));
+        let kind_ok = matches!(
+            (&backdrop, want),
+            (Some(Backdrop::Dup { .. }), Source::Desktop)
+                | (Some(Backdrop::Paper { .. }), Source::Wallpaper)
+        );
         if !kind_ok {
             backdrop = None;
             unsafe {
                 // Desktop: this layer must not see itself. Wallpaper: recorders may see it.
-                let _ = SetWindowDisplayAffinity(layer, if want == Source::Desktop { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE });
+                let _ = SetWindowDisplayAffinity(
+                    layer,
+                    if want == Source::Desktop {
+                        WDA_EXCLUDEFROMCAPTURE
+                    } else {
+                        WDA_NONE
+                    },
+                );
             }
             match want {
-                Source::Desktop => match unsafe { output.DuplicateOutput(&gfx.dev) } {
-                    Ok(dup) => backdrop = Some(Backdrop::Dup { dup, frame: None, origin: (mon.left, mon.top) }),
-                    Err(e) => {
-                        log::warn!("glass: desktop duplication unavailable ({e:?}), using the wallpaper");
-                        params.as_mut().unwrap().source = "wallpaper".into();
-                        continue;
+                Source::Desktop => {
+                    match unsafe { output.DuplicateOutput(&gfx.dev) } {
+                        Ok(dup) => {
+                            backdrop = Some(Backdrop::Dup {
+                                dup,
+                                frame: None,
+                                origin: (mon.left, mon.top),
+                            })
+                        }
+                        Err(e) => {
+                            log::warn!("glass: desktop duplication unavailable ({e:?}), using the wallpaper");
+                            params.as_mut().unwrap().source = "wallpaper".into();
+                            continue;
+                        }
                     }
-                },
+                }
                 _ => {
                     let (mw, mh) = (mon.right - mon.left, mon.bottom - mon.top);
                     let (path, style) = wallpaper_info().unwrap_or_default();
-                    let px = wallpaper_pixels(&path, style, mw, mh).unwrap_or_else(|| vec![0x20; (mw * mh * 4) as usize]);
+                    let px = wallpaper_pixels(&path, style, mw, mh)
+                        .unwrap_or_else(|| vec![0x20; (mw * mh * 4) as usize]);
                     let mut tex = None;
                     unsafe {
                         gfx.dev.CreateTexture2D(
@@ -700,16 +881,28 @@ fn run(main: HWND, rx: Receiver<Params>, mode: &AtomicU8) -> Result<()> {
                                 MipLevels: 1,
                                 ArraySize: 1,
                                 Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-                                SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+                                SampleDesc: DXGI_SAMPLE_DESC {
+                                    Count: 1,
+                                    Quality: 0,
+                                },
                                 Usage: D3D11_USAGE_DEFAULT,
                                 BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
                                 ..Default::default()
                             },
-                            Some(&D3D11_SUBRESOURCE_DATA { pSysMem: px.as_ptr() as _, SysMemPitch: (mw * 4) as u32, SysMemSlicePitch: 0 }),
+                            Some(&D3D11_SUBRESOURCE_DATA {
+                                pSysMem: px.as_ptr() as _,
+                                SysMemPitch: (mw * 4) as u32,
+                                SysMemSlicePitch: 0,
+                            }),
                             Some(&mut tex),
                         )?;
                     }
-                    backdrop = Some(Backdrop::Paper { tex: tex.unwrap(), origin: (mon.left, mon.top), size: (mw, mh), key: format!("{path}|{style}") });
+                    backdrop = Some(Backdrop::Paper {
+                        tex: tex.unwrap(),
+                        origin: (mon.left, mon.top),
+                        size: (mw, mh),
+                        key: format!("{path}|{style}"),
+                    });
                 }
             }
             dirty = true;
@@ -740,7 +933,13 @@ fn run(main: HWND, rx: Receiver<Params>, mode: &AtomicU8) -> Result<()> {
                                 if need {
                                     let mut c = None;
                                     gfx.dev.CreateTexture2D(
-                                        &D3D11_TEXTURE2D_DESC { BindFlags: 0, MiscFlags: 0, CPUAccessFlags: 0, Usage: D3D11_USAGE_DEFAULT, ..d },
+                                        &D3D11_TEXTURE2D_DESC {
+                                            BindFlags: 0,
+                                            MiscFlags: 0,
+                                            CPUAccessFlags: 0,
+                                            Usage: D3D11_USAGE_DEFAULT,
+                                            ..d
+                                        },
                                         None,
                                         Some(&mut c),
                                     )?;
@@ -764,7 +963,9 @@ fn run(main: HWND, rx: Receiver<Params>, mode: &AtomicU8) -> Result<()> {
         if let Some(Backdrop::Paper { key, .. }) = &backdrop {
             if recorder_at.elapsed() < interval {
                 // Checked with the recorder poll: reload on wallpaper change.
-                let now = wallpaper_info().map(|(p, s)| format!("{p}|{s}")).unwrap_or_default();
+                let now = wallpaper_info()
+                    .map(|(p, s)| format!("{p}|{s}"))
+                    .unwrap_or_default();
                 if &now != key {
                     backdrop = None;
                     continue;
@@ -777,8 +978,18 @@ fn run(main: HWND, rx: Receiver<Params>, mode: &AtomicU8) -> Result<()> {
 
         // Copy the window's region (plus margin) of the background.
         let (tex, origin, size) = match &backdrop {
-            Some(Backdrop::Dup { frame: Some(f), origin, .. }) => (f.clone(), *origin, (mon.right - mon.left, mon.bottom - mon.top)),
-            Some(Backdrop::Paper { tex, origin, size, .. }) => (tex.clone(), *origin, *size),
+            Some(Backdrop::Dup {
+                frame: Some(f),
+                origin,
+                ..
+            }) => (
+                f.clone(),
+                *origin,
+                (mon.right - mon.left, mon.bottom - mon.top),
+            ),
+            Some(Backdrop::Paper {
+                tex, origin, size, ..
+            }) => (tex.clone(), *origin, *size),
             _ => continue,
         };
         let sf = p.scale;
@@ -800,7 +1011,14 @@ fn run(main: HWND, rx: Receiver<Params>, mode: &AtomicU8) -> Result<()> {
                     0,
                     &tex,
                     0,
-                    Some(&D3D11_BOX { left: bx0 as u32, top: by0 as u32, front: 0, right: bx1 as u32, bottom: by1 as u32, back: 1 }),
+                    Some(&D3D11_BOX {
+                        left: bx0 as u32,
+                        top: by0 as u32,
+                        front: 0,
+                        right: bx1 as u32,
+                        bottom: by1 as u32,
+                        back: 1,
+                    }),
                 );
             }
         }

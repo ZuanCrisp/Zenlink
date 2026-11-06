@@ -20,12 +20,21 @@ fn windows_resources() {
         return;
     };
     let ver = std::env::var("CARGO_PKG_VERSION").unwrap();
-    let mut nums: Vec<String> = ver.split(['.', '-']).take(3).map(|s| s.parse::<u16>().unwrap_or(0).to_string()).collect();
+    let mut nums: Vec<String> = ver
+        .split(['.', '-'])
+        .take(3)
+        .map(|s| s.parse::<u16>().unwrap_or(0).to_string())
+        .collect();
     nums.resize(4, "0".into());
     let nums = nums.join(",");
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let rc_file = out.join("zenlink.rc");
-    let icon_path = std::fs::canonicalize(&icon).unwrap_or(icon).display().to_string().replace("\\\\?\\", "").replace('\\', "\\\\");
+    let icon_path = std::fs::canonicalize(&icon)
+        .unwrap_or(icon)
+        .display()
+        .to_string()
+        .replace("\\\\?\\", "")
+        .replace('\\', "\\\\");
     std::fs::write(
         &rc_file,
         format!(
@@ -60,7 +69,14 @@ END
     )
     .unwrap();
     let res = out.join("zenlink.res");
-    let ok = Command::new(&rc).arg("/nologo").arg("/fo").arg(&res).arg(&rc_file).status().map(|s| s.success()).unwrap_or(false);
+    let ok = Command::new(&rc)
+        .arg("/nologo")
+        .arg("/fo")
+        .arg(&res)
+        .arg(&rc_file)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
     if ok {
         println!("cargo:rustc-link-arg-bins={}", res.display());
     } else {
@@ -69,11 +85,19 @@ END
 }
 
 fn find_rc() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("RC").map(PathBuf::from).filter(|p| p.is_file()) {
+    if let Some(p) = std::env::var_os("RC")
+        .map(PathBuf::from)
+        .filter(|p| p.is_file())
+    {
         return Some(p);
     }
     let kits = Path::new(r"C:\Program Files (x86)\Windows Kits\10\bin");
-    let mut found: Vec<PathBuf> = std::fs::read_dir(kits).ok()?.flatten().map(|e| e.path().join(r"x64\rc.exe")).filter(|p| p.is_file()).collect();
+    let mut found: Vec<PathBuf> = std::fs::read_dir(kits)
+        .ok()?
+        .flatten()
+        .map(|e| e.path().join(r"x64\rc.exe"))
+        .filter(|p| p.is_file())
+        .collect();
     found.sort();
     found.pop()
 }

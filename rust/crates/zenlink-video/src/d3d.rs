@@ -5,7 +5,9 @@ use std::sync::Mutex;
 
 use windows::core::{Interface, Result};
 use windows::Win32::Foundation::{HMODULE, RECT};
-use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1};
+use windows::Win32::Graphics::Direct3D::{
+    D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
+};
 use windows::Win32::Graphics::Direct3D10::ID3D10Multithread;
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_NV12, DXGI_SAMPLE_DESC};
@@ -66,15 +68,26 @@ impl Gpu {
             MipLevels: 1,
             ArraySize: 1,
             Format: DXGI_FORMAT_NV12,
-            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
-            Usage: if dynamic { D3D11_USAGE_DYNAMIC } else { D3D11_USAGE_DEFAULT },
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: if dynamic {
+                D3D11_USAGE_DYNAMIC
+            } else {
+                D3D11_USAGE_DEFAULT
+            },
             // Video-processor inputs must be render-target capable on some drivers (AMD).
             BindFlags: if dynamic {
                 D3D11_BIND_SHADER_RESOURCE.0 as u32
             } else {
                 (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32
             },
-            CPUAccessFlags: if dynamic { D3D11_CPU_ACCESS_WRITE.0 as u32 } else { 0 },
+            CPUAccessFlags: if dynamic {
+                D3D11_CPU_ACCESS_WRITE.0 as u32
+            } else {
+                0
+            },
             MiscFlags: 0,
         };
         let mut tex = None;
@@ -126,7 +139,9 @@ impl Ring {
     pub fn free_slot(&mut self) -> (usize, u64) {
         let mut dropped = 0;
         loop {
-            if let Some(i) = (0..SLOTS).find(|i| !self.queue.contains(i) && Some(*i) != self.showing) {
+            if let Some(i) =
+                (0..SLOTS).find(|i| !self.queue.contains(i) && Some(*i) != self.showing)
+            {
                 return (i, dropped);
             }
             if self.queue.pop_front().is_none() {
@@ -157,7 +172,9 @@ impl Ring {
             self.showing = Some(i);
         }
         if self.queue.len() >= 2 {
-            let since = *self.behind_since.get_or_insert_with(std::time::Instant::now);
+            let since = *self
+                .behind_since
+                .get_or_insert_with(std::time::Instant::now);
             if since.elapsed() >= CATCH_UP {
                 if let Some(i) = self.queue.pop_front() {
                     self.showing = Some(i);
