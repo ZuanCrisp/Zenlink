@@ -60,12 +60,13 @@ fn set_accent(hwnd: HWND, state: u32, tint: u32) -> bool {
 /// Apply `mode` to `hwnd`. `dark` picks the dark title bar and tint.
 /// `thick` (0..1): 0 = fully clear (no blur at all, the desktop shows as
 /// is), higher = Windows Acrylic blur with a stronger tint.
-pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, thick: f32) -> bool {
+/// `round`: Windows 11 rounded corners (off in full screen / maximised).
+pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, thick: f32, round: bool) -> bool {
     unsafe {
         let d = BOOL::from(dark);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &d as *const _ as _, 4);
         // Rounded corners like Windows 11 / macOS windows (no system frame).
-        let corner: u32 = 2; // DWMWCP_ROUND
+        let corner: u32 = if round { 2 } else { 1 }; // DWMWCP_ROUND / DWMWCP_DONOTROUND
         let _ = DwmSetWindowAttribute(hwnd, windows::Win32::Graphics::Dwm::DWMWA_WINDOW_CORNER_PREFERENCE, &corner as *const _ as _, 4);
         // No frame extension: on a frameless window DWM would paint ghost
         // caption buttons into the extended area. The blur needs none.

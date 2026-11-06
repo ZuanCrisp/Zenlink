@@ -61,7 +61,7 @@ struct App {
     fitted: Option<(u32, u32, bool)>,
     meter_at: Option<Instant>,
     dark: bool,
-    backdrop: Option<(bool, bool, i32)>,
+    backdrop: Option<(bool, bool, i32, bool)>,
     on_top: Option<bool>,
     dots: Option<dots::Dots>,
     // Stage width (logical) to keep while the settings panel slides.
@@ -76,6 +76,9 @@ struct App {
     drivers_text: Option<String>,
     /// Device overlay ZenLink opened last ("control-center" / "notifications").
     panel: Option<&'static str>,
+    /// v2-style connect card: when Start was pressed (the backend may still
+    /// say "idle" for a moment).
+    flow_started: Option<Instant>,
 }
 
 thread_local! {
@@ -126,14 +129,16 @@ fn apply_look(ui: &AppWindow) {
     ui.global::<I18n>().set_id(p.lang.as_str() != "en");
     let glass_on = p.glass_on;
     let glass_k = thick;
+    // Square corners in full screen / maximised (rounded ones show the desktop).
+    let round = !ui.window().is_fullscreen() && !ui.window().is_maximized();
     APP.with_borrow_mut(|a| {
         a.dark = dark;
         let glass_q = (glass_k * 20.0).round() as i32; // re-apply in 5% steps
-        if a.backdrop != Some((glass_on, dark, glass_q)) {
+        if a.backdrop != Some((glass_on, dark, glass_q, round)) {
             if let Some(h) = hwnd_of(ui.window()) {
                 let mode = if glass_on { backdrop::Backdrop::Accent } else { backdrop::Backdrop::None };
-                backdrop::apply(h, mode, dark, glass_k);
-                a.backdrop = Some((glass_on, dark, glass_q));
+                backdrop::apply(h, mode, dark, glass_k, round);
+                a.backdrop = Some((glass_on, dark, glass_q, round));
             }
         }
         if a.on_top != Some(p.on_top) {
@@ -162,6 +167,33 @@ fn tr_ui(ui: &AppWindow, id: &str, en: &str) -> String {
     if ui.global::<I18n>().get_id() { id.into() } else { en.into() }
 }
 
+/// Backend messages are English; show the common ones in Indonesian.
+fn tr_backend(ui: &AppWindow, en: &str) -> String {
+    if !ui.global::<I18n>().get_id() {
+        return en.into();
+    }
+    const MAP: &[(&str, &str)] = &[
+        ("Unlock the device and tap Trust, then try again.", "Buka kunci perangkat dan tekan Percayai (Trust), lalu coba lagi."),
+        ("Connect the device with the cable, unlock it and tap Trust first.", "Colokkan perangkat pakai kabel, buka kunci, lalu tekan Percayai (Trust) dulu."),
+        ("Wi-Fi is already set up.", "Wi-Fi sudah siap. Bisa tanpa kabel."),
+        ("Wi-Fi needs Apple Driver mode.", "Wi-Fi butuh mode Apple Driver."),
+        ("Stop casting first.", "Hentikan mirroring dulu."),
+        ("Choose a connection mode first.", "Pilih mode koneksi dulu."),
+        ("Connect an iPhone or iPad with a USB cable.", "Colokkan iPhone atau iPad pakai kabel USB."),
+        (
+            "The device isn't on Wi-Fi yet. Press Set up Wi-Fi in Settings with the cable connected, keep both on the same network, or switch to Wired.",
+            "Perangkat belum tersambung Wi-Fi. Tekan Atur Wi-Fi saat kabel tersambung, pastikan di jaringan yang sama, atau pilih Kabel.",
+        ),
+    ];
+    if let Some((_, id)) = MAP.iter().find(|(e, _)| *e == en) {
+        return (*id).into();
+    }
+    if let Some(rest) = en.strip_prefix("Wi-Fi setup failed: ") {
+        return format!("Wi-Fi gagal disiapkan: {rest}");
+    }
+    en.into()
+}
+
 /// Backend state -> UI. Runs on the UI thread.
 fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     let tr = |id: &str, en: &str| -> String { if ui.global::<I18n>().get_id() { id.into() } else { en.into() } };
@@ -177,7 +209,7 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
         _ if !device.is_empty() => "USB".into(),
         _ => String::new(),
     };
-    let message = if phase == "error" { str_of(st, &["error"]).unwrap_or("").to_string() } else { String::new() };
+    let message = if phase == "error" { tr_backend(ui, str_of(st, &["error"]).unwrap_or("")) } else { String::new() };
     ui.set_phase(phase.clone().into());
     ui.set_device(device.into());
     ui.set_link(link.into());
@@ -220,6 +252,30 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
         )
         .into(),
     );
+    // Connect card (1-2-3-4) like v2. AirPlay / Hybrid wait for the device
+    // to pick ZenLink in Screen Mirroring: no card then (the guide shows).
+    let airplay = first.map(|d| d.get("airplay").and_then(Value::as_bool).unwrap_or(false) || d.get("hybrid").and_then(Value::as_bool).unwrap_or(false)).unwrap_or(false);
+    let kind = if str_of(st, &["connection", "active"]) == Some("usbdirect") { "usbdirect" } else { "apple" };
+    ui.set_flow_kind(kind.into());
+    ui.set_device_wifi(wifi || str_of(st, &["device", "wifi"]).is_some() && st["device"]["wifi"].as_bool().unwrap_or(false));
+    let fresh = APP.with_borrow(|a| a.flow_started.map(|t| t.elapsed() < Duration::from_secs(3)).unwrap_or(false));
+    let step = ui.get_flow_step();
+    match phase.as_str() {
+        "connecting" | "activating" if airplay => ui.set_flow_step(-1),
+        "connecting" | "activating" => {
+            let n = if phase == "connecting" { 1 } else { 2 };
+            ui.set_flow_failed(false);
+            ui.set_flow_step(step.max(n));
+        }
+        "streaming" => {
+            ui.set_flow_step(-1);
+            ui.set_flow_failed(false);
+            APP.with_borrow_mut(|a| a.flow_started = None);
+        }
+        "error" if step >= 0 => ui.set_flow_failed(true),
+        _ if step >= 0 && !fresh && !ui.get_flow_failed() => ui.set_flow_step(-1),
+        _ => {}
+    }
     let rot = st.get("rotation").and_then(Value::as_u64).unwrap_or(0) as u32;
     let live = phase == "streaming";
     APP.with_borrow_mut(|a| {
@@ -448,9 +504,28 @@ fn main() -> Result<(), slint::PlatformError> {
     // Callbacks.
     {
         let api = api.clone();
+        let weak = ui.as_weak();
         ui.on_start_cast(move || {
+            if let Some(ui) = weak.upgrade() {
+                // The card opens at step 0 (detect device) at once.
+                let airplay = ui.get_mode_link().as_str() == "wireless" && ui.get_flow_kind().as_str() == "usbdirect";
+                if !airplay {
+                    ui.set_flow_failed(false);
+                    ui.set_flow_step(0);
+                    APP.with_borrow_mut(|a| a.flow_started = Some(Instant::now()));
+                }
+            }
             let a = api.clone();
             std::thread::spawn(move || a.start_cast());
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_flow_dismiss(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_flow_step(-1);
+                ui.set_flow_failed(false);
+            }
         });
     }
     {
@@ -462,11 +537,25 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let api = api.clone();
+        let weak = ui.as_weak();
         ui.on_restart(move || {
+            if let Some(ui) = weak.upgrade() {
+                show_toast(&ui, tr_ui(&ui, "Memulai ulang koneksi…", "Restarting the connection…"));
+            }
             let a = api.clone();
             std::thread::spawn(move || {
                 a.stop_cast();
-                std::thread::sleep(Duration::from_millis(700));
+                // The backend ignores Start while the old session is still
+                // closing (that can take a few seconds): wait until it is
+                // gone ("capture" is null), then start again.
+                let t0 = Instant::now();
+                while t0.elapsed() < Duration::from_secs(15) {
+                    match a.state() {
+                        Some(st) if st.get("capture").map_or(true, Value::is_null) => break,
+                        _ => std::thread::sleep(Duration::from_millis(250)),
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(300));
                 a.start_cast();
             });
         });
@@ -649,6 +738,32 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
     {
+        // Cable / Wi-Fi from Settings (both modes). The backend ends a
+        // running session first.
+        let api = api.clone();
+        let weak = ui.as_weak();
+        ui.on_set_link(move |link| {
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_mode_link() == link {
+                return;
+            }
+            ui.set_mode_link(link.clone());
+            show_toast(&ui, if link.as_str() == "wireless" { tr_ui(&ui, "Beralih ke Wi-Fi…", "Switching to Wi-Fi…") } else { tr_ui(&ui, "Beralih ke kabel…", "Switching to the cable…") });
+            let (api, w) = (api.clone(), weak.clone());
+            let link = link.to_string();
+            std::thread::spawn(move || {
+                let ok = api.post("/api/connection", &json!({ "link": link })).is_some();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = w.upgrade() {
+                        if !ok {
+                            show_toast(&ui, tr_ui(&ui, "Sambungan belum bisa diganti, coba lagi.", "The connection could not be changed, try again."));
+                        }
+                    }
+                });
+            });
+        });
+    }
+    {
         let api = api.clone();
         let weak = ui.as_weak();
         ui.on_driver_action(move |a: slint::SharedString| {
@@ -674,7 +789,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     };
                     if a == "wifi" {
                         let ok = r.get("ok").and_then(Value::as_bool).unwrap_or(false);
-                        let msg = r.get("message").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| {
+                        let msg = r.get("message").and_then(Value::as_str).map(|m| tr_backend(&ui, m)).unwrap_or_else(|| {
                             if ok { tr_ui(&ui, "Wi-Fi siap. Sekarang bisa tanpa kabel.", "Wi-Fi is ready. You can unplug the cable.") }
                             else { tr_ui(&ui, "Wi-Fi belum bisa disiapkan.", "Wi-Fi could not be set up.") }
                         });
@@ -800,8 +915,13 @@ fn main() -> Result<(), slint::PlatformError> {
             if (lw < 640.0) != ui.get_compact() {
                 ui.set_compact(lw < 640.0);
             }
-            ui.set_maximized(ui.window().is_maximized());
-            ui.set_fullscreen(ui.window().is_fullscreen());
+            let (maxed, full) = (ui.window().is_maximized(), ui.window().is_fullscreen());
+            if maxed != ui.get_maximized() || full != ui.get_fullscreen() {
+                // Window style changed: corners and glass go again.
+                APP.with_borrow_mut(|a| a.backdrop = None);
+            }
+            ui.set_maximized(maxed);
+            ui.set_fullscreen(full);
             // Settings slide: window width follows the animated chrome so
             // the picture keeps its size; ends when the slide settles.
             if let Some(stage) = APP.with_borrow(|a| a.hold_stage) {
@@ -835,9 +955,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     "fill" => Fit::Fill,
                     _ => Fit::Contain,
                 });
-                // Rotation decision uses the unrotated frame size.
-                v.set_rotation(0);
-                let raw = v.shown_size();
+                // Rotation decision uses the unrotated frame size (read
+                // directly: briefly setting rotation 0 let the render thread
+                // draw a wrong frame).
+                let raw = v.source_size();
                 let rot = effective_rotation(&p, raw, device_rotation);
                 v.set_rotation(rot);
                 input.rotation.store(rot, Relaxed);

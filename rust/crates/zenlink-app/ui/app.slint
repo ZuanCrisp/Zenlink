@@ -279,45 +279,220 @@ component BottomBar inherits Rectangle {
     }
 }
 
-// Shown in the stage while there is no picture.
+// One step of the connect card (like v2: done / active / todo / failed).
+component FlowStep inherits Rectangle {
+    in property <string> title;
+    in property <string> sub;
+    in property <string> state; // "done" | "active" | "todo" | "failed"
+    in property <bool> last;
+    property <color> c: state == "done" ? Theme.ok : state == "active" ? #f0b43c : state == "failed" ? #ff6961 : Theme.text-3;
+    HorizontalLayout {
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 12px;
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            border-radius: 11px;
+            background: state == "done" || state == "failed" ? c : transparent;
+            border-width: state == "done" || state == "failed" ? 0px : 1.5px;
+            border-color: state == "active" ? c.with-alpha(0.35) : c.with-alpha(0.5);
+            if state == "done" || state == "failed": Text {
+                text: state == "done" ? "\u{E73E}" : "\u{E711}";
+                font-family: "Segoe Fluent Icons";
+                font-size: 11px;
+                color: #101010;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            // Spinning arc while this step runs.
+            if state == "active": Path {
+                width: 22px;
+                height: 22px;
+                viewbox-width: 22;
+                viewbox-height: 22;
+                stroke: c;
+                stroke-width: 2px;
+                commands: "M 11 1.5 A 9.5 9.5 0 0 1 20.5 11";
+                transform-rotation: (animation-tick() / 900ms) * 360deg;
+            }
+        }
+        VerticalLayout {
+            spacing: 3px;
+            Text { text: title; font-size: 13.5px; font-weight: 600; color: state == "todo" ? Theme.text-3 : state == "active" ? c : Theme.text; }
+            Text { text: sub; font-size: 11.5px; color: state == "active" ? Theme.text : Theme.text-3; wrap: word-wrap; }
+        }
+    }
+    if !last: Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+}
+
+// Shown in the stage while there is no picture: the device ready to start
+// (phone, cable, name), then the 1-2-3-4 connect card like v2.
 component Placeholder inherits Rectangle {
     in property <string> phase;
     in property <string> device;
     in property <string> message;
+    // Connect card: step -1 = hidden, 0..4; kind "apple" | "usbdirect" | "airplay".
+    in property <int> flow-step: -1;
+    in property <bool> flow-failed;
+    in property <string> flow-kind: "apple";
+    in property <bool> wifi;
     callback start();
-    VerticalLayout {
+    callback dismiss();
+    property <bool> card: flow-step >= 0;
+    property <[[string]]> texts: flow-kind == "usbdirect" ? [
+            [I18n.t("Deteksi perangkat", "Detect device"), I18n.t("Ditemukan di USB lewat driver libusb0", "Found on USB through the libusb0 driver")],
+            [I18n.t("Buka perangkat", "Open the device"), I18n.t("Mengalihkan ke mode tangkap layar", "Switching it to its screen-capture mode")],
+            [I18n.t("Cek kepercayaan", "Check trust"), I18n.t("Biarkan tidak terkunci sementara ZenLink membuktikan PC ini dipercaya", "Keep it unlocked while ZenLink proves this PC is trusted")],
+            [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar lewat ZenLink Studio", "Receiving the screen over ZenLink Studio")]]
+        : flow-kind == "airplay" ? [
+            [I18n.t("Perangkat tersambung", "Device connected"), I18n.t("iPhone/iPad memilih ZenLinkStudio di Pencerminan Layar", "Your iPhone/iPad chose ZenLinkStudio in Screen Mirroring")],
+            [I18n.t("Koneksi aman", "Secure connection"), I18n.t("Pairing AirPlay dan pertukaran kunci FairPlay", "AirPlay pairing and FairPlay key exchange")],
+            [I18n.t("Terima video", "Receive video"), I18n.t("Mendekripsi stream AirPlay", "Decrypting the AirPlay stream")],
+            [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar lewat Wi-Fi", "Receiving the screen over Wi-Fi")]]
+        : [
+            [I18n.t("Deteksi perangkat", "Detect device"), I18n.t("Ditemukan lewat Apple Mobile Device Service", "Found through Apple Mobile Device Service")],
+            [I18n.t("Koneksi aman", "Secure connection"), wifi ? I18n.t("Membuka tunnel Wi-Fi terenkripsi ke perangkat", "Opening an encrypted Wi-Fi tunnel to the device") : I18n.t("Membuka tunnel USB terenkripsi ke perangkat", "Opening an encrypted USB tunnel to the device")],
+            [I18n.t("Siapkan perangkat", "Prepare the device"), I18n.t("Biarkan tidak terkunci. Pertama kali, image developer kecil dipasang.", "Keep it unlocked. The first time, a small developer image is installed.")],
+            [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar dalam HEVC", "Receiving the screen in HEVC")]];
+    property <float> pct: max(0, min(flow-step, 4)) / 4;
+    animate pct { duration: 420ms; easing: ease-out; }
+    function st(i: int) -> string {
+        if flow-failed && i == max(flow-step, 0) { return "failed"; }
+        if i < flow-step { return "done"; }
+        if i == flow-step { return "active"; }
+        return "todo";
+    }
+
+    // Ready / plug-in view.
+    if !card: VerticalLayout {
         alignment: center;
-        spacing: 14px;
+        spacing: 12px;
         Rectangle {
-            width: 86px;
-            height: 160px;
-            x: (parent.width - self.width) / 2;
-            border-radius: 18px;
-            border-width: 2px;
-            border-color: device == "" ? Theme.text-3 : Theme.ok;
-            background: Theme.dark ? #ffffff08 : #ffffff80;
-            Rectangle { y: 8px; width: 26px; height: 6px; border-radius: 3px; background: device == "" ? Theme.text-3 : Theme.ok; opacity: 0.6; }
+            height: 196px;
+            // Phone outline with its cable.
+            Rectangle {
+                x: (parent.width - 86px) / 2;
+                y: 0px;
+                width: 86px;
+                height: 160px;
+                border-radius: 18px;
+                border-width: 2px;
+                border-color: device == "" ? Theme.text-3 : Theme.ok;
+                background: Theme.dark ? #ffffff08 : #ffffff80;
+                Rectangle { y: 8px; width: 26px; height: 6px; border-radius: 3px; background: device == "" ? Theme.text-3 : Theme.ok; opacity: 0.6; }
+            }
+            if !wifi: Rectangle {
+                x: (parent.width - 2px) / 2;
+                y: 160px;
+                width: 2px;
+                height: 36px;
+                background: device == "" ? Theme.text-3.with-alpha(0.5) : Theme.ok;
+            }
+        }
+        if device != "": HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                height: 28px;
+                border-radius: 14px;
+                background: Theme.dark ? #ffffff0d : #ffffffa0;
+                border-width: 1px;
+                border-color: Theme.ok.with-alpha(0.45);
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 14px;
+                    spacing: 8px;
+                    alignment: center;
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: Theme.ok; }
+                    }
+                    Text { text: device; font-size: 12px; font-weight: 600; color: Theme.text; vertical-alignment: center; }
+                    Text { text: "·"; color: Theme.text-3; vertical-alignment: center; }
+                    Text { text: wifi ? I18n.t("Siap · Wi-Fi", "Ready · Wi-Fi") : I18n.t("Siap", "Ready"); font-size: 12px; font-weight: 600; color: Theme.ok; vertical-alignment: center; }
+                }
+            }
         }
         Text {
-            text: phase == "connecting" || phase == "activating" ? I18n.t("Menyambung…", "Connecting…")
-                : device == "" ? I18n.t("Colokkan iPhone atau iPad", "Plug in an iPhone or iPad")
-                : I18n.t(device + " siap", device + " ready");
-            font-size: 18px;
-            font-weight: 600;
+            text: device == "" ? I18n.t("Colokkan iPhone atau iPad", "Plug in an iPhone or iPad") : I18n.t(device + " siap", device + " ready");
+            font-size: 20px;
+            font-weight: 700;
             color: Theme.text;
             horizontal-alignment: center;
         }
         Text {
-            text: message != "" ? message : device == "" ? I18n.t("Atau sambungkan lewat AirPlay (Wi-Fi yang sama).", "Or connect with AirPlay (same Wi-Fi).")
-                : I18n.t("Buka kunci, lalu tekan Mulai.", "Unlock it, then press Start.");
+            text: message != "" ? message
+                : device == "" ? I18n.t("Pakai kabel USB, buka kunci, lalu tekan Percayai (Trust). Atau sambungkan lewat Wi-Fi.", "Use a USB cable, unlock it and tap Trust. Or connect over Wi-Fi.")
+                : I18n.t("Buka kunci, lalu tekan Mulai mirroring.", "Unlock it, then press Start mirroring.");
             font-size: 12.5px;
-            color: Theme.text-2;
+            color: message != "" ? #ff8a80 : Theme.text-2;
             horizontal-alignment: center;
             wrap: word-wrap;
         }
-        if device != "" && phase != "connecting" && phase != "activating": HorizontalLayout {
+        if device != "": HorizontalLayout {
             alignment: center;
             GlassButton { primary: true; icon: "\u{E768}"; label: I18n.t("Mulai mirroring", "Start mirroring"); clicked => { root.start(); } }
+        }
+    }
+
+    // Connect card (1-2-3-4) while connecting, with the error if it fails.
+    if card: Rectangle {
+        width: min(parent.width - 32px, 440px);
+        height: cardL.preferred-height;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 18px;
+        background: Theme.dark ? #161618f2 : #fbfbfdf2;
+        border-width: 1px;
+        border-color: Theme.line;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #00000040;
+        cardL := VerticalLayout {
+            padding: 20px;
+            spacing: 6px;
+            HorizontalLayout {
+                Text {
+                    text: flow-failed ? I18n.t("Tidak bisa tersambung", "Couldn't connect")
+                        : flow-step >= 4 ? I18n.t("Tersambung", "Connected")
+                        : device != "" ? I18n.t("Menyambungkan ke " + device, "Connecting to " + device)
+                        : I18n.t("Menyambungkan", "Connecting");
+                    font-size: 17px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                Text { text: round(pct * 100) + "%"; font-size: 11.5px; color: Theme.text-3; vertical-alignment: center; font-family: "Cascadia Mono"; }
+            }
+            Rectangle {
+                height: 4px;
+                border-radius: 2px;
+                background: Theme.dark ? #ffffff1a : #0000001a;
+                Rectangle {
+                    x: 0px;
+                    width: parent.width * pct;
+                    border-radius: 2px;
+                    background: flow-failed ? #ff6961 : Theme.text;
+                }
+            }
+            Rectangle { height: 6px; }
+            for t[i] in texts: FlowStep {
+                title: t[0];
+                sub: t[1];
+                state: root.st(i);
+                last: i == 3;
+            }
+            if flow-failed: VerticalLayout {
+                spacing: 12px;
+                padding-top: 6px;
+                Text { text: message; font-size: 12.5px; color: #ff8a80; wrap: word-wrap; }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    GlassButton { label: I18n.t("Tutup", "Close"); clicked => { root.dismiss(); } }
+                    GlassButton { primary: true; icon: "\u{E72C}"; label: I18n.t("Coba lagi", "Try again"); clicked => { root.start(); } }
+                }
+            }
         }
     }
 }
@@ -540,6 +715,10 @@ component SettingsPanel inherits Glass {
     in-out property <Prefs> prefs;
     in property <string> driver-text;
     in property <string> connection;
+    // Cable or Wi-Fi, for both Apple Driver and ZenLink Studio.
+    in property <string> link: "wired";
+    in property <string> mode;
+    callback set-link(string);
     in property <string> stats-full;
     callback changed(Prefs);
     callback close();
@@ -687,6 +866,24 @@ component SettingsPanel inherits Glass {
                         "Apple Driver uses Apple's own driver. ZenLink Studio uses libusb0 for high bitrate. Driver changes always ask for confirmation and administrator approval.");
                     Text { text: connection; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
                     Text { text: driver-text; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                    Row {
+                        label: I18n.t("Sambungan", "Connection");
+                        Seg {
+                            width: 170px;
+                            options: ["wired", "wireless"];
+                            labels: [I18n.t("Kabel (USB)", "Cable (USB)"), "Wi-Fi"];
+                            value: root.link;
+                            changed(v) => { root.set-link(v); }
+                        }
+                    }
+                    Text {
+                        text: root.mode == "usbdirect"
+                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pilih ZenLinkStudio di Pencerminan Layar pada perangkat.", "Wi-Fi: pick ZenLinkStudio in Screen Mirroring on the device.") : I18n.t("Kabel: lewat driver libusb0, bitrate tinggi.", "Cable: through the libusb0 driver, high bitrate."))
+                            : (root.link == "wireless" ? I18n.t("Wi-Fi: tekan Atur Wi-Fi sekali dengan kabel tersambung. Perangkat yang dicolok tetap jalan lewat kabel.", "Wi-Fi: press Set up Wi-Fi once with the cable in. A plugged-in device still works over the cable.") : I18n.t("Kabel: lewat driver Apple.", "Cable: through Apple's driver."));
+                        font-size: 11px;
+                        color: Theme.text-3;
+                        wrap: word-wrap;
+                    }
                     HorizontalLayout {
                         spacing: 6px;
                         GlassButton { label: I18n.t("Ganti mode", "Change mode"); tip: I18n.t("Pilih Apple Driver atau ZenLink Studio", "Choose Apple Driver or ZenLink Studio"); clicked => { root.driver-action("mode"); } }
@@ -786,6 +983,12 @@ export component AppWindow inherits Window {
     in property <string> connection;
     in property <bool> muted;
     in property <string> toast;
+    // v2-style connect card (see Placeholder).
+    in property <int> flow-step: -1;
+    in property <bool> flow-failed: false;
+    in property <string> flow-kind: "apple";
+    in property <bool> device-wifi: false;
+    callback flow-dismiss();
     // Connection mode chooser (shown until a mode is chosen).
     in-out property <bool> chooser-open: false;
     in property <bool> chooser-cancelable: false;
@@ -793,6 +996,7 @@ export component AppWindow inherits Window {
     in property <string> mode-link: "wired";
     in property <bool> mode-remember: true;
     callback choose-mode(string, string, bool);
+    callback set-link(string);
     // Animated dot field (rendered in Rust) and the cursor over the stage.
     in property <image> dots-image;
     out property <bool> stage-hover: stage-ta.has-hover;
@@ -823,6 +1027,7 @@ export component AppWindow inherits Window {
     callback settings-toggled(bool);
     callback window-action(string);
     no-frame: true;
+    forward-focus: keys;
 
     // Narrow window: icon-only buttons. Set from Rust (window width), not
     // from layout, so the layout cannot feed back into it.
@@ -831,9 +1036,22 @@ export component AppWindow inherits Window {
     in property <bool> fullscreen: false;
     // Picture column too narrow for labelled shortcuts.
     in property <bool> compact-bar: false;
+    // Full screen / maximised: square edges to the screen border (no
+    // rounded corners showing the desktop, no resize strips).
+    property <bool> edge: root.fullscreen || root.maximized;
+    // F11 toggles full screen, Esc leaves it.
+    keys := FocusScope {
+        key-pressed(ev) => {
+            if ev.text == Key.F11 { root.window-action("fullscreen"); return accept; }
+            if ev.text == Key.Escape && root.fullscreen { root.window-action("fullscreen"); return accept; }
+            reject
+        }
+    }
     Rectangle {
-        background: Theme.base;
-        border-radius: 12px;
+        // Full screen has nothing behind the glass (Windows shows grey or
+        // black there): solid theme colour instead, so light stays light.
+        background: root.fullscreen ? (Theme.dark ? #121214 : #f2f2f7) : Theme.base;
+        border-radius: root.edge ? 0px : 12px;
         clip: true;
         VerticalLayout {
             padding: 8px;
@@ -888,7 +1106,12 @@ export component AppWindow inherits Window {
                             phase: root.phase;
                             device: root.device;
                             message: root.message;
+                            flow-step: root.flow-step;
+                            flow-failed: root.flow-failed;
+                            flow-kind: root.flow-kind;
+                            wifi: root.device-wifi;
                             start => { root.start-cast(); }
+                            dismiss => { root.flow-dismiss(); }
                         }
                     }
                     BottomBar {
@@ -908,6 +1131,9 @@ export component AppWindow inherits Window {
                     prefs: root.prefs;
                     driver-text: root.driver-text;
                     connection: root.connection;
+                    link: root.mode-link;
+                    mode: root.mode-active;
+                    set-link(l) => { root.set-link(l); }
                     stats-full: root.stats-full;
                     changed(p) => { root.prefs = p; root.prefs-changed(p); }
                     close => { root.settings-open = false; root.settings-toggled(false); }
@@ -927,6 +1153,7 @@ export component AppWindow inherits Window {
             { id: "ne", x: -10px, y: 0px, w: 10px, h: 10px, c: MouseCursor.nesw-resize },
             { id: "sw", x: 0px, y: -10px, w: 10px, h: 10px, c: MouseCursor.nesw-resize },
         ]: TouchArea {
+            enabled: !root.edge;
             x: e.x < 0 ? parent.width + e.x : e.x;
             y: e.y < 0 ? parent.height + e.y : e.y;
             width: e.w < 0 ? parent.width + e.w : e.w;
@@ -941,7 +1168,7 @@ export component AppWindow inherits Window {
         if root.chooser-open: ModeChooser {
             width: parent.width;
             height: parent.height;
-            border-radius: 12px;
+            border-radius: root.edge ? 0px : 12px;
             cancelable: root.chooser-cancelable;
             active: root.mode-active;
             link: root.mode-link;

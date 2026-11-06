@@ -499,16 +499,29 @@ class CastManager:
             return {"ok": False, "message": "Wi-Fi needs Apple Driver mode."}
         if self._session is not None:
             return {"ok": False, "message": "Stop casting first."}
-        usb = [d for d in apple_devices.connected_devices("wired").get("devices", []) if d.get("ready")]
+        listed = apple_devices.connected_devices("wired").get("devices", [])
+        usb = [d for d in listed if d.get("ready")]
         if not usb:
+            if listed:
+                return {"ok": False, "message": "Unlock the device and tap Trust, then try again."}
+            # Already set up: the device is reachable without the cable.
+            wifi_ok = [d for d in apple_devices.connected_devices("wireless").get("devices", [])
+                       if d.get("wifi") and d.get("ready")]
+            if wifi_ok:
+                return {"ok": True, "message": "Wi-Fi is already set up.", "device": wifi_ok[0]["name"]}
             return {"ok": False, "message": "Connect the device with the cable, unlock it and tap Trust first."}
+        # The device that has no Wi-Fi record yet first.
+        usb.sort(key=lambda d: apple_devices.wifi_ready(d["id"]))
+        target = usb[0]
         from zenlink.apple import wifi
 
         try:
-            result = wifi.prepare(usb[0]["id"])
+            result = wifi.prepare(target["id"])
         except Exception as error:  # noqa: BLE001
             return {"ok": False, "message": f"Wi-Fi setup failed: {_friendly_error(error)}"}
-        return {**result, "device": usb[0]["name"]}
+        self.__dict__.setdefault("_wifi_auto_tried", {})[target["id"]] = time.monotonic()
+        self.refresh_devices()
+        return {**result, "device": target["name"]}
 
     def set_link(self, link: str) -> dict:
         if self._session is not None:

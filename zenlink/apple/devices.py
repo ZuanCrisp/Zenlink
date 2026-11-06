@@ -77,12 +77,11 @@ def _add_lan_devices(devices: list[dict]) -> None:
             entry["need"], entry["ready"] = "wifi", False
         for i, d in enumerate(devices):
             if d["id"] == udid:
-                if not d.get("wifi"):
-                    devices[i] = entry  # cable-only entry -> reachable on Wi-Fi
+                if not d.get("wifi") and not d.get("ready"):
+                    devices[i] = entry  # untrusted cable entry -> reachable on Wi-Fi
                 break
         else:
             devices.append(entry)
-    devices.sort(key=lambda d: not d.get("wifi"))
 
 
 def connected_devices(link: str = "wired") -> dict:
@@ -120,12 +119,17 @@ def connected_devices(link: str = "wired") -> dict:
             "ready": bool(info.get("paired")),
             "wifi": wifi,
         }
-        if link == "wireless" and not wifi:
+        if link == "wireless" and not wifi and not entry["ready"]:
+            # On the cable but not trusted: Wi-Fi setup needs that first.
             entry["need"] = "wifi"
-            entry["ready"] = False
+        # A trusted device on the cable always works over the cable, also
+        # when Wi-Fi is chosen (Wi-Fi is set up for it in the background).
         devices.append(entry)
     if link == "wireless":
         _add_lan_devices(devices)
+        # The device on the cable first (the one the user just plugged in),
+        # then devices reachable on Wi-Fi, then the ones that need something.
+        devices.sort(key=lambda d: (not d.get("ready"), bool(d.get("wifi"))))
     with _lock:  # forget unplugged devices so a re-plug re-reads trust
         for udid in list(_cache):
             if udid not in {d["udid"] for d in all_listed}:

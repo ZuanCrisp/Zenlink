@@ -41,11 +41,13 @@ def main():
     ap.add_argument("--port", type=int, default=47399)
     ap.add_argument("--rotate-after", type=float, default=0)
     ap.add_argument("--needs-choice", action="store_true", help="start with no connection mode (chooser shows)")
+    ap.add_argument("--steps", type=float, default=0, help="seconds per connect phase (connecting, activating) before streaming")
+    ap.add_argument("--fail", action="store_true", help="fail during activating (with --steps)")
     a = ap.parse_args()
     clips = [load(a.video)] + ([load(a.video2)] if a.video2 else [])
     state = {"phase": "idle", "detail": "", "device": {"name": "iPhone (fake)"}, "error": None, "rotation": 0,
              "devices": [{"id": "fake", "name": "iPhone (fake)", "wifi": False}], "service": True,
-             "connection": {"active": "apple", "link": "wired", "remember": True, "needsChoice": False}, "capture": {"backend": "apple"}, "nativeAudio": False}
+             "connection": {"active": "apple", "link": "wired", "remember": True, "needsChoice": False}, "capture": None, "nativeAudio": False}
     log = {"touch": 0, "button": []}
     if a.needs_choice:
         state["connection"].update(active=None, needsChoice=True)
@@ -66,12 +68,27 @@ def main():
     async def get_state(_):
         return web.json_response(state)
 
-    async def start(_):
+    async def run_steps():
+        for ph in ("connecting", "activating"):
+            state["phase"] = ph
+            await asyncio.sleep(a.steps)
+            if state["phase"] != ph:
+                return
+        if a.fail:
+            state.update(phase="error", error="Unlock the device and tap Trust, then try again.", capture=None)
+            return
         state["phase"] = "streaming"
+
+    async def start(_):
+        state.update(error=None, capture={"backend": "apple"})
+        if a.steps > 0:
+            asyncio.ensure_future(run_steps())
+        else:
+            state["phase"] = "streaming"
         return web.json_response({"ok": True})
 
     async def stop(_):
-        state["phase"] = "idle"
+        state.update(phase="idle", capture=None)
         return web.json_response({"ok": True})
 
     async def codec(_):

@@ -119,6 +119,43 @@ pub fn picture_rect(cw: i32, ch: i32, sw: u32, sh: u32, rotation: u32, fit: Fit)
     RECT { left: x, top: y, right: x + dw, bottom: y + dh }
 }
 
+/// Clip `dest` to the `cw` x `ch` view and trim `src` by the same share of
+/// the picture (Cover fit overflows the view; the video processor refuses a
+/// destination outside its output). `rot` is clockwise, as D3D11 rotates.
+fn clip_to_view(src: RECT, dest: RECT, cw: i32, ch: i32, rot: u32) -> (RECT, RECT) {
+    let (dw, dh) = ((dest.right - dest.left).max(1) as f32, (dest.bottom - dest.top).max(1) as f32);
+    // Share of the shown picture cut from each side: left, top, right, bottom.
+    let cut = [
+        (-dest.left).max(0) as f32 / dw,
+        (-dest.top).max(0) as f32 / dh,
+        (dest.right - cw).max(0) as f32 / dw,
+        (dest.bottom - ch).max(0) as f32 / dh,
+    ];
+    if cut.iter().all(|c| *c == 0.0) {
+        return (src, dest);
+    }
+    // Shown side -> source side for each rotation.
+    let [l, t, r, b] = cut;
+    let (sl, st, sr, sb) = match rot {
+        90 => (t, r, b, l),
+        180 => (r, b, l, t),
+        270 => (b, l, t, r),
+        _ => (l, t, r, b),
+    };
+    let (sw, sh) = ((src.right - src.left) as f32, (src.bottom - src.top) as f32);
+    let src2 = RECT {
+        left: src.left + (sw * sl).round() as i32,
+        top: src.top + (sh * st).round() as i32,
+        right: src.right - (sw * sr).round() as i32,
+        bottom: src.bottom - (sh * sb).round() as i32,
+    };
+    let dest2 = RECT { left: dest.left.max(0), top: dest.top.max(0), right: dest.right.min(cw), bottom: dest.bottom.min(ch) };
+    if src2.right <= src2.left || src2.bottom <= src2.top || dest2.right <= dest2.left || dest2.bottom <= dest2.top {
+        return (src, RECT { left: 0, top: 0, right: cw, bottom: ch });
+    }
+    (src2, dest2)
+}
+
 fn fit_of(v: u8) -> Fit {
     match v {
         1 => Fit::Cover,
@@ -301,6 +338,12 @@ impl VideoView {
         }
     }
 
+    /// Picture size after crop, before rotation. 0 x 0 before the first frame.
+    pub fn source_size(&self) -> (u32, u32) {
+        let (w, h, _, _) = self.inner.visible();
+        (w, h)
+    }
+
     /// Picture size as shown: after crop and rotation. 0 x 0 before the first frame.
     pub fn shown_size(&self) -> (u32, u32) {
         let (w, h, _, _) = self.inner.visible();
@@ -393,6 +436,26 @@ fn make_processor(gpu: &Gpu, iw: u32, ih: u32, ow: u32, oh: u32) -> Result<Proce
 }
 
 fn render_loop(inner: &Inner) -> Result<()> {
+    // A failed swap chain / processor step used to end this thread, which
+    // froze the picture (seen after changing fit or rotation). Start over
+    // instead, a few times a second at most.
+    let mut errors = 0u32;
+    while !inner.stop_render.load(Relaxed) {
+        match render_session(inner) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                errors += 1;
+                if errors <= 20 || errors % 100 == 0 {
+                    log::warn!("render: {e}; starting the swap chain again ({errors})");
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn render_session(inner: &Inner) -> Result<()> {
     let gpu = &inner.gpu;
     let hwnd = HWND(inner.hwnd as _);
     unsafe {
@@ -458,7 +521,15 @@ fn render_loop(inner: &Inner) -> Result<()> {
                     src.top += c[1].min(sh / 2);
                     src.bottom -= c[3].min(sh / 2);
                     if proc_.as_ref().map(|p| p.key) != Some((w, h, cw, ch)) {
-                        proc_ = Some(make_processor(gpu, w, h, cw, ch).inspect_err(|e| log::error!("processor {w}x{h} -> {cw}x{ch}: {e}"))?);
+                        proc_ = match make_processor(gpu, w, h, cw, ch) {
+                            Ok(p) => Some(p),
+                            Err(e) => {
+                                log::warn!("processor {w}x{h} -> {cw}x{ch}: {e}");
+                                drop(back);
+                                std::thread::sleep(std::time::Duration::from_millis(50));
+                                continue;
+                            }
+                        };
                     }
                     let p = proc_.as_ref().unwrap();
                     let vc = &gpu.video_context;
@@ -471,6 +542,7 @@ fn render_loop(inner: &Inner) -> Result<()> {
                         rot,
                         fit_of(inner.fit.load(Relaxed)),
                     );
+                    let (src, dest) = clip_to_view(src, dest, cw as i32, ch as i32, rot);
                     let rotation = match rot {
                         90 => D3D11_VIDEO_PROCESSOR_ROTATION_90,
                         180 => D3D11_VIDEO_PROCESSOR_ROTATION_180,
@@ -493,13 +565,23 @@ fn render_loop(inner: &Inner) -> Result<()> {
                         Anonymous: D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC_0 { Texture2D: D3D11_TEX2D_VPIV { MipSlice: 0, ArraySlice: 0 } },
                     };
                     let mut iv = None;
-                    gpu.video_device.CreateVideoProcessorInputView(&tex, &p.enumr, &in_desc, Some(&mut iv)).inspect_err(|e| log::error!("input view: {e}"))?;
+                    if let Err(e) = gpu.video_device.CreateVideoProcessorInputView(&tex, &p.enumr, &in_desc, Some(&mut iv)) {
+                        log::warn!("input view: {e}");
+                        proc_ = None;
+                        drop(back);
+                        continue;
+                    }
                     let out_desc = D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
                         ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
                         Anonymous: D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC_0 { Texture2D: D3D11_TEX2D_VPOV { MipSlice: 0 } },
                     };
                     let mut ov = None;
-                    gpu.video_device.CreateVideoProcessorOutputView(&back, &p.enumr, &out_desc, Some(&mut ov)).inspect_err(|e| log::error!("output view: {e}"))?;
+                    if let Err(e) = gpu.video_device.CreateVideoProcessorOutputView(&back, &p.enumr, &out_desc, Some(&mut ov)) {
+                        log::warn!("output view: {e}");
+                        proc_ = None;
+                        drop(back);
+                        continue;
+                    }
                     let stream = D3D11_VIDEO_PROCESSOR_STREAM {
                         Enable: true.into(),
                         pInputSurface: ManuallyDrop::new(iv),
@@ -508,7 +590,11 @@ fn render_loop(inner: &Inner) -> Result<()> {
                     let mut streams = [stream];
                     let r = vc.VideoProcessorBlt(&p.vp, ov.as_ref().unwrap(), 0, &streams);
                     ManuallyDrop::drop(&mut streams[0].pInputSurface);
-                    r.inspect_err(|e| log::error!("blt: {e}"))?;
+                    if let Err(e) = r {
+                        // Next frame builds a fresh processor.
+                        log::warn!("blt: {e}");
+                        proc_ = None;
+                    }
                     if seq != shown_seq {
                         shown_seq = seq;
                     }
