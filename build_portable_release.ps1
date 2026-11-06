@@ -12,7 +12,13 @@
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\build_portable_release.ps1
 #>
-param([string]$Version = "")
+param(
+    [string]$Version = "",
+    # Folder with Google's platform-tools (adb.exe, AdbWinApi.dll,
+    # AdbWinUsbApi.dll, NOTICE.txt). Default: ANDROID_HOME / ANDROID_SDK_ROOT /
+    # Android Studio's SDK folder.
+    [string]$PlatformTools = ""
+)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -21,6 +27,31 @@ if (-not $Version) {
 }
 $py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { throw "Run Start ZenLink.bat once first (it creates .venv)." }
+
+# Android (B-28): every package carries Google's official adb, unmodified.
+# The build stops when it is missing or not validly signed by Google.
+$adbFiles = "adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll", "NOTICE.txt"
+if (-not $PlatformTools) {
+    $PlatformTools = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, (Join-Path $env:LOCALAPPDATA "Android\Sdk")) |
+        Where-Object { $_ } | ForEach-Object { Join-Path $_ "platform-tools" } |
+        Where-Object { Test-Path (Join-Path $_ "adb.exe") } | Select-Object -First 1
+}
+if (-not $PlatformTools) { throw "Google platform-tools not found: pass -PlatformTools <folder> or set ANDROID_HOME." }
+foreach ($f in $adbFiles) {
+    $p = Join-Path $PlatformTools $f
+    if (-not (Test-Path $p)) { throw "Missing $p" }
+    if ($f -ne "NOTICE.txt") {
+        $sig = Get-AuthenticodeSignature $p
+        if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "CN=Google LLC") {
+            throw "$p is not validly signed by Google ($($sig.Status))"
+        }
+    }
+}
+$adbRev = (Select-String -Path (Join-Path $PlatformTools "source.properties") -Pattern '^Pkg.Revision=(.+)$').Matches[0].Groups[1].Value
+Write-Host "    platform-tools $adbRev from $PlatformTools" -ForegroundColor Green
+foreach ($f in $adbFiles) {
+    Write-Host ("    {0,-18} {1}" -f $f, (Get-FileHash (Join-Path $PlatformTools $f) -Algorithm SHA256).Hash)
+}
 
 $release = Join-Path $PSScriptRoot "release"
 $build = Join-Path $PSScriptRoot "build"
@@ -124,6 +155,14 @@ if (Get-ChildItem $app -Recurse -Filter "avcodec-*.dll") { throw "PyAV/FFmpeg DL
 foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat") {
     Copy-Item $f $app
 }
+# Android: adb next to ZenLink.exe (found by find_adb); the scrcpy server is
+# built into ZenLink.exe, its licence ships beside it.
+$adbDest = Join-Path $app "third_party\platform-tools"
+New-Item -ItemType Directory -Force $adbDest | Out-Null
+foreach ($f in $adbFiles) { Copy-Item (Join-Path $PlatformTools $f) $adbDest }
+$scrcpyDest = Join-Path $app "third_party\scrcpy"
+New-Item -ItemType Directory -Force $scrcpyDest | Out-Null
+Copy-Item "third_party\scrcpy\LICENSE" $scrcpyDest
 & cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app
 if ($LASTEXITCODE) { throw "cargo failed" }
 # CARGO_TARGET_DIR lets the release build while a dev ZenLink.exe from
@@ -149,8 +188,9 @@ Test-FrozenExe $service
 # The Rust ZenLink.exe with that backend packed inside (unpacked to
 # %LOCALAPPDATA%\ZenLink-Next\service on start).
 $env:ZENLINK_BACKEND_EXE = $service
+$env:ZENLINK_ADB_DIR = (Resolve-Path $PlatformTools).Path
 & cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app --features embedded-backend --target-dir (Join-Path $build "rust-portable")
-Remove-Item Env:ZENLINK_BACKEND_EXE
+Remove-Item Env:ZENLINK_BACKEND_EXE, Env:ZENLINK_ADB_DIR
 if ($LASTEXITCODE) { throw "cargo (portable) failed" }
 Copy-Item (Join-Path $build "rust-portable\release\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
 
@@ -171,7 +211,12 @@ git archive --format=zip --prefix="ZenLink-v$Version/" -o $srcZip HEAD
 # Ready-built ZenLink.exe next to Start ZenLink.bat (no Rust toolchain needed).
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::Open($srcZip, "Update")
-try { [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $rustExe, "ZenLink-v$Version/ZenLink.exe") } finally { $zip.Dispose() }
+try {
+    [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $rustExe, "ZenLink-v$Version/ZenLink.exe")
+    foreach ($f in $adbFiles) {
+        [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $PlatformTools $f), "ZenLink-v$Version/third_party/platform-tools/$f")
+    }
+} finally { $zip.Dispose() }
 
 Get-ChildItem $release | ForEach-Object {
     "{0,-45} {1,8:N1} MB" -f $_.Name, ($_.Length / 1MB)

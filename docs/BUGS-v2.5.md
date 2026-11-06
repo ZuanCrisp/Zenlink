@@ -209,3 +209,9 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Evidence: `pefile` shows `mfplat.dll` only in the delay-import table.
 - Verification: unverified: needs an N edition (VM or Windows Sandbox, with the user's approval).
 
+### B-28: Release packages carry neither adb nor the scrcpy server            Status: fixed (unverified)
+- Reported: 2026-11-07, found in the A6 audit (the user asked why the Android screen says "ADB not found" when adb should be bundled).
+- Cause: `docs/android/ADB.md` (A1) decided to bundle Google's `adb`, but `build_portable_release.ps1` and `packaging/ZenLink.iss` never copied it, nor `third_party/scrcpy/scrcpy-server-v5.0.1`. `find_adb` / `load_server` look next to the exe and in parent folders, so the source checkout worked, and adb came from `ANDROID_HOME=E:\AndroidDev\sdk` set in the untracked `Start ZenLink.local.bat`. Running `rust\target\release\ZenLink.exe` without that variable shows "ADB not found". An installed or portable build on another PC would have had no Android at all.
+- Fix: the scrcpy server is built into `ZenLink.exe` (`include_bytes!`, 733,930 B; test `builtin_server_matches_the_pinned_release`). The build script takes Google's platform-tools (`-PlatformTools`, or ANDROID_HOME / ANDROID_SDK_ROOT / Android Studio's SDK), checks that `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` are validly signed by Google LLC, prints the revision and SHA-256s, and puts them with `NOTICE.txt` in `third_party\platform-tools` (installer and source zip). Portable.exe packs them (`ZENLINK_ADB_DIR`) and unpacks them to `<data folder>\platform-tools` on first use. Local platform-tools: 37.0.1, all three signatures Valid (Google LLC), 2026-11-07.
+- Verification: unverified: needs a full `build_portable_release.ps1` run, then the Android screen of the installed and the portable build on a PC without the Android SDK (adb found, server starts).
+

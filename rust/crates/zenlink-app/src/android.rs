@@ -829,19 +829,23 @@ impl VideoSource for FixtureSource {
     }
 }
 
-/// The bundled scrcpy server: `ZL_SCRCPY_SERVER`, else `third_party/scrcpy/`
-/// next to the exe or in a parent folder (source checkout). The size must
-/// match the pinned release.
+/// The pinned scrcpy server, built into ZenLink.exe (B-28): the installer,
+/// Portable.exe and the source zip all carry it without a separate file.
+/// `scrcpy.rs` pins the name and size; a test checks this copy against them.
+static BUILTIN_SERVER: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../third_party/scrcpy/scrcpy-server-v5.0.1"
+));
+
+/// The scrcpy server: `ZL_SCRCPY_SERVER` (tests, manual upgrades), else the
+/// copy built into the exe. The size must match the pinned release.
 pub fn load_server() -> Result<Vec<u8>, String> {
     let mut candidates = Vec::new();
     if let Some(p) = std::env::var_os("ZL_SCRCPY_SERVER") {
         candidates.push(PathBuf::from(p));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        for dir in exe.ancestors().skip(1).take(5) {
-            candidates.push(dir.join("third_party").join("scrcpy").join(SERVER_FILE));
-            candidates.push(dir.join(SERVER_FILE));
-        }
+    if candidates.is_empty() && BUILTIN_SERVER.len() as u64 == SERVER_SIZE {
+        return Ok(BUILTIN_SERVER.to_vec());
     }
     for p in &candidates {
         if let Ok(d) = std::fs::read(p) {
@@ -858,9 +862,57 @@ pub fn load_server() -> Result<Vec<u8>, String> {
     Err(format!("{SERVER_FILE} not found"))
 }
 
+/// Portable.exe: Google's official, unmodified `adb` (platform-tools) packed
+/// in by the build (`ZENLINK_ADB_DIR`, B-28) and unpacked on first use.
+#[cfg(feature = "embedded-backend")]
+static PACKED_ADB: [(&str, &[u8]); 4] = [
+    (
+        "adb.exe",
+        include_bytes!(concat!(env!("ZENLINK_ADB_DIR"), "/adb.exe")),
+    ),
+    (
+        "AdbWinApi.dll",
+        include_bytes!(concat!(env!("ZENLINK_ADB_DIR"), "/AdbWinApi.dll")),
+    ),
+    (
+        "AdbWinUsbApi.dll",
+        include_bytes!(concat!(env!("ZENLINK_ADB_DIR"), "/AdbWinUsbApi.dll")),
+    ),
+    (
+        "NOTICE.txt",
+        include_bytes!(concat!(env!("ZENLINK_ADB_DIR"), "/NOTICE.txt")),
+    ),
+];
+
+/// Unpacks the packed `adb` to `platform-tools` in the data folder
+/// (`zenlink_core::local_data_dir`).
+/// A file with the right size stays (a running adb server keeps its exe
+/// locked), so this writes only after an update.
+#[cfg(feature = "embedded-backend")]
+fn unpack_adb() -> Option<PathBuf> {
+    let dir = zenlink_core::local_data_dir()?.join("platform-tools");
+    std::fs::create_dir_all(&dir).ok()?;
+    for (name, data) in PACKED_ADB.iter() {
+        let path = dir.join(name);
+        let same = std::fs::metadata(&path)
+            .map(|m| m.len() == data.len() as u64)
+            .unwrap_or(false);
+        if !same {
+            let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
+            std::fs::write(&tmp, data).ok()?;
+            if std::fs::rename(&tmp, &path).is_err() {
+                let _ = std::fs::remove_file(&tmp);
+                return None;
+            }
+        }
+    }
+    Some(dir.join("adb.exe"))
+}
+
 /// The `adb` program to start the ADB server with, when none runs.
 /// `ZL_ADB=none` disables it (tests); `ZL_ADB=<path>` picks one.
-/// Otherwise: bundled `platform-tools` next to the exe, the Android SDK
+/// Otherwise: the bundled `third_party\platform-tools` next to the exe
+/// (installer), the copy packed into Portable.exe, the Android SDK
 /// (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, Android Studio's default folder), PATH.
 pub fn find_adb() -> Option<PathBuf> {
     let exe = if cfg!(windows) { "adb.exe" } else { "adb" };
@@ -876,6 +928,10 @@ pub fn find_adb() -> Option<PathBuf> {
             c.push(dir.join("third_party").join("platform-tools").join(exe));
             c.push(dir.join("platform-tools").join(exe));
         }
+    }
+    #[cfg(feature = "embedded-backend")]
+    if let Some(p) = unpack_adb() {
+        c.push(p);
     }
     for var in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
         if let Some(root) = std::env::var_os(var) {
@@ -1256,6 +1312,12 @@ mod tests {
         }
         assert_eq!(src.failures, src.max_failures());
         assert_eq!(src.shared.status().phase, Phase::Error);
+    }
+
+    #[test]
+    fn builtin_server_matches_the_pinned_release() {
+        assert_eq!(BUILTIN_SERVER.len() as u64, SERVER_SIZE);
+        assert_eq!(SERVER_FILE, "scrcpy-server-v5.0.1");
     }
 
     #[test]

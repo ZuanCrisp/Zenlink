@@ -23,4 +23,6 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dw
 slint-build = "1.18"
 
 [features]
+# Portable.exe: the Python backend (ZENLINK_BACKEND_EXE) and Google's adb
+# (ZENLINK_ADB_DIR) packed into ZenLink.exe.
 embedded-backend = ["zenlink-core/embedded-backend"]
