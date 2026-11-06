@@ -8,6 +8,20 @@ import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip, Ti
 
 export { Theme, I18n }
 
+// Smart Encoder Detection results for the selected Android device (A5),
+// filled from Rust.
+export global AndroidEnc {
+    // Encoder choices for the selected codec: "" = Auto, then MediaCodec names.
+    in property <[string]> options: [""];
+    in property <[string]> labels: ["Auto"];
+    // Codecs both ends support (empty = not detected yet).
+    in property <[string]> codecs;
+    // e.g. "H.264: 2 (1 hw) · H.265: 1 (1 hw)".
+    in property <string> detected;
+    // What the running session uses, e.g. "H.264 · c2.qti.avc.encoder".
+    in property <string> using;
+}
+
 export struct Prefs {
     theme: string,          // light | dark | system
     glass-on: bool,         // Liquid Glass on; off = solid window
@@ -35,7 +49,9 @@ export struct Prefs {
     android-max-size: string, // 1280 | 1920 | 2560 | 0 (native), longest side
     android-fps: string,      // 30 | 60 | 90 | 120 | 144 (cap)
     android-bitrate: string,  // Mbps: 4 | 8 | 16 | 24 | 40
-    android-codec: string,    // h264 | h265
+    android-codec: string,    // auto | h264 | h265
+    android-profile: string,  // low-latency | balanced | high-quality | streaming | custom
+    android-encoder: string,  // "" = automatic, else a MediaCodec name from the phone's list
 }
 
 // Window controls, Windows order (min, max, close) on the right, drawn as
@@ -222,7 +238,7 @@ component TopBar inherits Rectangle {
         if !compact: GlassButton {
             y: (parent.height - self.height) / 2;
             label: fit == "contain" ? "AUTO" : fit == "cover" ? "EDGE" : "FILL";
-            tip: I18n.t("Mode tampilan: Auto-Fit / Tepi-ke-tepi / Regang", "View mode: Auto-fit / Edge to edge / Stretch");
+            tip: I18n.t("Mode tampilan: Auto-Fit / Edge-to-Edge / Stretch", "View mode: Auto-Fit / Edge-to-Edge / Stretch");
             active: true;
             clicked => { root.fit-next(); }
         }
@@ -230,7 +246,7 @@ component TopBar inherits Rectangle {
             y: (parent.height - self.height) / 2;
             icon: root.fullscreen ? "\u{E73F}" : "\u{E740}";
             active: root.fullscreen;
-            tip: root.fullscreen ? I18n.t("Keluar layar penuh", "Exit full screen") : I18n.t("Layar penuh", "Full screen");
+            tip: root.fullscreen ? I18n.t("Keluar dari fullscreen", "Exit full screen") : I18n.t("Fullscreen", "Full screen");
             clicked => { root.window-action("fullscreen"); }
         }
         GlassButton {
@@ -278,12 +294,12 @@ component BottomBar inherits Rectangle {
                 alignment: center;
                 if !root.android: Chip { icon: "\u{E76B}"; tip: I18n.t("Geser ke kiri (kembali)", "Swipe left (back)"); label: compact ? "" : I18n.t("Geser kiri", "Swipe left"); clicked => { root.action("swipe-left"); } }
                 if root.android: Chip { icon: "\u{E72B}"; tip: I18n.t("Kembali (klik kanan juga bisa)", "Back (right click works too)"); label: compact ? "" : I18n.t("Kembali", "Back"); clicked => { root.action("back"); } }
-                Chip { icon: "\u{E80F}"; tip: I18n.t("Layar Utama", "Home screen"); label: compact ? "" : "Home"; clicked => { root.action("home"); } }
-                Chip { icon: "\u{E8A9}"; tip: I18n.t("App terbaru", "Recent apps"); label: compact ? "" : I18n.t("Terbaru", "Recent"); clicked => { root.action("switcher"); } }
+                Chip { icon: "\u{E80F}"; tip: I18n.t("Home", "Home screen"); label: compact ? "" : "Home"; clicked => { root.action("home"); } }
+                Chip { icon: "\u{E8A9}"; tip: I18n.t("Recent Apps", "Recent apps"); label: compact ? "" : "Recent"; clicked => { root.action("switcher"); } }
                 if !root.android: Chip { icon: "\u{E76C}"; tip: I18n.t("Geser ke kanan", "Swipe right"); label: compact ? "" : I18n.t("Geser kanan", "Swipe right"); clicked => { root.action("swipe-right"); } }
                 Rectangle { width: 1px; background: Theme.dark ? #ffffff1f : #0000001a; }
-                if !root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Pusat Kontrol", "Control Center"); label: compact ? "" : I18n.t("Kontrol", "Control"); clicked => { root.action("control-center"); } }
-                if root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Pengaturan cepat", "Quick settings"); label: compact ? "" : I18n.t("Cepat", "Quick"); clicked => { root.action("quick-settings"); } }
+                if !root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Control Center", "Control Center"); label: compact ? "" : "Control"; clicked => { root.action("control-center"); } }
+                if root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Quick Settings", "Quick Settings"); label: compact ? "" : "Quick"; clicked => { root.action("quick-settings"); } }
                 Chip { icon: "\u{EA8F}"; tip: I18n.t("Notifikasi", "Notifications"); label: compact ? "" : I18n.t("Notifikasi", "Alerts"); clicked => { root.action("notifications"); } }
                 if root.android: Chip { icon: "\u{E993}"; tip: I18n.t("Volume HP turun", "Phone volume down"); label: ""; clicked => { root.action("vol-down"); } }
                 if root.android: Chip { icon: "\u{E995}"; tip: I18n.t("Volume HP naik", "Phone volume up"); label: ""; clicked => { root.action("vol-up"); } }
@@ -910,7 +926,7 @@ component PlatformSelector inherits Rectangle {
     property <string> apple-badge: root.apple-detected ? I18n.t("Terdeteksi", "Detected") : "";
     property <string> android-badge: root.android-count > 0 ? (root.android-count + I18n.t(" terdeteksi", " detected")) : "";
     property <string> apple-desc: I18n.t("Cerminkan dan kendalikan perangkat Apple lewat USB atau Wi-Fi.", "Mirror and control compatible Apple devices using USB or Wi-Fi.");
-    property <string> android-title: I18n.t("Ponsel / Tablet Android", "Android Phone / Tablet");
+    property <string> android-title: I18n.t("Smartphone / Tablet Android", "Android Smartphone / Tablet");
     property <string> android-desc: I18n.t("Pencerminan dan kontrol Android berperforma tinggi lewat USB atau Wi-Fi.", "High-performance Android mirroring and control over USB or Wi-Fi.");
     property <[string]> apple-points: [
         I18n.t("Apple Driver atau ZenLink Studio", "Apple Driver or ZenLink Studio"),
@@ -1065,16 +1081,23 @@ component AndroidVideoCard inherits Card {
     icon: "\u{E714}";
     tint-a: #3ddc84;
     tint-b: #1f9d55;
-    info: I18n.t("Resolusi = sisi terpanjang. FPS adalah batas atas; HP tidak melebihi refresh layarnya, angka nyata ada di statistik. H.265 lebih hemat bitrate, tapi hanya muncul kalau Windows punya decodernya; kalau HP tidak punya encodernya, ZenLink kembali ke H.264.",
-        "Resolution is the longest side. FPS is a cap: the phone never goes above its screen refresh rate, the real number is in the stats. H.265 needs less bitrate but only shows when Windows has a decoder; if the phone has no encoder, ZenLink falls back to H.264.");
-    Row { label: I18n.t("Resolusi", "Resolution"); }
+    info: I18n.t("Profile mengisi resolusi, FPS, bitrate dan codec; ubah satu nilai dan profile jadi Custom. Setiap HP menyimpan pengaturannya sendiri (USB dan Wi-Fi sama). Encoder dibaca dari HP saat mirroring pertama; kalau encoder pilihan gagal, ZenLink mencoba encoder hardware lain lalu H.264, paling banyak 4 kali, dan pilihanmu tetap disimpan.",
+        "A profile fills in resolution, FPS, bitrate and codec; change one value and the profile becomes Custom. Each phone keeps its own settings (the same over USB and Wi-Fi). Encoders are read from the phone on the first mirroring; if the chosen encoder fails, ZenLink tries another hardware encoder, then H.264, at most 4 times, and keeps your choice.");
+    Row { label: "Profile"; }
+    Seg {
+        options: ["low-latency", "balanced", "high-quality", "streaming", "custom"];
+        labels: ["Low Latency", "Balanced", "High Quality", "Streaming", "Custom"];
+        value: prefs.android-profile;
+        changed(v) => { root.prefs.android-profile = v; root.changed(root.prefs); }
+    }
+    Row { label: I18n.t("Resolusi", "Resolution"); hint: I18n.t("Sisi terpanjang.", "Longest side."); }
     Seg {
         options: ["1280", "1920", "2560", "0"];
-        labels: ["720p", "1080p", "1440p", I18n.t("Asli", "Native")];
+        labels: ["720p", "1080p", "1440p", "Native"];
         value: prefs.android-max-size;
         changed(v) => { root.prefs.android-max-size = v; root.changed(root.prefs); }
     }
-    Row { label: "FPS"; }
+    Row { label: "FPS"; hint: I18n.t("Batas atas; HP tidak melebihi refresh rate layarnya.", "A cap; the phone never goes above its refresh rate."); }
     Seg {
         options: ["30", "60", "90", "120", "144"];
         labels: ["30", "60", "90", "120", "144"];
@@ -1088,12 +1111,34 @@ component AndroidVideoCard inherits Card {
         value: prefs.android-bitrate;
         changed(v) => { root.prefs.android-bitrate = v; root.changed(root.prefs); }
     }
-    Row { label: "Codec"; hint: root.hevc-ok ? "" : I18n.t("H.265 butuh HEVC Video Extensions di Windows.", "H.265 needs HEVC Video Extensions on Windows."); }
+    // Codecs: what both the phone and Windows support once detected; before
+    // that, what Windows can decode.
+    property <bool> h265-ok: AndroidEnc.codecs.length > 0 ? (AndroidEnc.codecs.length > 1 && AndroidEnc.codecs[1] == "h265") : root.hevc-ok;
+    Row {
+        label: "Codec";
+        hint: !root.hevc-ok ? I18n.t("H.265 butuh HEVC Video Extensions di Windows.", "H.265 needs HEVC Video Extensions on Windows.")
+            : AndroidEnc.codecs.length == 1 ? I18n.t("HP ini tidak punya encoder H.265.", "This phone has no H.265 encoder.")
+            : I18n.t("Auto = H.264, latency paling rendah.", "Auto = H.264, the lowest latency.");
+    }
     Seg {
-        options: root.hevc-ok ? ["h264", "h265"] : ["h264"];
-        labels: root.hevc-ok ? ["H.264", "H.265 (HEVC)"] : ["H.264"];
+        options: root.h265-ok ? ["auto", "h264", "h265"] : ["auto", "h264"];
+        labels: root.h265-ok ? ["Auto", "H.264", "H.265 (HEVC)"] : ["Auto", "H.264"];
         value: prefs.android-codec;
         changed(v) => { root.prefs.android-codec = v; root.changed(root.prefs); }
+    }
+    Row {
+        label: "Encoder";
+        hint: AndroidEnc.detected != "" ? AndroidEnc.detected : I18n.t("Terdeteksi saat mirroring pertama.", "Detected on the first mirroring.");
+    }
+    if AndroidEnc.options.length > 1: Seg {
+        options: AndroidEnc.options;
+        labels: AndroidEnc.labels;
+        value: prefs.android-encoder;
+        changed(v) => { root.prefs.android-encoder = v; root.changed(root.prefs); }
+    }
+    if AndroidEnc.using != "": Row {
+        label: I18n.t("Sedang dipakai", "In use");
+        hint: AndroidEnc.using;
     }
 }
 
@@ -1130,7 +1175,7 @@ component AndroidHome inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
-                        Text { text: I18n.t("Ponsel / Tablet Android", "Android Phone / Tablet"); font-size: 15px; font-weight: 800; color: Theme.text; }
+                        Text { text: I18n.t("Smartphone / Tablet Android", "Android Smartphone / Tablet"); font-size: 15px; font-weight: 800; color: Theme.text; }
                         Text { text: root.status; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
                     }
                 }
@@ -1292,11 +1337,11 @@ component SettingsPanel inherits Glass {
                     icon: "\u{E7F4}";
                     tint-a: #a78bfa;
                     tint-b: #7c3aed;
-                    info: I18n.t("Auto-Fit menampilkan seluruh layar perangkat. Tepi-ke-tepi mengisi area dan memotong pinggir. Jendela otomatis mengikuti ukuran dan orientasi (potret/lanskap) perangkat.",
+                    info: I18n.t("Auto-Fit menampilkan seluruh layar perangkat. Edge-to-Edge mengisi area dan memotong pinggir. Jendela otomatis mengikuti ukuran dan orientasi (potret/lanskap) perangkat.",
                         "Auto-Fit shows the whole device screen. Edge-to-Edge fills the area and crops the sides. The window follows the device's size and orientation (portrait / landscape).");
                     Seg {
                         options: ["contain", "cover", "fill"];
-                        labels: ["Auto-Fit", I18n.t("Tepi-ke-tepi", "Edge-to-Edge"), I18n.t("Regang", "Stretch")];
+                        labels: ["Auto-Fit", "Edge-to-Edge", "Stretch"];
                         value: prefs.fit;
                         changed(v) => { root.prefs.fit = v; root.changed(root.prefs); }
                     }
@@ -1380,7 +1425,7 @@ component SettingsPanel inherits Glass {
                     tint-b: #0a84ff;
                     info: I18n.t("Pilih iPhone / iPad atau Android. Sesi yang berjalan dihentikan dulu dengan aman. Pengaturan Apple dan Android tetap tersimpan terpisah.",
                         "Choose iPhone / iPad or Android. A running session is stopped safely first. Apple and Android settings are kept separately.");
-                    Text { text: root.screen == "android" ? I18n.t("Ponsel / Tablet Android", "Android Phone / Tablet") : "iPhone / iPad"; font-size: 12.5px; font-weight: 600; color: Theme.text; }
+                    Text { text: root.screen == "android" ? I18n.t("Smartphone / Tablet Android", "Android Smartphone / Tablet") : "iPhone / iPad"; font-size: 12.5px; font-weight: 600; color: Theme.text; }
                     Row {
                         label: I18n.t("Ingat jenis perangkat", "Remember device type");
                         Toggle { checked: prefs.remember-platform; toggled(v) => { root.prefs.remember-platform = v; root.changed(root.prefs); } }

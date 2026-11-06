@@ -83,3 +83,12 @@ See the comment in `rust/crates/zenlink-android/src/scrcpy.rs`.
 - The device writes clipboard, ack and UHID messages on the same socket; ZenLink
   drains them.
 
+## Smart Encoder Detection (phase A5)
+
+- `list_encoders=true` makes the v5.0.1 server print its encoders through `Ln.i` and exit without mirroring (`Server.java`, `LogUtils.buildEncoderListMessage`). Line format: `--video-codec=<codec> --video-encoder=<name>`, padded, then on API 29+ `(hw|sw|hybrid)`, optional `[vendor]` and `(alias for <canonical>)`. Parser: `zenlink-android/src/encoders.rs`.
+- Codec names: `h264`, `h265`, `av1`, `vp8`, `vp9` (`VideoCodec.java`). ZenLink offers only codecs it can play: H.264 always, H.265 when Windows has a decoder and the phone an encoder; AV1/VP8/VP9 never (no decoder path yet).
+- `video_encoder=<name>` picks a specific encoder; the name is checked (`[A-Za-z0-9._-]`, at most 128 bytes) before it goes into the shell command.
+- Fallback plan (at most 4 attempts): the chosen encoder, up to two non-software encoders of the codec, the server default for the codec, then H.264 with the server default. The server's own `downsize_on_error` (default true, `SurfaceEncoder.MAX_SIZE_FALLBACK`) covers lowering the resolution. The user's choice is never overwritten.
+- Live changes: the v5.0.1 control protocol has no bitrate/codec message, so picture changes restart the session.
+- Per-device settings: `android-devices.json` next to the prefs, keyed by `identity::DeviceId::key` (the hardware serial, the same over USB and Wi-Fi). Stores names, profile, picture values and the last working codec/encoder. No ADB keys or IP addresses.
+

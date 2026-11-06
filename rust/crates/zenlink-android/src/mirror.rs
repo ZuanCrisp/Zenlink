@@ -211,6 +211,9 @@ pub struct VideoOptions {
     pub max_fps: u32,
     /// `h264` (the default; `h265`/`av1` only after Smart Encoder Detection).
     pub codec: &'static str,
+    /// A MediaCodec encoder name from the encoder list (`None` = the
+    /// server's default for the codec).
+    pub encoder: Option<String>,
     /// Device sound as raw PCM (Android 11+). Raw needs no decoder on the
     /// PC: 1.5 Mbps, small next to the video.
     pub audio: bool,
@@ -225,10 +228,19 @@ impl Default for VideoOptions {
             bit_rate: 8_000_000,
             max_fps: 60,
             codec: "h264",
+            encoder: None,
             audio: false,
             control: false,
         }
     }
+}
+
+/// A MediaCodec name safe to put in a shell command.
+pub fn is_encoder_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
 }
 
 /// The `adb shell` command that starts the server.
@@ -252,6 +264,11 @@ pub fn server_command(scid: u32, tunnel_forward: bool, o: &VideoOptions) -> Stri
     );
     if tunnel_forward {
         cmd.push_str(" tunnel_forward=true");
+    }
+    // Names come from the server's own list; anything else is not passed
+    // to the shell.
+    if let Some(e) = o.encoder.as_deref().filter(|e| is_encoder_name(e)) {
+        cmd.push_str(&format!(" video_encoder={e}"));
     }
     if o.max_size > 0 {
         cmd.push_str(&format!(" max_size={}", o.max_size));
@@ -857,6 +874,7 @@ mod tests {
                 bit_rate: 0,
                 max_fps: 0,
                 codec: "h264",
+                encoder: None,
                 audio: false,
                 control: true,
             },
@@ -865,6 +883,22 @@ mod tests {
             fwd.ends_with("control=true clipboard_autosync=false tunnel_forward=true"),
             "{fwd}"
         );
+    }
+
+    #[test]
+    fn encoder_name_is_passed_only_when_safe() {
+        let mut o = VideoOptions {
+            codec: "h265",
+            encoder: Some("c2.qti.hevc.encoder".into()),
+            ..VideoOptions::default()
+        };
+        let cmd = server_command(1, false, &o);
+        assert!(cmd.contains(" video_codec=h265 "));
+        assert!(cmd.contains(" video_encoder=c2.qti.hevc.encoder "), "{cmd}");
+        o.encoder = Some("x; reboot".into());
+        assert!(!server_command(1, false, &o).contains("video_encoder"));
+        o.encoder = Some(String::new());
+        assert!(!server_command(1, false, &o).contains("video_encoder"));
     }
 
     #[test]

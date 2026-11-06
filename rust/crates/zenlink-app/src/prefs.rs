@@ -47,7 +47,9 @@ pub fn defaults() -> Prefs {
         android_max_size: "1920".into(),
         android_fps: "60".into(),
         android_bitrate: "8".into(),
-        android_codec: "h264".into(),
+        android_codec: "auto".into(),
+        android_profile: "balanced".into(),
+        android_encoder: "".into(),
     }
 }
 
@@ -137,7 +139,35 @@ pub fn from_value(v: &Value) -> Prefs {
         &mut p.android_bitrate,
         &["4", "8", "16", "24", "40"],
     );
-    s("androidCodec", &mut p.android_codec, &["h264", "h265"]);
+    s(
+        "androidCodec",
+        &mut p.android_codec,
+        &["auto", "h264", "h265"],
+    );
+    // Phase A5: video profile and a specific encoder (from the phone's list).
+    s(
+        "androidProfile",
+        &mut p.android_profile,
+        &[
+            "low-latency",
+            "balanced",
+            "high-quality",
+            "streaming",
+            "custom",
+        ],
+    );
+    if v.get("androidProfile").is_none() {
+        // Settings from before A5: the profile their values match.
+        p.android_profile =
+            zenlink_android::profiles::matching(&crate::devprofiles::picture_of(&p))
+                .as_str()
+                .into();
+    }
+    if let Some(e) = v.get("androidEncoder").and_then(Value::as_str) {
+        if e.is_empty() || zenlink_android::mirror::is_encoder_name(e) {
+            p.android_encoder = e.into();
+        }
+    }
     p
 }
 
@@ -162,6 +192,7 @@ pub fn to_value(p: &Prefs) -> Value {
         "platform": p.platform.as_str(), "rememberPlatform": p.remember_platform,
         "androidMaxSize": p.android_max_size.as_str(), "androidFps": p.android_fps.as_str(),
         "androidBitrate": p.android_bitrate.as_str(), "androidCodec": p.android_codec.as_str(),
+        "androidProfile": p.android_profile.as_str(), "androidEncoder": p.android_encoder.as_str(),
     })
 }
 

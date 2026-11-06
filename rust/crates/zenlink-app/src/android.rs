@@ -26,6 +26,7 @@ use zenlink_android::adb::{AdbClient, Target};
 use zenlink_android::control::{
     self, keycode, meta, Control, ACTION_DOWN, ACTION_MOVE, ACTION_UP, POINTER_ID_GENERIC_FINGER,
 };
+use zenlink_android::encoders::{self, Attempt, Decoders, Encoder, Preference};
 use zenlink_android::mirror::{
     codec_name, read_device_meta, Mirror, Packet, Session, Stopper, VideoOptions, VideoReader,
     CODEC_H264, CODEC_H265,
@@ -68,6 +69,12 @@ pub struct Status {
     pub device: String,
     /// Last error, in English (logged; the UI shows its own bilingual text).
     pub error: String,
+    /// Codec and encoder of the running (or last tried) start attempt;
+    /// encoder empty = the server's default.
+    pub codec: String,
+    pub encoder: String,
+    /// The attempt is not the first of the plan (Smart Encoder fallback).
+    pub fell_back: bool,
 }
 
 /// Shared between the decoder thread (source) and the window.
@@ -86,6 +93,8 @@ pub struct Shared {
     /// Panel the bottom bar opened ("notifications" / "quick-settings"):
     /// pressing the same button again closes it, like the Apple bar.
     panel: Mutex<Option<&'static str>>,
+    /// The phone's encoder list (Smart Encoder Detection), once read.
+    encoders: Mutex<Option<Vec<Encoder>>>,
 }
 
 /// The session the window's mouse and keyboard go to.
@@ -129,6 +138,12 @@ impl Shared {
         Some(self.audio_ms.load(Relaxed)).filter(|&v| v > 0)
     }
 
+    /// The encoder list read at session start, `None` until read or when
+    /// the phone could not list them.
+    pub fn encoders(&self) -> Option<Vec<Encoder>> {
+        self.encoders.lock().unwrap().clone()
+    }
+
     fn set(&self, f: impl FnOnce(&mut Status)) {
         f(&mut self.status.lock().unwrap());
     }
@@ -151,6 +166,11 @@ impl Shared {
     fn frame(&self) -> Option<(u16, u16)> {
         let (w, h) = (self.frame_w.load(Relaxed), self.frame_h.load(Relaxed));
         (w > 0 && h > 0).then(|| (w.min(0xffff) as u16, h.min(0xffff) as u16))
+    }
+
+    /// Video frame size from the last session packet (0 before one).
+    pub fn frame_size(&self) -> (u32, u32) {
+        (self.frame_w.load(Relaxed), self.frame_h.load(Relaxed))
     }
 
     fn set_frame(&self, w: u32, h: u32) {
@@ -389,6 +409,14 @@ impl<R: Read + Send> RecordStream for Records<R> {
     }
 }
 
+/// Smart Encoder Detection inputs for a session start: the user's choice,
+/// what the PC decodes, and an encoder list read earlier (skips the query).
+pub struct Smart {
+    pub pref: Preference,
+    pub dec: Decoders,
+    pub known: Option<Vec<Encoder>>,
+}
+
 /// A real device: starts the scrcpy server through the ADB server.
 pub struct DeviceSource {
     pub client: AdbClient,
@@ -398,6 +426,14 @@ pub struct DeviceSource {
     pub options: VideoOptions,
     pub shared: Arc<Shared>,
     failures: u32,
+    /// Smart Encoder Detection: what the user chose, what the PC decodes,
+    /// an encoder list known from earlier (skips the query), the plan and
+    /// the attempt in use.
+    pref: Preference,
+    dec: Decoders,
+    known: Option<Vec<Encoder>>,
+    plan: Vec<Attempt>,
+    step: usize,
 }
 
 impl DeviceSource {
@@ -410,12 +446,13 @@ impl DeviceSource {
         server: Arc<Vec<u8>>,
         shared: Arc<Shared>,
         options: VideoOptions,
+        smart: Smart,
     ) -> Self {
         shared.set(|s| {
             *s = Status {
                 phase: Phase::Connecting,
                 device: name,
-                error: String::new(),
+                ..Status::default()
             }
         });
         Self {
@@ -426,23 +463,77 @@ impl DeviceSource {
             options,
             shared,
             failures: 0,
+            pref: smart.pref,
+            dec: smart.dec,
+            known: smart.known,
+            plan: Vec::new(),
+            step: 0,
         }
+    }
+
+    /// Reads the encoder list (once per session) and plans the attempts.
+    fn ensure_plan(&mut self, target: &Target) {
+        if !self.plan.is_empty() {
+            return;
+        }
+        let list = match self.known.take() {
+            Some(l) => Some(l),
+            None => match encoders::query(&self.client, target, &self.server) {
+                Ok(l) if !l.is_empty() => Some(l),
+                Ok(_) => {
+                    log::warn!("android: the server listed no encoders");
+                    None
+                }
+                Err(e) => {
+                    log::warn!("android: encoder list failed: {e}");
+                    None
+                }
+            },
+        };
+        if let Some(l) = &list {
+            let names: Vec<String> = l
+                .iter()
+                .map(|e| format!("{}:{}({})", e.codec, e.name, e.accel.as_str()))
+                .collect();
+            log::info!("android: encoders {}", names.join(" "));
+        }
+        self.plan = encoders::plan(&self.pref, list.as_deref(), self.dec);
+        log::info!("android: encoder plan {:?}", self.plan);
+        *self.shared.encoders.lock().unwrap() = list;
+    }
+
+    /// The attempt to start with now.
+    fn attempt(&self) -> Attempt {
+        self.plan
+            .get(self.step)
+            .or(self.plan.last())
+            .cloned()
+            .unwrap_or(Attempt {
+                codec: "h264",
+                encoder: None,
+            })
+    }
+
+    /// Consecutive failures that end the session: every planned attempt
+    /// gets its chance, and at least MAX_FAILURES (cable hiccups).
+    fn max_failures(&self) -> u32 {
+        MAX_FAILURES.max(self.plan.len() as u32)
     }
 
     fn fail(&mut self, e: String) {
         log::warn!("android: {e}");
-        // Bounded fallback: a phone without an H.265 encoder (the server
-        // stops with an error) or a stream that does not decode goes back to
-        // H.264, the codec every Android device has.
-        if self.options.codec != "h264" {
-            log::warn!(
-                "android: {} failed; falling back to h264",
-                self.options.codec
-            );
-            self.options.codec = "h264";
+        // Bounded fallback (master prompt section 5): the next attempt of
+        // the plan, e.g. another hardware encoder, then H.264 with the
+        // server's default encoder. The user's preference is kept for the
+        // next session.
+        if self.step + 1 < self.plan.len() {
+            let from = self.attempt();
+            self.step += 1;
+            let to = self.attempt();
+            log::warn!("android: {from:?} failed; trying {to:?}");
         }
         self.failures += 1;
-        let gave_up = self.failures >= MAX_FAILURES;
+        let gave_up = self.failures >= self.max_failures();
         self.shared.set(|s| {
             s.error = e;
             if gave_up {
@@ -458,10 +549,21 @@ impl VideoSource for DeviceSource {
             return None;
         }
         self.shared.set(|s| s.phase = Phase::Connecting);
+        let serial = self.serial.clone();
         let target = match self.transport_id {
             Some(id) => Target::TransportId(id),
-            None => Target::Serial(&self.serial),
+            None => Target::Serial(&serial),
         };
+        self.ensure_plan(&target);
+        let a = self.attempt();
+        self.options.codec = a.codec;
+        self.options.encoder = a.encoder.clone();
+        let fell_back = self.step > 0;
+        self.shared.set(|s| {
+            s.codec = a.codec.to_string();
+            s.encoder = a.encoder.clone().unwrap_or_default();
+            s.fell_back = fell_back;
+        });
         let mut m = match Mirror::start(&self.client, &target, &self.server, &self.options) {
             Ok(m) => m,
             Err(e) => {
@@ -514,7 +616,7 @@ impl VideoSource for DeviceSource {
     }
 
     fn finished(&self) -> bool {
-        self.shared.stop.load(Relaxed) || self.failures >= MAX_FAILURES
+        self.shared.stop.load(Relaxed) || self.failures >= self.max_failures()
     }
 }
 
@@ -643,8 +745,7 @@ impl FixtureSource {
         shared.set(|s| {
             *s = Status {
                 phase: Phase::Connecting,
-                device: String::new(),
-                error: String::new(),
+                ..Status::default()
             }
         });
         Self {
@@ -1121,13 +1222,40 @@ mod tests {
             "x".into(),
             Arc::new(Vec::new()),
             shared,
-            VideoOptions {
-                codec: "h265",
-                ..VideoOptions::default()
+            VideoOptions::default(),
+            Smart {
+            pref: Preference {
+                codec: "h265".into(),
+                encoder: String::new(),
+            },
+            dec: Decoders {
+                h265: true,
+                av1: false,
+            },
+            // The phone listed an H.265 and an H.264 hardware encoder.
+            known: Some(encoders::parse_list(
+                "    --video-codec=h265 --video-encoder=c2.x.hevc.encoder (hw)\n    --video-codec=h264 --video-encoder=c2.x.avc.encoder (hw)",
+            )),
             },
         );
-        src.fail("encoder".into());
-        assert_eq!(src.options.codec, "h264");
+        src.ensure_plan(&Target::Serial("x"));
+        assert_eq!(src.attempt().codec, "h265");
+        assert_eq!(src.attempt().encoder.as_deref(), Some("c2.x.hevc.encoder"));
+        assert_eq!(src.shared.encoders().unwrap().len(), 2);
+        // Every planned attempt gets a turn before the session stops.
+        let n = src.plan.len();
+        assert!(n <= encoders::MAX_ATTEMPTS);
+        for _ in 1..n {
+            src.fail("encoder".into());
+            assert!(!src.finished());
+        }
+        assert_eq!(src.attempt().codec, "h264");
+        assert_eq!(src.attempt().encoder, None);
+        while !src.finished() {
+            src.fail("encoder".into());
+        }
+        assert_eq!(src.failures, src.max_failures());
+        assert_eq!(src.shared.status().phase, Phase::Error);
     }
 
     #[test]

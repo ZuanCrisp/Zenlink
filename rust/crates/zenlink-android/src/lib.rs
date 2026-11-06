@@ -9,6 +9,8 @@
 //! - [`discovery`]: combines the above into the device list the UI shows.
 //! - [`mirror`]: starts the scrcpy server and reads its video stream (phase A3).
 //! - [`control`]: scrcpy control messages (touch, keys, text, clipboard; phase A4).
+//! - [`encoders`]: Smart Encoder Detection and the bounded start plan (phase A5).
+//! - [`profiles`]: video profiles and per-device settings (phase A5).
 //!
 //! Everything here is portable Rust; only [`adb::start_server`] touches the platform.
 
@@ -16,8 +18,10 @@ pub mod adb;
 pub mod control;
 pub mod devices;
 pub mod discovery;
+pub mod encoders;
 pub mod identity;
 pub mod mirror;
 pub mod naming;
+pub mod profiles;
 pub mod props;
 pub mod scrcpy;

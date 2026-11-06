@@ -3,6 +3,7 @@
 
 mod android;
 mod backdrop;
+mod devprofiles;
 mod dots;
 mod flow;
 mod input;
@@ -128,6 +129,15 @@ struct App {
     android_list: Vec<zenlink_android::discovery::AndroidDevice>,
     /// ZL_ANDROID_FIXTURE: started once when the Android workspace opens.
     fixture_started: bool,
+    /// Per-device Android settings (phase A5), loaded on first use.
+    android_store: Option<zenlink_android::profiles::Store>,
+    /// Stable key of the device last started: Settings edits go to it.
+    android_dev: Option<String>,
+    /// Encoder lists read this run, per device key (skips the query on
+    /// the next start of the same phone).
+    android_encoders: std::collections::HashMap<String, Vec<zenlink_android::encoders::Encoder>>,
+    /// This session's working configuration was saved (lastGood).
+    android_good_saved: bool,
 }
 
 /// ZenLink's own full screen (the window covers the monitor). winit's full
@@ -1266,21 +1276,162 @@ fn hevc_ok() -> bool {
 
 /// scrcpy server options from Settings › Android video and Settings › Audio.
 /// H.265 falls back to H.264 when Windows has no HEVC decoder.
+/// The codec and encoder come from the Smart Encoder plan (`android.rs`).
 fn android_options(p: &Prefs, audio_supported: bool) -> zenlink_android::mirror::VideoOptions {
     let num = |s: &str, d: u32| s.parse::<u32>().unwrap_or(d);
-    let codec = if p.android_codec.as_str() == "h265" && hevc_ok() {
-        "h265"
-    } else {
-        "h264"
-    };
     zenlink_android::mirror::VideoOptions {
         max_size: num(&p.android_max_size, 1920),
         bit_rate: num(&p.android_bitrate, 8).saturating_mul(1_000_000),
         max_fps: num(&p.android_fps, 60),
-        codec,
+        codec: "h264",
+        encoder: None,
         audio: audio_supported && p.audio_out.as_str() == "pc",
         control: true,
     }
+}
+
+/// What the user chose for codec and encoder.
+fn android_pref(p: &Prefs) -> zenlink_android::encoders::Preference {
+    zenlink_android::encoders::Preference {
+        codec: p.android_codec.to_string(),
+        encoder: p.android_encoder.to_string(),
+    }
+}
+
+fn android_decoders() -> zenlink_android::encoders::Decoders {
+    zenlink_android::encoders::Decoders {
+        h265: hevc_ok(),
+        av1: false,
+    }
+}
+
+/// Runs `f` on the per-device store (loaded on first use) and saves it.
+fn with_store<R>(f: impl FnOnce(&mut zenlink_android::profiles::Store) -> R) -> R {
+    APP.with_borrow_mut(|a| {
+        let s = a.android_store.get_or_insert_with(devprofiles::load);
+        let r = f(s);
+        devprofiles::save(s);
+        r
+    })
+}
+
+/// Loads a device's own settings into Settings before it starts. A phone
+/// seen for the first time takes the current Settings as its own.
+fn android_select_device(ui: &AppWindow, d: &zenlink_android::discovery::AndroidDevice) {
+    use zenlink_android::devices::Connection;
+    let key = d.id.key.clone();
+    let mut p = ui.get_prefs();
+    let known = with_store(|s| {
+        let known = s.get(&key).is_some();
+        let e = s.entry(&key);
+        e.name = d.name.display.clone();
+        e.manufacturer = d.manufacturer.clone().unwrap_or_default();
+        e.model = d.model.clone().unwrap_or_default();
+        e.android = d.android_release.clone().unwrap_or_default();
+        e.connection = match d.primary.connection {
+            Connection::WifiTcp { .. } | Connection::WifiTls { .. } => "wifi",
+            _ => "usb",
+        }
+        .into();
+        if known {
+            devprofiles::apply(&mut p, e);
+        } else {
+            e.set_picture(devprofiles::picture_of(&p));
+        }
+        known
+    });
+    if known {
+        prefs::save(&p);
+        ui.set_prefs(p);
+    }
+    APP.with_borrow_mut(|a| a.android_dev = Some(key));
+    refresh_encoder_ui(ui);
+}
+
+/// Settings changed: store them for the selected device.
+fn android_store_prefs(p: &Prefs) {
+    let Some(key) = APP.with_borrow(|a| a.android_dev.clone()) else {
+        return;
+    };
+    with_store(|s| {
+        let e = s.entry(&key);
+        e.set_picture(devprofiles::picture_of(p));
+    });
+}
+
+/// Short button label for an encoder: the vendor part of its name and how
+/// it runs, e.g. `qti hw`, `android sw`.
+fn encoder_label(e: &zenlink_android::encoders::Encoder) -> String {
+    let parts: Vec<&str> = e.name.split('.').collect();
+    let vendor = match parts.as_slice() {
+        ["c2" | "OMX", v, ..] => v,
+        [v, ..] => v,
+        [] => "?",
+    };
+    let vendor: String = vendor.chars().take(10).collect();
+    let accel = e.accel.as_str();
+    if accel.is_empty() {
+        vendor
+    } else {
+        format!("{vendor} {accel}")
+    }
+}
+
+/// Fills the encoder choices and the detection summary in Settings.
+fn refresh_encoder_ui(ui: &AppWindow) {
+    use zenlink_android::encoders::{usable_codecs, video_encoders, Accel};
+    let list = APP.with_borrow(|a| {
+        a.android_dev
+            .as_ref()
+            .and_then(|k| a.android_encoders.get(k).cloned())
+    });
+    let g = ui.global::<AndroidEnc>();
+    let Some(list) = list else {
+        g.set_options(slint::ModelRc::new(slint::VecModel::from(vec!["".into()])));
+        g.set_labels(slint::ModelRc::new(slint::VecModel::from(vec![
+            slint::SharedString::from("Auto"),
+        ])));
+        g.set_codecs(slint::ModelRc::new(slint::VecModel::from(Vec::<
+            slint::SharedString,
+        >::new())));
+        g.set_detected(slint::SharedString::new());
+        return;
+    };
+    let p = ui.get_prefs();
+    let codec = match p.android_codec.as_str() {
+        "h265" => "h265",
+        _ => "h264",
+    };
+    let encs = video_encoders(&list, codec);
+    let mut options: Vec<slint::SharedString> = vec!["".into()];
+    let mut labels: Vec<slint::SharedString> = vec!["Auto".into()];
+    // Seg shows at most six options.
+    for e in encs.iter().take(5) {
+        options.push(e.name.as_str().into());
+        labels.push(encoder_label(e).into());
+    }
+    g.set_options(slint::ModelRc::new(slint::VecModel::from(options)));
+    g.set_labels(slint::ModelRc::new(slint::VecModel::from(labels)));
+    let codecs: Vec<slint::SharedString> = usable_codecs(&list, android_decoders())
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    g.set_codecs(slint::ModelRc::new(slint::VecModel::from(codecs)));
+    // "H.264: 2 (1 hw) · H.265: 1 (1 hw) · AV1: 1 (no PC decoder)"
+    let mut parts = Vec::new();
+    for (c, name) in [("h264", "H.264"), ("h265", "H.265"), ("av1", "AV1")] {
+        let v = video_encoders(&list, c);
+        if v.is_empty() {
+            continue;
+        }
+        let hw = v.iter().filter(|e| e.accel == Accel::Hardware).count();
+        let mut s = format!("{name}: {} ({hw} hw)", v.len());
+        if c == "av1" || (c == "h265" && !hevc_ok()) {
+            s.push_str(&tr_ui(ui, ", tanpa decoder di PC", ", no PC decoder"));
+        }
+        parts.push(s);
+    }
+    g.set_detected(parts.join(" · ").into());
 }
 
 /// Text on the Windows clipboard (Ctrl+V to Android), `None` without text.
@@ -1313,8 +1464,13 @@ fn pc_clipboard_text() -> Option<String> {
 /// The settings a running Android session depends on.
 fn android_key(p: &Prefs) -> String {
     format!(
-        "{}|{}|{}|{}|{}",
-        p.audio_out, p.android_max_size, p.android_fps, p.android_bitrate, p.android_codec
+        "{}|{}|{}|{}|{}|{}",
+        p.audio_out,
+        p.android_max_size,
+        p.android_fps,
+        p.android_bitrate,
+        p.android_codec,
+        p.android_encoder
     )
 }
 
@@ -1383,6 +1539,9 @@ fn android_start(ui: &AppWindow, index: i32) {
             Connection::Emulator => "Emulator",
             Connection::Unknown => "",
         };
+        android_select_device(ui, &d);
+        let known = APP.with_borrow(|a| a.android_encoders.get(&d.id.key).cloned());
+        let p = ui.get_prefs();
         (
             Box::new(android::DeviceSource::new(
                 d.primary.serial.clone(),
@@ -1390,7 +1549,12 @@ fn android_start(ui: &AppWindow, index: i32) {
                 d.name.display.clone(),
                 server,
                 shared.clone(),
-                android_options(&ui.get_prefs(), d.audio_supported),
+                android_options(&p, d.audio_supported),
+                android::Smart {
+                    pref: android_pref(&p),
+                    dec: android_decoders(),
+                    known,
+                },
             )),
             link.to_string(),
         )
@@ -1400,6 +1564,7 @@ fn android_start(ui: &AppWindow, index: i32) {
         android::set_active(Some(shared.clone()));
         a.android = Some(shared);
         a.android_index = index;
+        a.android_good_saved = false;
         a.android_key = Some(android_key(&ui.get_prefs()));
         a.android_link = link;
         a.android_shown = None;
@@ -1461,6 +1626,23 @@ fn android_tick(ui: &AppWindow) {
         _ => String::new(),
     };
     ui.set_android_message(message.into());
+    let using = if st.encoder.is_empty() {
+        st.codec.to_uppercase().replace("H26", "H.26")
+    } else {
+        format!(
+            "{} · {}",
+            st.codec.to_uppercase().replace("H26", "H.26"),
+            st.encoder
+        )
+    };
+    ui.global::<AndroidEnc>().set_using(if st.codec.is_empty() {
+        "".into()
+    } else {
+        using.clone().into()
+    });
+    if live {
+        android_session_ok(ui, &st, &using);
+    }
     APP.with_borrow_mut(|a| {
         if live != a.android_live {
             a.android_live = live;
@@ -1468,6 +1650,49 @@ fn android_tick(ui: &AppWindow) {
         }
         a.android_shown = Some(st);
     });
+}
+
+/// First frame of a session: remember the encoder list and the working
+/// configuration, and say so when a fallback was needed.
+fn android_session_ok(ui: &AppWindow, st: &android::Status, using: &str) {
+    let Some((key, shared, saved)) = APP.with_borrow(|a| {
+        Some((
+            a.android_dev.clone()?,
+            a.android.clone()?,
+            a.android_good_saved,
+        ))
+    }) else {
+        return;
+    };
+    if saved {
+        return;
+    }
+    if let Some(list) = shared.encoders() {
+        APP.with_borrow_mut(|a| a.android_encoders.insert(key.clone(), list));
+    }
+    let (w, h) = shared.frame_size();
+    with_store(|s| {
+        s.entry(&key).last_good = Some(zenlink_android::profiles::LastGood {
+            codec: st.codec.clone(),
+            encoder: st.encoder.clone(),
+            width: w,
+            height: h,
+        });
+    });
+    APP.with_borrow_mut(|a| a.android_good_saved = true);
+    refresh_encoder_ui(ui);
+    if st.fell_back {
+        show_toast(
+            ui,
+            tr_ui(
+                ui,
+                &format!(
+                    "Encoder pilihan gagal, sekarang pakai {using}. Pilihanmu tetap disimpan."
+                ),
+                &format!("The chosen encoder failed; now using {using}. Your choice is kept."),
+            ),
+        );
+    }
 }
 
 fn tr_ui_static(ui: &AppWindow, id: &'static str, en: &'static str) -> &'static str {
@@ -1657,7 +1882,23 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         let api = api.clone();
         let (t, g) = (touch_on.clone(), gestures_on.clone());
-        ui.on_prefs_changed(move |p| {
+        let last = std::cell::RefCell::new(ui.get_prefs());
+        ui.on_prefs_changed(move |mut p| {
+            // Video profile logic (phase A5), then store for the device.
+            devprofiles::normalize(&last.borrow(), &mut p);
+            let android_changed = devprofiles::picture_of(&p)
+                != devprofiles::picture_of(&last.borrow())
+                || p.android_profile != last.borrow().android_profile;
+            *last.borrow_mut() = p.clone();
+            if let Some(ui) = weak.upgrade() {
+                if ui.get_prefs() != p {
+                    ui.set_prefs(p.clone());
+                }
+                if android_changed {
+                    android_store_prefs(&p);
+                    refresh_encoder_ui(&ui);
+                }
+            }
             prefs::save(&p);
             t.store(p.touch, Relaxed);
             g.store(p.gestures, Relaxed);

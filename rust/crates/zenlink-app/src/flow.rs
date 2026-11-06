@@ -1,7 +1,7 @@
 //! Startup navigation (master prompt section 2, "Mandatory startup flow").
 //!
 //! Launch -> platform selection -> iPhone/iPad (the v2.2.31 Apple Driver /
-//! ZenLink Studio chooser, unchanged) or Android Phone/Tablet.
+//! ZenLink Studio chooser, unchanged) or Android Smartphone / Tablet.
 //!
 //! Kept free of Slint types so the acceptance rules are unit-tested here; the
 //! window only mirrors `Flow` into its properties.
@@ -9,7 +9,7 @@
 /// Which screen the window shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen {
-    /// The new first screen: "iPhone / iPad" or "Android Phone / Tablet".
+    /// The new first screen: "iPhone / iPad" or "Android Smartphone / Tablet".
     Platform,
     /// The Apple workspace (with its own mode chooser as step two).
     Apple,

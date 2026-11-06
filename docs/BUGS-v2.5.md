@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **A4 fixes from the user test (B-22..B-25) done; next A5 (smart encoder + profiles)**, see `docs/ROADMAP.md`.
+Current phase: **A5 (smart encoder + profiles) done in code; next: shortcuts and Settings layout (B-26), then A6**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is
@@ -195,3 +195,16 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Reported: 2026-11-07 by the user (screenshot of the window with Settings open, wanting that size at start).
 - Fix: `app.slint` preferred size 620 x 900 (was 480 x 820); on first show the window is kept inside the monitor's work area (95%) for small or high-DPI screens (`clamp_to_work_area`). With Settings open at start (the default) the width is the idle stage plus the panel, as before.
 - Verification: measured at 100% scaling on a 2560x1440 screen: the window opens at 824 x 900 (was 824 x 820) on the Android screen and the platform screen.
+
+### B-26: Settings and README list shortcuts the Rust window does not have            Status: open
+- Reported: 2026-11-07, by the user (screenshot of the README "Keyboard Shortcuts" table: "belum lengkap di setting").
+- Cause: the shortcuts (Space, Alt+H/C/R/V/D/U/L, Ctrl+K, Alt+Left, G/M) live in the classic web UI (`ui/app.js`, `ui/keys.js`). The Rust window handles only F11/Esc and, for Android, typed keys. The Settings card "Control & shortcuts" and the README still describe the classic set.
+- Fix: pending. Port the shortcuts to the Rust window (both platforms where the backend supports them) and list the real set in Settings, per platform.
+- Verification: unverified.
+
+### B-27: Windows "N" editions have no Media Foundation decoder            Status: open
+- Reported: 2026-11-07, from the clean-PC review (user asked whether ZenLink runs on other PCs without extra installs).
+- Cause: N/KN editions ship without the Media Feature Pack, so the H.264 decoder the picture needs is missing. Not seen on a device yet; from Microsoft's edition notes.
+- Fix: pending (A6): detect a missing H.264 decoder at start and show a bilingual message with the official Media Feature Pack link.
+- Verification: unverified: needs an N edition (VM or Windows Sandbox, with the user's approval).
+
