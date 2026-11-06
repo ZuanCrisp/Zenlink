@@ -5,10 +5,15 @@
 //! - [`DeviceSource`]: a real device through the ADB server (scrcpy server).
 //! - [`FixtureSource`]: a recorded scrcpy stream (`ZL_ANDROID_FIXTURE`), for
 //!   tests without a device. It is paced by the recorded timestamps.
+//!
+//! Sound (phase A4): raw PCM from the scrcpy audio socket goes through the
+//! v2.2.31 jitter buffer (`zenlink-audio`) to WASAPI. Low-latency mode:
+//! sound plays as it arrives, the picture as it decodes (the Apple cable
+//! path works the same way).
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -62,11 +67,33 @@ pub struct Shared {
     status: Mutex<Status>,
     stop: AtomicBool,
     stopper: Mutex<Option<Stopper>>,
+    /// Sound latency (queue + output) in ms; 0 = no sound.
+    audio_ms: AtomicU32,
+}
+
+/// Sound settings from the window (Settings › Audio, the mute button).
+static AUDIO_TO_PC: AtomicBool = AtomicBool::new(true);
+static AUDIO_MUTED: AtomicBool = AtomicBool::new(false);
+/// f32 bits, 0.0..=1.0.
+static AUDIO_VOLUME: AtomicU32 = AtomicU32::new(0x3f80_0000);
+
+/// Called whenever the window pushes its sound settings. "Device only"
+/// (`to_pc == false`) takes effect at the next Start: the server then does
+/// not capture, so the phone keeps its own sound.
+pub fn set_audio(to_pc: bool, volume: f32, muted: bool) {
+    AUDIO_TO_PC.store(to_pc, Relaxed);
+    AUDIO_VOLUME.store(volume.clamp(0.0, 1.0).to_bits(), Relaxed);
+    AUDIO_MUTED.store(muted, Relaxed);
 }
 
 impl Shared {
     pub fn status(&self) -> Status {
         self.status.lock().unwrap().clone()
+    }
+
+    /// Sound latency in ms (queue + output), `None` without sound.
+    pub fn audio_ms(&self) -> Option<u32> {
+        Some(self.audio_ms.load(Relaxed)).filter(|&v| v > 0)
     }
 
     fn set(&self, f: impl FnOnce(&mut Status)) {
@@ -192,12 +219,14 @@ pub struct DeviceSource {
 }
 
 impl DeviceSource {
+    /// `audio_supported`: Android 11+ (scrcpy captures sound from API 30).
     pub fn new(
         serial: String,
         transport_id: Option<u64>,
         name: String,
         server: Arc<Vec<u8>>,
         shared: Arc<Shared>,
+        audio_supported: bool,
     ) -> Self {
         shared.set(|s| {
             *s = Status {
@@ -211,7 +240,10 @@ impl DeviceSource {
             serial,
             transport_id,
             server,
-            options: VideoOptions::default(),
+            options: VideoOptions {
+                audio: audio_supported && AUDIO_TO_PC.load(Relaxed),
+                ..VideoOptions::default()
+            },
             shared,
             failures: 0,
         }
@@ -269,7 +301,15 @@ impl VideoSource for DeviceSource {
             }
             s.error.clear();
         });
-        let Mirror { video, session, .. } = m;
+        let Mirror {
+            video,
+            audio,
+            session,
+            ..
+        } = m;
+        if let Some(a) = audio {
+            play_audio(a, self.shared.clone());
+        }
         Some((
             info,
             Box::new(Records {
@@ -284,6 +324,50 @@ impl VideoSource for DeviceSource {
     fn finished(&self) -> bool {
         self.shared.stop.load(Relaxed) || self.failures >= MAX_FAILURES
     }
+}
+
+/// Plays the audio socket until it closes (stop, unplug). Without a working
+/// output the video goes on alone.
+fn play_audio(mut r: VideoReader<std::net::TcpStream>, shared: Arc<Shared>) {
+    let _ = std::thread::Builder::new()
+        .name("android-audio".into())
+        .spawn(move || {
+            let mut player = match zenlink_audio::Player::start() {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!("android: no sound output ({e}); video only");
+                    return;
+                }
+            };
+            let mut stats_at = Instant::now();
+            while !shared.stop.load(Relaxed) {
+                match r.next_packet() {
+                    Ok(Packet::Media { data, .. }) => {
+                        player.set_muted(AUDIO_MUTED.load(Relaxed));
+                        player.set_volume(f32::from_bits(AUDIO_VOLUME.load(Relaxed)));
+                        player.feed(&data);
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+                if stats_at.elapsed() >= Duration::from_secs(1) {
+                    stats_at = Instant::now();
+                    let s = player.stats();
+                    let ms = (s.queue_ms + s.output_ms).round().max(1.0) as u32;
+                    shared.audio_ms.store(ms, Relaxed);
+                    if std::env::var_os("ZL_STATS_LOG").is_some() {
+                        log::info!(
+                            "sound stats queue={:.0} output={:.1} underruns={} dropped={:.0}",
+                            s.queue_ms,
+                            s.output_ms,
+                            s.underruns,
+                            s.dropped_ms
+                        );
+                    }
+                }
+            }
+            shared.audio_ms.store(0, Relaxed);
+        });
 }
 
 /// A recorded stream (`ZL_ANDROID_FIXTURE`), looped and paced by its PTS.
@@ -569,6 +653,44 @@ mod tests {
         assert_eq!(frames, 120);
         assert!(keys >= 1);
         assert!(data.len() < 150_000, "keep the fixture small");
+    }
+
+    #[test]
+    #[ignore = "needs a sound device (plays silence, muted)"]
+    fn audio_socket_plays_through_the_output() {
+        use std::io::Write;
+        use zenlink_android::mirror::CODEC_RAW;
+        set_audio(true, 1.0, true);
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let device = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            s.write_all(&CODEC_RAW.to_be_bytes()).unwrap();
+            // 1.5 s of 10 ms PCM packets, in real time like a device.
+            for i in 0..150u64 {
+                let mut w = Vec::new();
+                write_packet(
+                    &mut w,
+                    &Packet::Media {
+                        pts: i * 10_000,
+                        key: false,
+                        data: vec![0; 480 * 4],
+                    },
+                )
+                .unwrap();
+                s.write_all(&w).unwrap();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let r =
+            VideoReader::new(std::net::TcpStream::connect(("127.0.0.1", port)).unwrap()).unwrap();
+        let shared = Arc::new(Shared::default());
+        play_audio(r, shared.clone());
+        std::thread::sleep(Duration::from_millis(1300));
+        let ms = shared.audio_ms().expect("sound latency reported");
+        println!("sound latency {ms} ms");
+        assert!(ms < 150, "{ms} ms");
+        device.join().unwrap();
     }
 
     #[test]

@@ -55,3 +55,15 @@ See the comment in `rust/crates/zenlink-android/src/scrcpy.rs`.
   packets are skipped because a rotation is followed by a new config.
 - Test without a device: `ZL_ANDROID_FIXTURE=tests\fixtures\android\synthetic-h264-360x640.scrcpy`
   with `ZL_ADB=none` plays a recorded stream on the Android screen, paced by its PTS.
+
+## Sound (phase A4)
+
+- Option `audio=true audio_codec=raw`: PCM s16le, 48 kHz, stereo (`AudioConfig.java`),
+  about 1.5 Mbps. No decoder is needed on the PC; Opus/AAC/FLAC can come later for
+  Wi-Fi bandwidth. Default server values: `audio_source=output`, `audio_dup=false`.
+- The audio socket is the second socket (after video, before control). It starts
+  with the codec id; `0` means the device disabled the stream (for example Android
+  10 or older, or capture refused) and `1` a configuration error
+  (`Streamer.writeDisableStream`). ZenLink then mirrors video only.
+- Audio packets use the same 12-byte header as video (no session packets).
+

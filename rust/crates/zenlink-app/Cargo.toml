@@ -13,6 +13,7 @@ path = "src/main.rs"
 zenlink-core = { path = "../zenlink-core" }
 zenlink-video = { path = "../zenlink-video" }
 zenlink-android = { path = "../zenlink-android" }
+zenlink-audio = { path = "../zenlink-audio" }
 serde_json = { workspace = true }
 log = { workspace = true }
 slint = { version = "1.18", default-features = false, features = ["std", "compat-1-2", "backend-winit", "renderer-femtovg", "unstable-winit-030", "raw-window-handle-06"] }

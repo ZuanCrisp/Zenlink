@@ -26,6 +26,19 @@ pub const CODEC_H264: u32 = 0x6832_3634;
 pub const CODEC_H265: u32 = 0x6832_3635;
 pub const CODEC_AV1: u32 = 0x0061_7631;
 
+/// Audio codec ids (scrcpy `AudioCodec.java`).
+pub const CODEC_OPUS: u32 = 0x6f70_7573;
+pub const CODEC_AAC: u32 = 0x0061_6163;
+pub const CODEC_FLAC: u32 = 0x666c_6163;
+/// PCM s16le, 48 kHz, stereo (`AudioConfig.java`): no decoder needed.
+pub const CODEC_RAW: u32 = 0x0072_6177;
+
+/// Codec ids that are not codecs (`Streamer.writeDisableStream`): the device
+/// disabled the stream (e.g. audio capture not possible), or a
+/// configuration error happened.
+pub const STREAM_DISABLED: u32 = 0;
+pub const STREAM_ERROR: u32 = 1;
+
 /// Size of the device meta (the device name, NUL-padded UTF-8).
 pub const DEVICE_NAME_LEN: usize = 64;
 
@@ -43,6 +56,12 @@ pub fn codec_name(id: u32) -> &'static str {
         CODEC_H264 => "h264",
         CODEC_H265 => "h265",
         CODEC_AV1 => "av1",
+        CODEC_OPUS => "opus",
+        CODEC_AAC => "aac",
+        CODEC_FLAC => "flac",
+        CODEC_RAW => "raw",
+        STREAM_DISABLED => "disabled",
+        STREAM_ERROR => "error",
         _ => "unknown",
     }
 }
@@ -180,8 +199,8 @@ pub fn socket_name(scid: u32) -> String {
     format!("scrcpy_{scid:08x}")
 }
 
-/// Server options for a video-only session (phase A3). Later phases add
-/// audio, control and the per-device profiles.
+/// Server options (phases A3-A4). Later phases add control and the
+/// per-device profiles.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VideoOptions {
     /// Longest side in pixels, 0 = native.
@@ -192,6 +211,9 @@ pub struct VideoOptions {
     pub max_fps: u32,
     /// `h264` (the default; `h265`/`av1` only after Smart Encoder Detection).
     pub codec: &'static str,
+    /// Device sound as raw PCM (Android 11+). Raw needs no decoder on the
+    /// PC: 1.5 Mbps, small next to the video.
+    pub audio: bool,
 }
 
 impl Default for VideoOptions {
@@ -201,6 +223,7 @@ impl Default for VideoOptions {
             bit_rate: 8_000_000,
             max_fps: 60,
             codec: "h264",
+            audio: false,
         }
     }
 }
@@ -209,8 +232,13 @@ impl Default for VideoOptions {
 pub fn server_command(scid: u32, tunnel_forward: bool, o: &VideoOptions) -> String {
     let mut cmd = format!(
         "CLASSPATH={DEVICE_SERVER_PATH} app_process / com.genymobile.scrcpy.Server {SCRCPY_VERSION} \
-         scid={scid:08x} log_level=info video_codec={} audio=false control=false",
-        o.codec
+         scid={scid:08x} log_level=info video_codec={} {} control=false",
+        o.codec,
+        if o.audio {
+            "audio=true audio_codec=raw"
+        } else {
+            "audio=false"
+        }
     );
     if tunnel_forward {
         cmd.push_str(" tunnel_forward=true");
@@ -236,14 +264,17 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub struct Mirror {
     pub device_name: String,
     pub video: VideoReader<TcpStream>,
+    /// Raw PCM packets; `None` when audio was not asked for, or the device
+    /// disabled it (video-only fallback).
+    pub audio: Option<VideoReader<TcpStream>>,
     pub session: Session,
 }
 
-/// The server's shell and a handle on the video socket.
+/// The server's shell and handles on the media sockets.
 pub struct Session {
     /// Closing the shell socket ends `app_process` on the device.
     shell: TcpStream,
-    video_ctl: TcpStream,
+    sockets: Vec<TcpStream>,
 }
 
 impl Mirror {
@@ -282,38 +313,66 @@ impl Mirror {
         let ended = Arc::new(AtomicBool::new(false));
         log_shell(shell.try_clone()?, ended.clone());
 
-        let video = match &forward {
+        // The server opens its sockets in order: video, then audio. The
+        // tunnel stays until all are connected.
+        let count = 1 + usize::from(opts.audio);
+        let mut sockets = Vec::with_capacity(count);
+        let mut failed = None;
+        for n in 0..count {
+            let r = match &forward {
+                None => accept(&listener, &ended),
+                // Only the first forward socket carries the dummy byte.
+                Some((port, _)) if n == 0 => connect_forward(*port, &ended),
+                Some((port, _)) => TcpStream::connect(("127.0.0.1", *port)),
+            };
+            match r {
+                Ok(s) => sockets.push(s),
+                Err(e) => {
+                    failed = Some(e);
+                    break;
+                }
+            }
+        }
+        match &forward {
             None => {
-                let r = accept(&listener, &ended);
                 let _ = client.reverse_remove(target, &remote);
-                r
             }
-            Some((port, local)) => {
-                let r = connect_forward(*port, &ended);
+            Some((_, local)) => {
                 let _ = client.forward_remove(target, local);
-                r
             }
+        }
+        if let Some(e) = failed {
+            let _ = shell.shutdown(Shutdown::Both);
+            return Err(e.into());
+        }
+        let mut handles = Vec::with_capacity(count);
+        for s in &sockets {
+            s.set_read_timeout(None)?;
+            s.set_nodelay(true)?;
+            handles.push(s.try_clone()?);
+        }
+        let session = Session {
+            shell,
+            sockets: handles,
         };
-        let mut video = match video {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = shell.shutdown(Shutdown::Both);
-                return Err(e.into());
-            }
-        };
-        video.set_read_timeout(None)?;
-        video.set_nodelay(true)?;
+        let mut it = sockets.into_iter();
+        let mut video = it.next().expect("one socket");
         let device_name = read_device_meta(&mut video)?;
-        let video_ctl = video.try_clone()?;
         let video = VideoReader::new(video)?;
+        let audio = match it.next() {
+            Some(a) => open_audio(a)?,
+            None => None,
+        };
         log::info!(
-            "android: mirroring {device_name:?} codec={}",
-            codec_name(video.codec)
+            "android: mirroring {device_name:?} video={} audio={}",
+            codec_name(video.codec),
+            audio.as_ref().map_or("off", |a| codec_name(a.codec))
         );
         Ok(Self {
             device_name,
             video,
-            session: Session { shell, video_ctl },
+            audio,
+            session,
         })
     }
 
@@ -327,28 +386,59 @@ impl Session {
     pub fn stopper(&self) -> io::Result<Stopper> {
         Ok(Stopper {
             shell: self.shell.try_clone()?,
-            video: self.video_ctl.try_clone()?,
+            sockets: self
+                .sockets
+                .iter()
+                .map(TcpStream::try_clone)
+                .collect::<io::Result<_>>()?,
         })
     }
 }
 
-/// Ends a [`Mirror`] from another thread: the blocked read returns.
+/// Ends a [`Mirror`] from another thread: blocked reads return.
 pub struct Stopper {
     shell: TcpStream,
-    video: TcpStream,
+    sockets: Vec<TcpStream>,
 }
 
 impl Stopper {
     pub fn stop(&self) {
-        let _ = self.video.shutdown(Shutdown::Both);
+        for s in &self.sockets {
+            let _ = s.shutdown(Shutdown::Both);
+        }
         let _ = self.shell.shutdown(Shutdown::Both);
     }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        let _ = self.video_ctl.shutdown(Shutdown::Both);
+        for s in &self.sockets {
+            let _ = s.shutdown(Shutdown::Both);
+        }
         let _ = self.shell.shutdown(Shutdown::Both);
+    }
+}
+
+/// Reads the audio codec id. A device that cannot capture sound (Android 10
+/// or older, or capture refused) disables the stream: mirroring goes on
+/// without sound.
+fn open_audio(s: TcpStream) -> io::Result<Option<VideoReader<TcpStream>>> {
+    // The server writes the id once its capture is set up.
+    s.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let r = VideoReader::new(s)?;
+    match r.codec {
+        CODEC_RAW => {
+            r.r.set_read_timeout(None)?;
+            Ok(Some(r))
+        }
+        STREAM_DISABLED => {
+            log::info!("android: the device disabled audio; video only");
+            Ok(None)
+        }
+        other => {
+            log::warn!("android: audio stream {}; video only", codec_name(other));
+            Ok(None)
+        }
     }
 }
 
@@ -446,6 +536,13 @@ mod tests {
     /// takes the push, the reverse tunnel and the shell command, then
     /// connects back through the "tunnel" and streams `wire`.
     fn fake_device(wire: Vec<u8>) -> (u16, Arc<Mutex<Vec<String>>>) {
+        fake_device_with_audio(wire, None)
+    }
+
+    fn fake_device_with_audio(
+        wire: Vec<u8>,
+        audio: Option<Vec<u8>>,
+    ) -> (u16, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let log = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -455,6 +552,7 @@ mod tests {
             for conn in listener.incoming() {
                 let Ok(mut c) = conn else { break };
                 let (log, tunnel, wire) = (log2.clone(), tunnel.clone(), wire.clone());
+                let audio = audio.clone();
                 std::thread::spawn(move || {
                     let t = String::from_utf8(read_frame(&mut c).unwrap()).unwrap();
                     assert_eq!(t, "host:transport:SER");
@@ -494,6 +592,11 @@ mod tests {
                         c.write_all(b"[server] INFO: Device: [Google] Pixel 9\n")
                             .unwrap();
                         v.write_all(&wire).unwrap();
+                        let _a = svc.contains("audio=true").then(|| {
+                            let mut a = TcpStream::connect(("127.0.0.1", p)).unwrap();
+                            a.write_all(audio.as_deref().unwrap_or(&[])).unwrap();
+                            a
+                        });
                         // Keep the shell open until the client closes it.
                         let mut sink = [0u8; 64];
                         while matches!(c.read(&mut sink), Ok(n) if n > 0) {}
@@ -555,6 +658,63 @@ mod tests {
         );
         assert!(log[3].starts_with("shell:CLASSPATH=/data/local/tmp/scrcpy-server.jar"));
         assert!(log[4].starts_with("reverse:killforward:localabstract:scrcpy_"));
+    }
+
+    fn video_wire() -> Vec<u8> {
+        let mut wire = Vec::new();
+        write_device_meta(&mut wire, "Pixel 9").unwrap();
+        wire.extend_from_slice(&CODEC_H264.to_be_bytes());
+        write_packet(&mut wire, &Packet::Config(vec![0, 0, 0, 1, 0x67])).unwrap();
+        wire
+    }
+
+    fn start_with(audio: Vec<u8>) -> Mirror {
+        let (port, _log) = fake_device_with_audio(video_wire(), Some(audio));
+        let mut client = AdbClient::new(port);
+        client.timeout = Duration::from_secs(2);
+        let opts = VideoOptions {
+            audio: true,
+            ..VideoOptions::default()
+        };
+        Mirror::start(&client, &Target::Serial("SER"), &[1, 2, 3], &opts).unwrap()
+    }
+
+    #[test]
+    fn audio_socket_carries_raw_pcm() {
+        let mut a = CODEC_RAW.to_be_bytes().to_vec();
+        let pcm = Packet::Media {
+            pts: 10_000,
+            key: false,
+            data: vec![1, 0, 2, 0, 3, 0, 4, 0],
+        };
+        write_packet(&mut a, &pcm).unwrap();
+        let mut m = start_with(a);
+        assert!(matches!(m.video.next_packet().unwrap(), Packet::Config(_)));
+        let audio = m.audio.as_mut().expect("audio stream");
+        assert_eq!(audio.codec, CODEC_RAW);
+        assert_eq!(audio.next_packet().unwrap(), pcm);
+        m.stopper().unwrap().stop();
+        assert!(m.audio.as_mut().unwrap().next_packet().is_err());
+    }
+
+    #[test]
+    fn device_without_audio_falls_back_to_video_only() {
+        let m = start_with(STREAM_DISABLED.to_be_bytes().to_vec());
+        assert!(m.audio.is_none());
+        assert_eq!(m.device_name, "Pixel 9");
+        let m = start_with(STREAM_ERROR.to_be_bytes().to_vec());
+        assert!(m.audio.is_none());
+    }
+
+    #[test]
+    fn audio_options_in_the_server_command() {
+        let o = VideoOptions {
+            audio: true,
+            ..VideoOptions::default()
+        };
+        assert!(server_command(1, false, &o).contains(" audio=true audio_codec=raw control=false"));
+        assert_eq!(codec_name(CODEC_OPUS), "opus");
+        assert_eq!(codec_name(0x0072_6177), "raw");
     }
 
     #[test]
@@ -664,6 +824,7 @@ mod tests {
                 bit_rate: 0,
                 max_fps: 0,
                 codec: "h264",
+                audio: false,
             },
         );
         assert!(fwd.ends_with("control=false tunnel_forward=true"), "{fwd}");

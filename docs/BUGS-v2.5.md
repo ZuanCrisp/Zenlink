@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **A3 (Android video mirroring) done; next A4**, see `docs/ROADMAP.md`.
+Current phase: **A4 part 1 (Android sound) done; next A4 part 2 (controls)**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is
@@ -92,7 +92,7 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: `rust/crates/zenlink-app/src/flow.rs` (navigation rules), `prefs.rs` (`platform`, `rememberPlatform`, separate from the backend's `rememberConnectionMode`), `ui/app.slint` (`PlatformSelector`, `PlatformCard`, `AndroidHome`, Back in the Apple chooser, Settings card "Device type"), `main.rs` (wiring; Android poll reads an already running ADB server only, never starts or stops one; video and Apple Start only in the Apple workspace; going back stops a running Apple session).
 - Verification: 10 app tests pass (`flow::tests` 7: fresh install, old config, iPhone path, Android path, Back from both paths, remembered platform, backend needs choice; `prefs::tests` 3: Indonesian + dark defaults, old file keeps language/theme, platform round trip). Screenshots with a stub backend and temporary prefs (no device, ADB port redirected): fresh install Indonesian, English, light theme with a saved selection, remembered Android, remembered Apple (chooser with Back). Unverified: clicking through Continue/Back in the real window, keyboard focus and screen-reader labels, and the Apple path with a real iPhone (needs the user).
 
-### B-14: Android video mirroring over ADB with the scrcpy server (phase A3)            Status: fixed (unverified)
+### B-14: Android video mirroring over ADB with the scrcpy server (phase A3)            Status: fixed (verified)
 - Reported: 2026-11-07, phase A3 gate (ROADMAP: a recorded scrcpy stream plays through `VideoView`, frame pacing stats work, USB mirroring on a device).
 - Cause: n/a (new feature).
 - Fix:
@@ -105,5 +105,25 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Verification:
   - Tests: `zenlink-android` 52 (sync push chunks and FAIL, reverse/forward requests, packet round trip and wire layout against scrcpy's flags, device meta, server command, and an end-to-end `Mirror::start` against a fake adb + device: push 100 KB, reverse, shell, stream, stop closes the shell), `zenlink-core` 10, `zenlink-app` 18 (packet to record, fixture plays and loops paced by PTS, committed fixture is valid, missing fixture, other codecs refused), `zenlink-video` 5, pytest 81.
   - Measured on the developer's PC (Windows 11, stub backend, `ZL_ADB=none`, no device): the fixture played through `VideoView` with hardware decode, decoded 29.6-30.7 fps for a 30 fps stream, 0 frames dropped, presented once per display refresh (~170 Hz), the window fitted itself to the 360x640 portrait picture, and the recording looped (stream end, reopen) without errors.
-  - Unverified: USB mirroring on a real Android device (needs the user), Wi-Fi, the forward-tunnel fallback on a device, rotation (new session + config), and very large keyframes.
+  - User confirmed on 2026-11-07: USB mirroring works on a TECNO POVA 6 (`TECNO LI7`, Android 15). Log: `scrcpy: [server] INFO: Device: [TECNO] TECNO TECNO LI7 (Android 15)`, `android: mirroring "TECNO LI7" codec=h264`, `decoder H264 hardware=true`.
+  - Still unverified: Wi-Fi, the forward-tunnel fallback on a device, rotation (new session + config), and very large keyframes.
 
+
+### B-15: No feedback when an Android phone is plugged in without USB debugging            Status: open
+- Reported: 2026-11-07 by the user: "udah kusambungin ni ga terjadi apa apa" (TECNO POVA 6 on USB, Start ZenLink.bat, Android screen).
+- Cause: proven on the user's PC: ZenLink started the ADB server (log: `android: starting the ADB server with E:\AndroidDev\sdk\platform-tools\adb.exe`), and `adb devices -l` lists no device. Windows shows the phone only as an MTP device (`USB\VID_0E8D&PID_2008`, class WPD); no ADB interface is exposed, so USB debugging is off (or the phone was not replugged after turning it on). The Android screen only says "No Android device yet", which does not tell the user the phone was seen.
+- Fix: planned: on Windows, detect a plugged-in phone that has no ADB interface and say so ("phone seen, turn on USB debugging"), behind the platform layer.
+- Verification: unverified.
+
+### B-16: Android sound (phase A4, part 1)            Status: fixed (unverified)
+- Reported: 2026-11-07, phase A4 gate ("audio socket into the shared audio engine, video-only fallback"; device check: sound on Android 11+). The user asked for sound before controls.
+- Cause: n/a (new feature). The v2.2.31 sound engine (`NativeAudio`) is Python; Android code must be Rust (AGENTS.md section 6).
+- Fix:
+  - New crate `zenlink-audio`: `buffer.rs` is a line-by-line port of the v2.2.31 `NativeAudio` jitter buffer (start after one packet + margin, +5 ms per underrun capped at 50 ms, -1 ms after 30 s calm, 10 ms minimum, drop beyond twice the target, output block size counts); `wasapi.rs` is a WASAPI shared-mode, event-driven output on its own COM thread (48 kHz stereo s16 with AUTOCONVERTPCM, reopens when the device changes). No new third-party crate (cpal not needed; AGENTS.md section 3e latency rule).
+  - `zenlink-android` `mirror.rs`: optional audio socket (`audio=true audio_codec=raw`: PCM s16le 48 kHz stereo, no decoder on the PC); codec id 0 (disabled) or 1 (error) means video only; the tunnel stays until all sockets are connected; `Stopper` closes every socket.
+  - `zenlink-app`: `android.rs` `play_audio` thread; sound only on Android 11+ (`audio_supported`) and when Settings › Audio is "On this PC" ("Device only" keeps the sound on the phone; it applies at the next Start); volume and mute follow the window at once; the stats line shows the sound latency.
+  - Low-latency mode only (sound as it arrives, picture as it decodes), as on the Apple cable path. A/V sync modes are still to do.
+- Verification:
+  - Tests: `zenlink-audio` 6 buffer tests (start rule, underrun growth and calm shrink, cap and floor, drop beyond twice the target, Bluetooth-size blocks, jitter floor); `zenlink-android` 55 (raw audio socket end to end, device without audio falls back to video only, server command); all workspace tests, fmt, clippy (no new warnings).
+  - Measured on the developer's PC, default output, silence (muted): WASAPI output latency 23.4 ms (v2.2.31 measured ~22-23 ms), 0 underruns in 2 s; socket to output with 10 ms packets in real time: 53 ms total (queue + output).
+  - Unverified: sound from a real phone (TECNO POVA 6, Android 15) on USB, Bluetooth headsets, Android 10 (video-only fallback) on a device.

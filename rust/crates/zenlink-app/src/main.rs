@@ -241,6 +241,7 @@ fn apply_look(ui: &AppWindow) {
 fn push_audio(api: &Api, p: &Prefs, muted: bool) {
     let api = api.clone();
     let body = json!({ "enabled": p.audio_out.as_str() == "pc", "volume": p.volume / 100.0, "muted": muted });
+    android::set_audio(p.audio_out.as_str() == "pc", p.volume / 100.0, muted);
     std::thread::spawn(move || api.audio(&body));
 }
 
@@ -951,15 +952,6 @@ fn pick_icon_font(has_fluent: bool) -> &'static str {
     }
 }
 
-#[cfg(test)]
-mod icon_tests {
-    #[test]
-    fn windows_10_falls_back_to_mdl2() {
-        assert_eq!(super::pick_icon_font(false), "Segoe MDL2 Assets");
-        assert_eq!(super::pick_icon_font(true), "Segoe Fluent Icons");
-    }
-}
-
 /// Mirrors the startup navigation into the window.
 fn apply_flow(ui: &AppWindow, f: &flow::Flow) {
     ui.set_screen(f.screen.as_str().into());
@@ -1289,6 +1281,7 @@ fn android_start(ui: &AppWindow, index: i32) {
                 d.name.display.clone(),
                 server,
                 shared.clone(),
+                d.audio_supported,
             )),
             link.to_string(),
         )
@@ -1599,6 +1592,11 @@ fn main() -> Result<(), slint::PlatformError> {
     // once unless a remembered mode exists (the backend can take a while).
     {
         let p = ui.get_prefs();
+        android::set_audio(
+            p.audio_out.as_str() == "pc",
+            p.volume / 100.0,
+            ui.get_muted(),
+        );
         let f = flow::Flow::launch(&p.platform, p.remember_platform, mode_remembered());
         apply_flow(&ui, &f);
         APP.with_borrow_mut(|a| a.flow = Some(f));
@@ -2247,7 +2245,15 @@ fn main() -> Result<(), slint::PlatformError> {
                         log::info!("stats decoded={:.1} presented={:.1} dropped_total={}", s.decoded_fps, s.presented_fps, s.replaced);
                     }
                     if streaming && s.width > 0 {
-                        ui.set_stats_line(format!("{}×{}  ·  {:.0} fps  ·  {:.1} Mbps  ·  decode {:.1} ms", s.width, s.height, s.presented_fps.min(s.decoded_fps), s.mbps, s.decode_ms).into());
+                        // Android: sound latency (queue + output) next to the video numbers.
+                        let sound = a
+                            .android
+                            .as_ref()
+                            .filter(|_| on_android)
+                            .and_then(|sh| sh.audio_ms())
+                            .map(|ms| format!("  ·  {} {ms} ms", tr_ui_static(&ui, "suara", "sound")))
+                            .unwrap_or_default();
+                        ui.set_stats_line(format!("{}×{}  ·  {:.0} fps  ·  {:.1} Mbps  ·  decode {:.1} ms{sound}", s.width, s.height, s.presented_fps.min(s.decoded_fps), s.mbps, s.decode_ms).into());
                         ui.set_stats_full(
                             format!(
                                 "Resolusi      {}×{}\nDecode        {:.1} fps ({})\nTampil        {:.1} fps\nTerlewat      {}\nDecode frame  {:.1} ms\nBitrate       {:.1} Mbps",
@@ -2297,4 +2303,13 @@ fn main() -> Result<(), slint::PlatformError> {
         m.lock().unwrap().take();
     }
     r
+}
+
+#[cfg(test)]
+mod icon_tests {
+    #[test]
+    fn windows_10_falls_back_to_mdl2() {
+        assert_eq!(super::pick_icon_font(false), "Segoe MDL2 Assets");
+        assert_eq!(super::pick_icon_font(true), "Segoe Fluent Icons");
+    }
 }
