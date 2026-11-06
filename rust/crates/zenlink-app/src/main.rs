@@ -67,6 +67,9 @@ struct App {
     // Stage width (logical) to keep while the settings panel slides.
     hold_stage: Option<f32>,
     dots_at: Option<Instant>,
+    /// A mode choice was just sent: keep the chooser closed until the
+    /// backend's state catches up.
+    mode_sent: Option<Instant>,
 }
 
 thread_local! {
@@ -149,6 +152,10 @@ fn str_of<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
     cur.as_str()
 }
 
+fn tr_ui(ui: &AppWindow, id: &str, en: &str) -> String {
+    if ui.global::<I18n>().get_id() { id.into() } else { en.into() }
+}
+
 /// Backend state -> UI. Runs on the UI thread.
 fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     let tr = |id: &str, en: &str| -> String { if ui.global::<I18n>().get_id() { id.into() } else { en.into() } };
@@ -175,6 +182,21 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
         _ => tr("Belum dipilih", "Not chosen yet"),
     };
     ui.set_connection(conn.into());
+    // Connection mode chooser: nothing connects until a mode is chosen.
+    let c = st.get("connection");
+    let needs = c.and_then(|c| c.get("needsChoice")).and_then(Value::as_bool).unwrap_or(false);
+    ui.set_mode_active(str_of(st, &["connection", "active"]).unwrap_or("").into());
+    ui.set_mode_link(str_of(st, &["connection", "link"]).unwrap_or("wired").into());
+    ui.set_mode_remember(c.and_then(|c| c.get("remember")).and_then(Value::as_bool).unwrap_or(true) || needs);
+    let just_sent = APP.with_borrow(|a| a.mode_sent.map(|t| t.elapsed() < Duration::from_secs(3)).unwrap_or(false));
+    if needs && !just_sent && !ui.get_chooser_open() {
+        ui.set_chooser_cancelable(false);
+        ui.set_chooser_open(true);
+    }
+    if let Some(p) = str_of(st, &["connection", "pending"]) {
+        let name = if p == "apple" { "Apple Driver" } else { "ZenLink Studio" };
+        ui.set_connection(format!("{} · {}", ui.get_connection(), tr(&format!("{name} aktif setelah restart app"), &format!("{name} after an app restart"))).into());
+    }
     let service = st.get("service").and_then(Value::as_bool).unwrap_or(true);
     let native_audio = st.get("nativeAudio").and_then(Value::as_bool).unwrap_or(false);
     ui.set_driver_text(
@@ -444,7 +466,45 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let api = api.clone();
+        let weak = ui.as_weak();
+        ui.on_choose_mode(move |mode, link, remember| {
+            APP.with_borrow_mut(|a| a.mode_sent = Some(Instant::now()));
+            let (api, w) = (api.clone(), weak.clone());
+            let (mode, link) = (mode.to_string(), link.to_string());
+            std::thread::spawn(move || {
+                let cur = api.get("/api/connection");
+                let ok_link = cur.as_ref().and_then(|c| c.get("link")).and_then(Value::as_str) == Some(link.as_str())
+                    || api.post("/api/connection", &json!({ "link": link })).is_some();
+                let r = api.post("/api/connection", &json!({ "mode": mode, "remember": remember }));
+                let failed = !ok_link || r.as_ref().map(|v| v.get("error").is_some()).unwrap_or(true);
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = w.upgrade() else { return };
+                    if failed {
+                        APP.with_borrow_mut(|a| a.mode_sent = None);
+                        ui.set_toast(tr_ui(&ui, "Mode belum tersimpan, coba lagi.", "The mode was not saved, try again.").into());
+                        ui.set_chooser_open(true);
+                        let w = ui.as_weak();
+                        slint::Timer::single_shot(Duration::from_secs(3), move || {
+                            if let Some(ui) = w.upgrade() {
+                                ui.set_toast("".into());
+                            }
+                        });
+                    }
+                });
+            });
+        });
+    }
+    {
+        let api = api.clone();
+        let weak = ui.as_weak();
         ui.on_driver_action(move |a| {
+            if a.as_str() == "mode" {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_chooser_cancelable(true);
+                    ui.set_chooser_open(true);
+                }
+                return;
+            }
             let api = api.clone();
             let a = a.to_string();
             std::thread::spawn(move || match a.as_str() {

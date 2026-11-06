@@ -15,7 +15,7 @@ pub fn defaults() -> Prefs {
     Prefs {
         theme: "dark".into(),
         glass_on: true,
-        glass: 0.0,
+        glass: 30.0,
         lens: true,
         lang: "id".into(),
         fit: "contain".into(),

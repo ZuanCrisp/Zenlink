@@ -37,12 +37,27 @@ def main():
     ap.add_argument("--video2", help="switch to this file every --rotate-after seconds (orientation change)")
     ap.add_argument("--port", type=int, default=47399)
     ap.add_argument("--rotate-after", type=float, default=0)
+    ap.add_argument("--needs-choice", action="store_true", help="start with no connection mode (chooser shows)")
     a = ap.parse_args()
     clips = [load(a.video)] + ([load(a.video2)] if a.video2 else [])
     state = {"phase": "idle", "detail": "", "device": {"name": "iPhone (fake)"}, "error": None, "rotation": 0,
              "devices": [{"id": "fake", "name": "iPhone (fake)", "wifi": False}], "service": True,
-             "connection": {"active": "apple"}, "capture": {"backend": "apple"}, "nativeAudio": False}
+             "connection": {"active": "apple", "link": "wired", "remember": True, "needsChoice": False}, "capture": {"backend": "apple"}, "nativeAudio": False}
     log = {"touch": 0, "button": []}
+    if a.needs_choice:
+        state["connection"].update(active=None, needsChoice=True)
+
+    async def conn_get(_):
+        return web.json_response(state["connection"])
+
+    async def conn_set(request):
+        body = await request.json()
+        c = state["connection"]
+        if "link" in body and "mode" not in body:
+            c["link"] = body["link"]
+        else:
+            c.update(active=body.get("mode"), remember=bool(body.get("remember")), needsChoice=False)
+        return web.json_response(c)
 
     async def get_state(_):
         return web.json_response(state)
@@ -105,7 +120,7 @@ def main():
         web.get("/cast/codec", codec), web.get("/cast/stream.bin", stream), web.post("/cast/touch", touch),
         web.post("/cast/button", button), web.post("/cast/pli", ok), web.post("/api/audio", ok),
         web.post("/api/keyboard/action", ok), web.get("/api/drivers", ok), web.post("/api/wifi/prepare", ok),
-        web.get("/debug", debug),
+        web.get("/debug", debug), web.get("/api/connection", conn_get), web.post("/api/connection", conn_set),
     ])
     web.run_app(app, host="127.0.0.1", port=a.port, print=lambda *_: print(f"fake backend on {a.port}", flush=True))
 

@@ -26,11 +26,17 @@ export global Theme {
     out property <color> edge: dark ? #ffffff24 : #ffffffcc;
     // Liquid Glass rim: specular edge from the top-left light, catching
     // light again bottom-right where the bezel bends it back.
+    // Liquid Glass rim: a hairline that is bright where light hits (top,
+    // then a weaker bounce at the bottom) and nearly gone on the sides.
     out property <brush> rim: glass <= 0.01 ? (dark ? #ffffff1a : #0000001a)
-        : dark ? @linear-gradient(135deg, #ffffff73 0%, #ffffff14 38%, #ffffff08 62%, #ffffff40 100%)
-        : @linear-gradient(135deg, #ffffffff 0%, #ffffff8c 35%, #ffffff40 62%, #ffffffe6 100%);
+        : dark ? @linear-gradient(180deg, #ffffff4d 0%, #ffffff14 22%, #ffffff08 70%, #ffffff1f 100%)
+        : @linear-gradient(180deg, #ffffffff 0%, #ffffffb3 25%, #ffffff80 70%, #ffffffd9 100%);
+    // Glass on glass (cards in a sheet) and clear-glass controls.
+    out property <color> card: dark ? #2c2c2e.mix(#ffffff0d, 1 - glass) : #ffffff.mix(#ffffff59, 1 - glass);
+    out property <color> fill: dark ? #3a3a3c.mix(#ffffff1a, 1 - glass) : #ffffff.mix(#ffffff8c, 1 - glass);
+    out property <color> fill-hover: dark ? #48484a.mix(#ffffff2b, 1 - glass) : #ffffff.mix(#ffffffcc, 1 - glass);
     out property <color> line: dark ? #ffffff1a : #0000001a;
-    out property <color> shadow: dark ? #00000073 : #0000001f;
+    out property <color> shadow: dark ? #00000059 : #0000001a;
     out property <color> ok: #2fc26b;
     out property <color> warn: #f2a53a;
     out property <color> bad: #ef5466;

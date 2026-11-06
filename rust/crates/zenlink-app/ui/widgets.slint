@@ -12,33 +12,33 @@ export global Tip {
 
 export component Glass inherits Rectangle {
     in property <bool> strong: false;
+    // Glass resting on other glass (cards in a sheet): no shadow of its own.
+    in property <bool> nested: false;
     background: strong ? Theme.raise : Theme.panel;
     border-radius: 18px;
-    border-width: 1px;
+    border-width: Theme.glass > 0.01 ? 0.75px : 1px;
     border-color: Theme.glass > 0.01 ? Theme.rim : Theme.edge;
-    drop-shadow-blur: Theme.glass > 0 ? 24px : 10px;
-    drop-shadow-offset-y: 8px;
-    drop-shadow-color: Theme.shadow;
-    // Specular highlight along the top edge.
+    drop-shadow-blur: nested ? 0px : Theme.glass > 0 ? 30px : 10px;
+    drop-shadow-offset-y: nested ? 0px : 10px;
+    drop-shadow-color: nested ? transparent : Theme.shadow;
+    // Specular: light catches the top edge, brightest in the middle.
     Rectangle {
-        y: 1px;
-        height: min(parent.height * 0.45, 40px);
-        x: 1px;
-        width: parent.width - 2px;
-        border-top-left-radius: parent.border-radius - 1px;
-        border-top-right-radius: parent.border-radius - 1px;
-        background: @linear-gradient(180deg, Theme.dark ? #ffffff17 : #ffffff8c 0%, #ffffff00 100%);
+        y: 0.75px;
+        x: parent.border-radius * 0.6;
+        width: parent.width - parent.border-radius * 1.2;
+        height: 1px;
+        background: @linear-gradient(90deg, #ffffff00 0%, Theme.dark ? #ffffff59 : #ffffffff 50%, #ffffff00 100%);
         opacity: Theme.glass;
     }
-    // Lens refraction: a soft bright band along the bottom inner edge.
+    // Soft inner sheen under the top edge (very faint).
     Rectangle {
+        y: 1px;
         x: 1px;
         width: parent.width - 2px;
-        height: min(parent.height * 0.3, 24px);
-        y: parent.height - self.height - 1px;
-        border-bottom-left-radius: parent.border-radius - 1px;
-        border-bottom-right-radius: parent.border-radius - 1px;
-        background: @linear-gradient(0deg, Theme.dark ? #ffffff0f : #ffffff66 0%, #ffffff00 100%);
+        height: min(parent.height * 0.35, 28px);
+        border-top-left-radius: max(0px, parent.border-radius - 1px);
+        border-top-right-radius: max(0px, parent.border-radius - 1px);
+        background: @linear-gradient(180deg, Theme.dark ? #ffffff0d : #ffffff59 0%, #ffffff00 100%);
         opacity: Theme.glass;
     }
     @children
@@ -63,11 +63,11 @@ export component GlassButton inherits Rectangle {
     min-height: 32px;
     // Icon-only: square-ish 34x32.
     min-width: label == "" ? 34px : 0px;
-    border-radius: 10px;
+    border-radius: self.height / 2;
     background: primary ? (ta.has-hover ? Theme.btn-hover : Theme.btn)
         : active ? Theme.accent-soft
-        : ta.has-hover ? Theme.hover : Theme.raise;
-    border-width: 1px;
+        : ta.has-hover ? Theme.fill-hover : Theme.fill;
+    border-width: 0.75px;
     border-color: primary ? (Theme.glass > 0.01 ? @linear-gradient(135deg, #ffffff99 0%, #ffffff00 50%, #ffffff4d 100%) : transparent)
         : Theme.glass > 0.01 ? Theme.rim : Theme.line;
     drop-shadow-blur: primary ? 12px : 0px;
@@ -145,10 +145,8 @@ export component Seg inherits Rectangle {
     in-out property <string> value;
     callback changed(string);
     height: 30px;
-    border-radius: 10px;
-    background: Theme.dark ? #ffffff0d : #20212a0d;
-    border-width: 1px;
-    border-color: Theme.line;
+    border-radius: self.height / 2;
+    background: Theme.dark ? #7676803d : #7676801f;
     property <int> n: max(1, options.length);
     property <int> sel: value == options[0] ? 0 : value == options[1] ? 1 : value == options[2] ? 2 : value == options[3] ? 3 : value == options[4] ? 4 : value == options[5] ? 5 : -1;
     property <length> cell: (self.width - 4px - (n - 1) * 2px) / n;
@@ -158,11 +156,11 @@ export component Seg inherits Rectangle {
         y: 2px;
         width: root.cell;
         height: root.height - 4px;
-        border-radius: 8px;
-        background: Theme.raise;
-        border-width: 1px;
-        border-color: Theme.edge;
-        drop-shadow-blur: 4px;
+        border-radius: self.height / 2;
+        background: Theme.dark ? #ffffff2e : #ffffff;
+        border-width: 0.75px;
+        border-color: Theme.rim;
+        drop-shadow-blur: 6px;
         drop-shadow-color: Theme.shadow;
         visible: root.sel >= 0;
         animate x { duration: 360ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
@@ -172,7 +170,7 @@ export component Seg inherits Rectangle {
         y: 2px;
         width: root.cell;
         height: root.height - 4px;
-        border-radius: 8px;
+        border-radius: self.height / 2;
         background: root.value != opt && ta.has-hover ? (Theme.dark ? #ffffff0a : #ffffff80) : transparent;
         animate background { duration: 150ms; }
         Text {
@@ -296,10 +294,12 @@ export component Card inherits Glass {
     in property <color> tint-b: #db2777;
     property <bool> open: false;
     strong: false;
-    border-radius: 18px;
+    nested: true;
+    background: Theme.card;
+    border-radius: 22px;
     VerticalLayout {
-        padding: 12px;
-        padding-top: 11px;
+        padding: 14px;
+        padding-top: 12px;
         spacing: 10px;
         HorizontalLayout {
             spacing: 9px;

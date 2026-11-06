@@ -314,6 +314,220 @@ component Placeholder inherits Rectangle {
     }
 }
 
+// One connection mode in the chooser: a selectable glass card.
+component ModeCard inherits Rectangle {
+    in property <string> icon;
+    in property <string> title;
+    in property <string> tag;
+    in property <string> badge;
+    in property <string> desc;
+    in property <[{ ok: bool, text: string }]> points;
+    in property <bool> selected;
+    in property <color> tint;
+    callback pick();
+    border-radius: 16px;
+    background: selected ? tint.with-alpha(Theme.dark ? 0.14 : 0.10) : ta.has-hover ? Theme.hover.with-alpha(Theme.dark ? 0.10 : 0.5) : (Theme.dark ? #ffffff08 : #ffffff73);
+    border-width: selected ? 1.5px : 1px;
+    border-color: selected ? tint : Theme.line;
+    animate background, border-color { duration: 220ms; easing: ease-out; }
+    transform-scale-x: ta.pressed ? 98.5% : 100%;
+    transform-scale-y: ta.pressed ? 98.5% : 100%;
+    animate transform-scale-x, transform-scale-y { duration: ta.pressed ? 120ms : 320ms; easing: cubic-bezier(0.34, 1.45, 0.64, 1); }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.pick(); } }
+    VerticalLayout {
+        padding: 14px;
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                border-radius: 10px;
+                background: @linear-gradient(135deg, root.tint 0%, root.tint.darker(0.35) 100%);
+                Icon { text: root.icon; color: white; font-size: 15px; }
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                Text { text: root.title; font-size: 14px; font-weight: 700; color: Theme.text; }
+                Text { text: root.tag; font-size: 11px; color: Theme.text-2; }
+            }
+            if root.badge != "": VerticalLayout {
+                alignment: start;
+                Rectangle {
+                    height: 20px;
+                    width: badgeT.preferred-width + 14px;
+                    border-radius: 10px;
+                    background: root.tint.with-alpha(0.18);
+                    badgeT := Text { text: root.badge; font-size: 10.5px; font-weight: 700; color: root.tint; }
+                }
+            }
+            // Radio dot.
+            VerticalLayout {
+                alignment: start;
+                Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 10px;
+                    border-width: root.selected ? 0px : 1.5px;
+                    border-color: Theme.text-3;
+                    background: root.selected ? root.tint : transparent;
+                    animate background { duration: 200ms; }
+                    Rectangle {
+                        width: root.selected ? 8px : 0px;
+                        height: self.width;
+                        border-radius: self.width / 2;
+                        background: white;
+                        animate width { duration: 300ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+                    }
+                }
+            }
+        }
+        Text { text: root.desc; font-size: 12px; color: Theme.text-2; wrap: word-wrap; }
+        for p in root.points: HorizontalLayout {
+            spacing: 7px;
+            Icon {
+                text: p.ok ? "\u{E73E}" : "\u{E711}";
+                font-size: 10px;
+                width: 14px;
+                vertical-alignment: top;
+                color: p.ok ? Theme.ok : Theme.text-3;
+            }
+            Text { text: p.text; font-size: 11.5px; color: p.ok ? Theme.text : Theme.text-2; wrap: word-wrap; horizontal-stretch: 1; }
+        }
+    }
+}
+
+// First-run (or "change mode") sheet: nothing connects and no driver
+// changes until a mode is chosen here.
+component ModeChooser inherits Rectangle {
+    in property <bool> cancelable;
+    in property <string> active;     // mode in use now ("" = none yet)
+    in property <string> link: "wired";
+    in property <bool> remember: true;
+    in-out property <Prefs> prefs;
+    callback prefs-changed(Prefs);
+    callback choose(string, string, bool);
+    callback cancel();
+    property <string> pick: active;
+    property <string> link-pick: link;
+    property <bool> keep: remember;
+    property <float> t: 0;
+    init => { self.t = 1; }
+    animate t { duration: 380ms; easing: cubic-bezier(0.05, 0.7, 0.1, 1); }
+    background: #000000.with-alpha(0.5 * t);
+    TouchArea { } // swallow clicks behind the sheet
+    sheet := Glass {
+        strong: true;
+        // A modal sheet stays readable at any glass thickness.
+        background: Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
+        border-radius: 22px;
+        width: min(parent.width - 24px, 560px);
+        height: min(parent.height - 24px, col.preferred-height + 2px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + 24px * (1 - root.t);
+        opacity: root.t;
+        transform-scale-x: 0.96 + 0.04 * root.t;
+        transform-scale-y: 0.96 + 0.04 * root.t;
+        ScrollView {
+            col := VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Image { source: @image-url("../../../../ui/logo-256.png"); width: 40px; height: 40px; }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text { text: I18n.t("ZenLink mau tersambung lewat apa?", "How should ZenLink connect?"); font-size: 16px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
+                        Text { text: I18n.t("Belum ada yang tersambung dan driver tidak diubah sampai kamu lanjut.", "Nothing connects and no driver changes until you continue."); font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                    }
+                    if root.cancelable: VerticalLayout { alignment: start; GlassButton { icon: "\u{E711}"; tip: I18n.t("Batal", "Cancel"); clicked => { root.cancel(); } } }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
+                    Seg {
+                        width: 190px;
+                        options: ["id", "en"];
+                        labels: ["Indonesia", "English"];
+                        value: root.prefs.lang;
+                        changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
+                    }
+                }
+                ModeCard {
+                    icon: "\u{E83D}";
+                    tint: #22c55e;
+                    title: "Apple Driver";
+                    tag: I18n.t("Standar · kontrol penuh", "Standard · full control");
+                    badge: I18n.t("Disarankan", "Recommended");
+                    desc: I18n.t("Pakai driver bawaan Apple. Paling kompatibel, stabil dan gampang.", "Uses Apple's own driver. Most compatible, stable and easy.");
+                    points: [
+                        { ok: true, text: I18n.t("HEVC, dibatasi perangkat sekitar 4–6 Mbps", "HEVC, device-limited to about 4–6 Mbps") },
+                        { ok: true, text: I18n.t("Sentuh pakai mouse, keyboard, gestur dan tombol", "Mouse touch, keyboard, gestures and buttons") },
+                        { ok: true, text: I18n.t("Driver Apple sendiri, tidak perlu pasang apa-apa", "Apple's own driver, nothing to install") },
+                        { ok: true, text: I18n.t("Kabel atau Wi-Fi (setelah setup sekali pakai kabel)", "Cable or Wi-Fi (after a one-time setup with the cable)") },
+                        { ok: true, text: I18n.t("iOS 17–26: Hybrid Control (eksperimental)", "iOS 17–26: Hybrid Control (experimental)") },
+                        { ok: false, text: I18n.t("iOS 16 ke bawah: pakai ZenLink Studio", "iOS 16 or older: use ZenLink Studio") },
+                    ];
+                    selected: root.pick == "apple";
+                    pick => { root.pick = "apple"; }
+                }
+                ModeCard {
+                    icon: "\u{E945}";
+                    tint: #ff5fa8;
+                    title: "ZenLink Studio";
+                    tag: I18n.t("Untuk live streaming", "For live streaming");
+                    desc: I18n.t("Kualitas terbaik untuk streaming: bitrate tinggi (terukur 12–30 Mbps), sampai ~56 fps, latensi sangat rendah. Butuh driver libusb0.", "Best quality for streaming: high bitrate (measured 12–30 Mbps), up to ~56 fps, very low latency. Needs the libusb0 driver.");
+                    points: [
+                        { ok: true, text: I18n.t("Resolusi native penuh lewat kabel, H.264 bitrate tinggi", "Full native resolution over the cable, high-bitrate H.264") },
+                        { ok: true, text: I18n.t("Kabel (USB) atau Wi-Fi (AirPlay, tanpa driver)", "Cable (USB) or Wi-Fi (AirPlay, no driver)") },
+                        { ok: false, text: I18n.t("Gambar dan suara saja: tanpa sentuh, keyboard, gestur", "Picture and sound only: no touch, keyboard or gestures") },
+                        { ok: false, text: I18n.t("Aplikasi Apple tidak melihat perangkat sampai balik ke Apple Driver", "Apple apps can't see the device until you switch back") },
+                    ];
+                    selected: root.pick == "usbdirect";
+                    pick => { root.pick = "usbdirect"; }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: I18n.t("Sambungan", "Connection"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Seg {
+                        width: 240px;
+                        options: ["wired", "wireless"];
+                        labels: [I18n.t("Kabel", "Cable"), "Wi-Fi"];
+                        value: root.link-pick;
+                        changed(v) => { root.link-pick = v; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: I18n.t("Ingat pilihan ini", "Remember my choice"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Toggle { checked: root.keep; toggled(v) => { root.keep = v; } }
+                }
+                Text {
+                    text: I18n.t("Bisa diganti kapan saja di Pengaturan › Koneksi & driver. Ganti mode bisa perlu restart app dan colok ulang kabel.",
+                        "You can change it any time in Settings › Connection & driver. Changing it may need an app restart and reconnecting the cable.");
+                    font-size: 11px;
+                    color: Theme.text-3;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    if root.cancelable: GlassButton { label: I18n.t("Batal", "Cancel"); clicked => { root.cancel(); } }
+                    GlassButton {
+                        primary: true;
+                        enabled: root.pick != "";
+                        icon: "\u{E72A}";
+                        label: I18n.t("Lanjut", "Continue");
+                        clicked => { root.choose(root.pick, root.link-pick, root.keep); }
+                    }
+                }
+            }
+        }
+    }
+}
+
 component SettingsPanel inherits Glass {
     in-out property <Prefs> prefs;
     in property <string> driver-text;
@@ -467,6 +681,7 @@ component SettingsPanel inherits Glass {
                     Text { text: driver-text; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
                     HorizontalLayout {
                         spacing: 6px;
+                        GlassButton { label: I18n.t("Ganti mode", "Change mode"); tip: I18n.t("Pilih Apple Driver atau ZenLink Studio", "Choose Apple Driver or ZenLink Studio"); clicked => { root.driver-action("mode"); } }
                         GlassButton { label: I18n.t("Periksa driver", "Check drivers"); clicked => { root.driver-action("refresh"); } }
                         GlassButton { label: I18n.t("Atur Wi-Fi", "Set up Wi-Fi"); clicked => { root.driver-action("wifi"); } }
                     }
@@ -563,6 +778,13 @@ export component AppWindow inherits Window {
     in property <string> connection;
     in property <bool> muted;
     in property <string> toast;
+    // Connection mode chooser (shown until a mode is chosen).
+    in-out property <bool> chooser-open: false;
+    in property <bool> chooser-cancelable: false;
+    in property <string> mode-active;
+    in property <string> mode-link: "wired";
+    in property <bool> mode-remember: true;
+    callback choose-mode(string, string, bool);
     // Animated dot field (rendered in Rust) and the cursor over the stage.
     in property <image> dots-image;
     out property <bool> stage-hover: stage-ta.has-hover;
@@ -705,6 +927,19 @@ export component AppWindow inherits Window {
                     root.window-action("resize-" + e.id);
                 }
             }
+        }
+        if root.chooser-open: ModeChooser {
+            width: parent.width;
+            height: parent.height;
+            border-radius: 12px;
+            cancelable: root.chooser-cancelable;
+            active: root.mode-active;
+            link: root.mode-link;
+            remember: root.mode-remember;
+            prefs: root.prefs;
+            prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
+            choose(m, l, r) => { root.chooser-open = false; root.choose-mode(m, l, r); }
+            cancel => { root.chooser-open = false; }
         }
         // Hover tooltip: below the control, or above it near the bottom.
         tip := Rectangle {
