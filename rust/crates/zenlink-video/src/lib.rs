@@ -11,6 +11,7 @@
 
 mod d3d;
 mod decoder;
+pub mod glass;
 mod stats;
 mod view;
 

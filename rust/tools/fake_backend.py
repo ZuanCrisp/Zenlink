@@ -26,8 +26,11 @@ def load(path):
     fps = float(s.average_rate or 60)
     packets = [(bytes(p), bool(p.is_keyframe)) for p in c.demux(s) if p.size]
     c.close()
-    profile, compat, level = extradata[1], extradata[2], extradata[3]
-    codec = f"avc1.{profile:02x}{compat:02x}{level:02x}"
+    if s.codec_context.name == "hevc":
+        codec = "hvc1.1.6.L153.B0"  # hvcC extradata, like Apple mode
+    else:
+        profile, compat, level = extradata[1], extradata[2], extradata[3]
+        codec = f"avc1.{profile:02x}{compat:02x}{level:02x}"
     return {"codec": codec, "description": base64.b64encode(extradata).decode(), "keyframesOnRequest": True}, packets, fps
 
 

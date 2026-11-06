@@ -98,6 +98,7 @@ component TopBar inherits Rectangle {
     in property <string> fit;
     in property <bool> compact;
     in property <bool> maximized;
+    in property <bool> fullscreen;
     property <bool> live: phase == "streaming";
     property <bool> busy: phase == "connecting" || phase == "activating";
     height: 46px;
@@ -216,6 +217,13 @@ component TopBar inherits Rectangle {
             tip: I18n.t("Mode tampilan: Auto-Fit / Tepi-ke-tepi / Regang", "View mode: Auto-fit / Edge to edge / Stretch");
             active: true;
             clicked => { root.fit-next(); }
+        }
+        GlassButton {
+            y: (parent.height - self.height) / 2;
+            icon: root.fullscreen ? "\u{E73F}" : "\u{E740}";
+            active: root.fullscreen;
+            tip: root.fullscreen ? I18n.t("Keluar layar penuh", "Exit full screen") : I18n.t("Layar penuh", "Full screen");
+            clicked => { root.window-action("fullscreen"); }
         }
         GlassButton {
             y: (parent.height - self.height) / 2;
@@ -767,7 +775,7 @@ export component AppWindow inherits Window {
     default-font-family: "Segoe UI Variable Text";
 
     in-out property <Prefs> prefs;
-    in-out property <bool> settings-open: false;
+    in-out property <bool> settings-open: true; // Settings start open (docked at the side)
     in property <string> phase: "idle";
     in property <string> device;
     in property <string> link;
@@ -820,6 +828,7 @@ export component AppWindow inherits Window {
     // from layout, so the layout cannot feed back into it.
     in property <bool> compact: false;
     in property <bool> maximized: false;
+    in property <bool> fullscreen: false;
     // Picture column too narrow for labelled shortcuts.
     in property <bool> compact-bar: false;
     Rectangle {
@@ -832,6 +841,7 @@ export component AppWindow inherits Window {
             TopBar {
                 compact: root.compact;
                 maximized: root.maximized;
+                fullscreen: root.fullscreen;
                 device: root.device;
                 phase: root.phase;
                 link: root.link;

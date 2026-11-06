@@ -74,6 +74,8 @@ struct App {
     mode_pending: bool,
     /// Result of the last "Check drivers", shown under the service line.
     drivers_text: Option<String>,
+    /// Device overlay ZenLink opened last ("control-center" / "notifications").
+    panel: Option<&'static str>,
 }
 
 thread_local! {
@@ -525,6 +527,44 @@ fn main() -> Result<(), slint::PlatformError> {
         let input = input.clone();
         ui.on_action(move |a| {
             let Some(ui) = weak.upgrade() else { return };
+            // Control Center / Notification Center: press again to close,
+            // press the other one to switch (close first, then open).
+            if let Some(name) = match a.as_str() {
+                "control-center" => Some("control-center"),
+                "notifications" => Some("notifications"),
+                _ => None,
+            } {
+                let open = |input: &Input, n: &str| {
+                    if n == "control-center" {
+                        input.send(Cmd::Stroke(0.92, 0.0, 0.92, 0.62, 12, 16));
+                    } else {
+                        input.send(Cmd::Stroke(0.22, 0.0, 0.22, 0.62, 12, 16));
+                    }
+                };
+                // Swipe up from the bottom closes either overlay.
+                let close = |input: &Input| input.send(Cmd::Stroke(0.5, 0.97, 0.5, 0.25, 12, 16));
+                let was = APP.with_borrow(|x| x.panel);
+                match was {
+                    Some(p) if p == name => {
+                        close(&input);
+                        APP.with_borrow_mut(|x| x.panel = None);
+                    }
+                    Some(_) => {
+                        close(&input);
+                        APP.with_borrow_mut(|x| x.panel = Some(name));
+                        let input = input.clone();
+                        slint::Timer::single_shot(Duration::from_millis(550), move || open(&input, name));
+                    }
+                    None => {
+                        open(&input, name);
+                        APP.with_borrow_mut(|x| x.panel = Some(name));
+                    }
+                }
+                return;
+            }
+            if matches!(a.as_str(), "swipe-left" | "swipe-right" | "home" | "switcher" | "lock") {
+                APP.with_borrow_mut(|x| x.panel = None);
+            }
             match a.as_str() {
                 "swipe-left" => input.send(Cmd::Stroke(1.0, 0.5, 0.12, 0.5, 10, 20)),
                 "swipe-right" => input.send(Cmd::Stroke(0.0, 0.5, 0.88, 0.5, 10, 20)),
@@ -649,6 +689,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "min" => w.set_minimized(true),
                 "max" => w.set_maximized(!w.is_maximized()),
+                "fullscreen" => {
+                    let on = !w.is_fullscreen();
+                    w.set_fullscreen(on);
+                    ui.set_fullscreen(on);
+                    // Leaving full screen: fit the window to the picture again.
+                    APP.with_borrow_mut(|a| a.fitted = None);
+                }
                 "drag" => {
                     // Second press within 400 ms = double-click: maximise / restore.
                     let now = Instant::now();
@@ -727,13 +774,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.set_compact(lw < 640.0);
             }
             ui.set_maximized(ui.window().is_maximized());
+            ui.set_fullscreen(ui.window().is_fullscreen());
             // Settings slide: window width follows the animated chrome so
             // the picture keeps its size; ends when the slide settles.
             if let Some(stage) = APP.with_borrow(|a| a.hold_stage) {
                 let chrome = ui.get_chrome_w();
                 let target = (stage + chrome).max(400.0);
                 let lh = ui.window().size().height as f32 / sf;
-                if (lw - target).abs() > 0.5 && !ui.window().is_maximized() {
+                if (lw - target).abs() > 0.5 && !ui.window().is_maximized() && !ui.window().is_fullscreen() {
                     let size = LogicalSize::new(target, lh);
                     ui.window().set_size(size);
                     if let Some(wa) = work_area(&ui) {
@@ -745,7 +793,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     APP.with_borrow_mut(|a| a.hold_stage = None);
                 }
             }
-            let bar = ui.get_stage_w() < 600.0;
+            // Labelled dock is ~690 px wide (measured): icons only below that.
+            let bar = ui.get_stage_w() < 720.0;
             if bar != ui.get_compact_bar() {
                 ui.set_compact_bar(bar);
             }
@@ -787,7 +836,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 v.set_bounds(x.round() as i32, y.round() as i32, w.round() as i32, h.round() as i32, streaming, ((22.0 - PIC_INSET) * sf).round() as i32);
                 let shown = v.shown_size();
-                if streaming && p.fit_window && shown.0 > 0 {
+                let free = !ui.window().is_fullscreen() && !ui.window().is_maximized();
+                if streaming && p.fit_window && shown.0 > 0 && free {
                     let key = (shown.0, shown.1, ui.get_settings_open());
                     if a.fitted != Some(key) {
                         a.fitted = Some(key);

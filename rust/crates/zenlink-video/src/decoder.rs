@@ -80,11 +80,21 @@ impl Mft {
             let mt = MFCreateMediaType()?;
             mt.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Video)?;
             mt.SetGUID(&MF_MT_SUBTYPE, &subtype(codec))?;
-            t.SetInputType(0, &mt, 0)?;
+            // Microsoft's HEVC decoder lists no output type until the input
+            // type has a frame size. Any size works: the real one arrives
+            // with the first frame as MF_E_TRANSFORM_STREAM_CHANGE.
+            mt.SetUINT64(&MF_MT_FRAME_SIZE, (1920u64 << 32) | 1080)?;
+            mt.SetUINT32(&MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive.0 as u32)?;
+            t.SetInputType(0, &mt, 0).inspect_err(|e| log::warn!("decoder: set input type: {e}"))?;
 
             let mut me = Self { t, hardware, provides_samples: false, out_size: 0, width: 0, height: 0, src: RECT::default() };
-            me.pick_output()?;
-            me.t.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0)?;
+            // Some decoders (Microsoft's HEVC MFT) list no complete output
+            // type until they have parsed the first frame; they then signal
+            // MF_E_TRANSFORM_STREAM_CHANGE and drain() picks it.
+            if let Err(e) = me.pick_output() {
+                log::info!("decoder: output type after the first frame ({e})");
+            }
+            me.t.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0).inspect_err(|e| log::warn!("decoder: begin streaming: {e}"))?;
             me.t.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0)?;
             Ok(me)
         }

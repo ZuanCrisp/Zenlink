@@ -353,15 +353,18 @@ export component Chip inherits Rectangle {
     callback clicked();
     height: 32px;
     border-radius: 16px;
-    background: ta.pressed ? Theme.accent-soft : ta.has-hover ? Theme.hover : Theme.raise;
+    background: ta.pressed ? Theme.accent-soft : ta.has-hover ? Theme.fill-hover : Theme.fill;
     animate background { duration: 180ms; easing: ease-out; }
     transform-origin: { x: self.width / 2, y: self.height / 2 };
     transform-scale-x: ta.pressed ? 104% : 100%;
     transform-scale-y: ta.pressed ? 104% : 100%;
     animate transform-scale-x, transform-scale-y { duration: ta.pressed ? 210ms : 240ms; easing: cubic-bezier(0.34, 1.45, 0.64, 1); }
-    border-width: 1px;
-    border-color: Theme.line;
-    min-width: 36px;
+    border-width: 0.75px;
+    border-color: Theme.glass > 0.01 ? Theme.rim : Theme.line;
+    // Wide enough for icon + label (a Rectangle does not take its
+    // layout's size on its own: labels overlapped the icons).
+    min-width: max(36px, chipRow.min-width);
+    preferred-width: max(36px, chipRow.preferred-width);
     // Illumination under the pointer (fades in 90 ms, out 260 ms).
     Rectangle {
         property <length> gx: ta.mouse-x;
@@ -380,7 +383,7 @@ export component Chip inherits Rectangle {
             background: @radial-gradient(circle, Theme.dark ? #ffffff38 : #ffffffb3 0%, #ffffff00 60%);
         }
     }
-    HorizontalLayout {
+    chipRow := HorizontalLayout {
         padding-left: root.label == "" ? 10px : 11px;
         padding-right: root.label == "" ? 10px : 12px;
         spacing: 6px;
