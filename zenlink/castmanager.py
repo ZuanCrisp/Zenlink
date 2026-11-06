@@ -71,6 +71,20 @@ def _friendly_error(error: Exception) -> str:
     return text
 
 
+# Why a listed device can't start in the chosen mode (castmanager._need).
+_NEED_MESSAGES = {
+    "restore": "This device uses the ZenLink Studio driver, so Apple mode can't see it. Press Restore Apple driver "
+               "in Settings > Connection & Drivers, or switch to ZenLink Studio.",
+    "bind": "ZenLink Studio needs its driver on this device. Press Install ZenLink Studio driver in Settings > "
+            "Connection & Drivers, or switch to Apple Driver mode.",
+    "package": "ZenLink Studio uses libusb-win32, which isn't on this PC. Install TikTok LIVE Studio's iOS driver "
+               "or libusb-win32 once, or switch to Apple Driver mode.",
+    "removefilter": "A libusb0 filter is stacked on Apple's driver. Press Remove libusb0 filter in Settings > "
+                    "Connection & Drivers first.",
+    "mode": "Choose a connection mode first.",
+}
+
+
 def _receiver_name() -> str:
     from zenlink.airplay.receiver import receiver_name
 
@@ -281,7 +295,13 @@ class CastManager:
                    else "Connect an iPhone or iPad with a USB cable.")
             self._set_state("error", error=msg)
             return self.snapshot()
-        target = found[0]
+        # A device that can start now goes first (another one may be listed
+        # first while it waits for Trust or for its driver).
+        target = next((d for d in found if d.get("ready")), found[0])
+        need = target.get("need")
+        if need in _NEED_MESSAGES:
+            self._set_state("error", error=_NEED_MESSAGES[need])
+            return self.snapshot()
         if target.get("need") == "wifi":
             self._set_state("error", error="The device isn't on Wi-Fi yet. Press Set up Wi-Fi in Settings with the "
                             "cable connected, keep both on the same network, or switch to Wired.")

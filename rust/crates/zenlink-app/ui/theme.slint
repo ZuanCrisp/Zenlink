@@ -1,9 +1,9 @@
-// Liquid Glass tokens. Light is the default; Dark is its twin.
+// Liquid Glass tokens. Dark is the default; Light is its twin.
 // `glass` (0..1) is clarity, set from Rust: 0 = solid (glass off),
 // 1 = fully clear (thickness 0%), in between = thicker frosted glass.
 
 export global Theme {
-    in-out property <bool> dark: false;
+    in-out property <bool> dark: true;
     in-out property <float> glass: 1.0;
 
     out property <color> text: dark ? #f5f5f7 : #1d1d1f;

@@ -5,6 +5,10 @@ use serde_json::{json, Value};
 use crate::Prefs;
 
 fn path() -> Option<std::path::PathBuf> {
+    // Tests use their own file so they never change the user's settings.
+    if let Some(p) = std::env::var_os("ZL_PREFS") {
+        return Some(p.into());
+    }
     let base = std::env::var_os("APPDATA")?;
     let dir = std::path::Path::new(&base).join("ZenLink");
     let _ = std::fs::create_dir_all(&dir);

@@ -100,6 +100,8 @@ component TopBar inherits Rectangle {
     in property <bool> maximized;
     in property <bool> fullscreen;
     property <bool> live: phase == "streaming";
+    in property <string> need; // the device needs something before Start ("" = ready)
+    property <bool> blocked: !live && phase != "connecting" && phase != "activating" && device != "" && need != "";
     property <bool> busy: phase == "connecting" || phase == "activating";
     height: 46px;
     // Empty header space moves the window; double-click maximises.
@@ -140,7 +142,7 @@ component TopBar inherits Rectangle {
             width: 10px;
             height: 10px;
             border-radius: 5px;
-            background: live ? Theme.accent : busy ? #f59e0b : #22c55e;
+            background: live ? Theme.accent : busy || blocked ? #f59e0b : #22c55e;
             border-width: 2px;
             border-color: Theme.dark ? #ffffff33 : #ffffffcc;
           }
@@ -155,7 +157,7 @@ component TopBar inherits Rectangle {
             border-width: 1px;
             border-color: Theme.line;
             pillT := Text {
-                text: live ? I18n.t("Mirroring", "Mirroring") : busy ? I18n.t("Menyambung…", "Connecting…") : I18n.t("Siap", "Ready");
+                text: live ? I18n.t("Mirroring", "Mirroring") : busy ? I18n.t("Menyambung…", "Connecting…") : blocked ? I18n.t("Perlu tindakan", "Action needed") : I18n.t("Siap", "Ready");
                 font-size: 11px;
                 font-weight: 600;
                 color: live ? Theme.accent : Theme.text-2;
@@ -337,9 +339,32 @@ component Placeholder inherits Rectangle {
     in property <bool> flow-failed;
     in property <string> flow-kind: "apple";
     in property <bool> wifi;
+    // What stands between the device and Start ("" = ready): restore, bind,
+    // package, removefilter, mode, wifi, trust.
+    in property <string> need;
     callback start();
     callback dismiss();
+    callback fix();
     property <bool> card: flow-step >= 0;
+    property <color> tone: device == "" ? Theme.text-3 : need != "" ? Theme.warn : Theme.ok;
+    property <string> need-label: need == "trust" ? I18n.t("Perlu Trust", "Needs Trust")
+        : need == "wifi" ? I18n.t("Wi-Fi belum siap", "Wi-Fi not set up")
+        : need == "mode" ? I18n.t("Pilih mode", "Choose a mode")
+        : I18n.t("Perlu driver", "Needs a driver");
+    property <string> need-title: need == "restore" ? I18n.t("Kembalikan driver Apple", "Restore the Apple driver")
+        : need == "bind" ? I18n.t("Pasang driver ZenLink Studio", "Install the ZenLink Studio driver")
+        : need == "package" ? I18n.t("libusb-win32 belum terpasang", "libusb-win32 is not installed")
+        : need == "removefilter" ? I18n.t("Hapus filter libusb0 dulu", "Remove the libusb0 filter first")
+        : need == "mode" ? I18n.t("Pilih mode koneksi", "Choose a connection mode")
+        : need == "wifi" ? I18n.t("Wi-Fi belum diatur", "Wi-Fi is not set up yet")
+        : I18n.t("Buka kunci dan tekan Percayai", "Unlock it and tap Trust");
+    property <string> need-hint: need == "restore" ? I18n.t("Perangkat ini memakai driver ZenLink Studio, jadi mode Apple tidak bisa melihatnya. Kembalikan driver Apple, atau ganti ke mode ZenLink Studio.", "This device uses the ZenLink Studio driver, so Apple mode cannot see it. Restore the Apple driver, or switch to ZenLink Studio.")
+        : need == "bind" ? I18n.t("ZenLink Studio memakai driver libusb0 di perangkat. Pasang drivernya, atau ganti ke mode Apple Driver.", "ZenLink Studio uses the libusb0 driver on the device. Install it, or switch to Apple Driver mode.")
+        : need == "package" ? I18n.t("Pasang driver iOS TikTok LIVE Studio atau libusb-win32 sekali, lalu tekan Periksa driver. Atau pakai mode Apple Driver.", "Install the iOS driver of TikTok LIVE Studio or libusb-win32 once, then press Check drivers. Or use Apple Driver mode.")
+        : need == "removefilter" ? I18n.t("Filter libusb0 menumpuk di driver Apple. Ini bisa membuat Windows crash.", "A libusb0 filter is stacked on the Apple driver. It can crash Windows.")
+        : need == "mode" ? I18n.t("Pilih Apple Driver atau ZenLink Studio untuk lanjut.", "Pick Apple Driver or ZenLink Studio to continue.")
+        : need == "wifi" ? I18n.t("Colokkan kabel sekali, lalu tekan Atur Wi-Fi di Pengaturan. Atau pilih Kabel.", "Plug in the cable once, then press Set up Wi-Fi in Settings. Or choose Cable.")
+        : I18n.t("Buka kunci perangkat, tekan Percayai (Trust) kalau muncul, lalu coba lagi.", "Unlock the device, tap Trust if it asks, then try again.");
     property <[[string]]> texts: flow-kind == "usbdirect" ? [
             [I18n.t("Deteksi perangkat", "Detect device"), I18n.t("Ditemukan di USB lewat driver libusb0", "Found on USB through the libusb0 driver")],
             [I18n.t("Buka perangkat", "Open the device"), I18n.t("Mengalihkan ke mode tangkap layar", "Switching it to its screen-capture mode")],
@@ -368,6 +393,8 @@ component Placeholder inherits Rectangle {
     if !card: VerticalLayout {
         alignment: center;
         spacing: 12px;
+        padding-left: 24px;
+        padding-right: 24px;
         Rectangle {
             height: 196px;
             // Phone outline with its cable.
@@ -378,16 +405,16 @@ component Placeholder inherits Rectangle {
                 height: 160px;
                 border-radius: 18px;
                 border-width: 2px;
-                border-color: device == "" ? Theme.text-3 : Theme.ok;
+                border-color: root.tone;
                 background: Theme.dark ? #ffffff08 : #ffffff80;
-                Rectangle { y: 8px; width: 26px; height: 6px; border-radius: 3px; background: device == "" ? Theme.text-3 : Theme.ok; opacity: 0.6; }
+                Rectangle { y: 8px; width: 26px; height: 6px; border-radius: 3px; background: root.tone; opacity: 0.6; }
             }
             if !wifi: Rectangle {
                 x: (parent.width - 2px) / 2;
                 y: 160px;
                 width: 2px;
                 height: 36px;
-                background: device == "" ? Theme.text-3.with-alpha(0.5) : Theme.ok;
+                background: device == "" ? Theme.text-3.with-alpha(0.5) : root.tone;
             }
         }
         if device != "": HorizontalLayout {
@@ -397,7 +424,7 @@ component Placeholder inherits Rectangle {
                 border-radius: 14px;
                 background: Theme.dark ? #ffffff0d : #ffffffa0;
                 border-width: 1px;
-                border-color: Theme.ok.with-alpha(0.45);
+                border-color: root.tone.with-alpha(0.45);
                 HorizontalLayout {
                     padding-left: 12px;
                     padding-right: 14px;
@@ -405,16 +432,16 @@ component Placeholder inherits Rectangle {
                     alignment: center;
                     VerticalLayout {
                         alignment: center;
-                        Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: Theme.ok; }
+                        Rectangle { width: 7px; height: 7px; border-radius: 3.5px; background: root.tone; }
                     }
                     Text { text: device; font-size: 12px; font-weight: 600; color: Theme.text; vertical-alignment: center; }
                     Text { text: "·"; color: Theme.text-3; vertical-alignment: center; }
-                    Text { text: wifi ? I18n.t("Siap · Wi-Fi", "Ready · Wi-Fi") : I18n.t("Siap", "Ready"); font-size: 12px; font-weight: 600; color: Theme.ok; vertical-alignment: center; }
+                    Text { text: need != "" ? root.need-label : wifi ? I18n.t("Siap · Wi-Fi", "Ready · Wi-Fi") : I18n.t("Siap", "Ready"); font-size: 12px; font-weight: 600; color: root.tone; vertical-alignment: center; }
                 }
             }
         }
         Text {
-            text: device == "" ? I18n.t("Colokkan iPhone atau iPad", "Plug in an iPhone or iPad") : I18n.t(device + " siap", device + " ready");
+            text: device == "" ? I18n.t("Colokkan iPhone atau iPad", "Plug in an iPhone or iPad") : need != "" ? root.need-title : I18n.t(device + " siap", device + " ready");
             font-size: 20px;
             font-weight: 700;
             color: Theme.text;
@@ -422,6 +449,7 @@ component Placeholder inherits Rectangle {
         }
         Text {
             text: message != "" ? message
+                : device != "" && need != "" ? root.need-hint
                 : device == "" ? I18n.t("Pakai kabel USB, buka kunci, lalu tekan Percayai (Trust). Atau sambungkan lewat Wi-Fi.", "Use a USB cable, unlock it and tap Trust. Or connect over Wi-Fi.")
                 : I18n.t("Buka kunci, lalu tekan Mulai mirroring.", "Unlock it, then press Start mirroring.");
             font-size: 12.5px;
@@ -431,7 +459,17 @@ component Placeholder inherits Rectangle {
         }
         if device != "": HorizontalLayout {
             alignment: center;
-            GlassButton { primary: true; icon: "\u{E768}"; label: I18n.t("Mulai mirroring", "Start mirroring"); clicked => { root.start(); } }
+            if need == "" || need == "trust": GlassButton { primary: true; icon: "\u{E768}"; label: need == "" ? I18n.t("Mulai mirroring", "Start mirroring") : I18n.t("Coba lagi", "Try again"); clicked => { root.start(); } }
+            if need != "" && need != "trust": GlassButton {
+                primary: true;
+                icon: "\u{E90F}";
+                label: need == "restore" ? I18n.t("Kembalikan driver Apple", "Restore Apple driver")
+                    : need == "bind" ? I18n.t("Pasang driver", "Install driver")
+                    : need == "removefilter" ? I18n.t("Hapus filter", "Remove filter")
+                    : need == "mode" ? I18n.t("Pilih mode", "Choose mode")
+                    : I18n.t("Buka pengaturan", "Open settings");
+                clicked => { root.fix(); }
+            }
         }
     }
 
@@ -581,6 +619,42 @@ component ModeCard inherits Rectangle {
     }
 }
 
+// Small modal: driver confirmations, progress and results.
+component NoticeSheet inherits Rectangle {
+    in property <string> title;
+    in property <string> body;
+    in property <string> ok;
+    in property <string> cancel;
+    callback answer(bool);
+    property <float> t: 0;
+    init => { self.t = 1; }
+    animate t { duration: 300ms; easing: cubic-bezier(0.05, 0.7, 0.1, 1); }
+    background: #000000.with-alpha(0.5 * t);
+    TouchArea { } // swallow clicks behind the sheet
+    Glass {
+        strong: true;
+        background: Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
+        border-radius: 20px;
+        width: min(parent.width - 24px, 440px);
+        height: min(parent.height - 24px, ncol.preferred-height + 2px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + 20px * (1 - root.t);
+        opacity: root.t;
+        ncol := VerticalLayout {
+            padding: 20px;
+            spacing: 12px;
+            Text { text: root.title; font-size: 16px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
+            Text { text: root.body; font-size: 12px; color: Theme.text-2; wrap: word-wrap; }
+            if root.ok != "" || root.cancel != "": HorizontalLayout {
+                alignment: end;
+                spacing: 8px;
+                if root.cancel != "": GlassButton { label: root.cancel; clicked => { root.answer(false); } }
+                if root.ok != "": GlassButton { primary: true; label: root.ok; clicked => { root.answer(true); } }
+            }
+        }
+    }
+}
+
 // First-run (or "change mode") sheet: nothing connects and no driver
 // changes until a mode is chosen here.
 component ModeChooser inherits Rectangle {
@@ -718,6 +792,10 @@ component SettingsPanel inherits Glass {
     // Cable or Wi-Fi, for both Apple Driver and ZenLink Studio.
     in property <string> link: "wired";
     in property <string> mode;
+    // Driver changes that fit the device (each asks for confirmation).
+    in property <bool> drv-restore;
+    in property <bool> drv-bind;
+    in property <bool> drv-filter;
     callback set-link(string);
     in property <string> stats-full;
     callback changed(Prefs);
@@ -890,6 +968,12 @@ component SettingsPanel inherits Glass {
                         GlassButton { label: I18n.t("Periksa driver", "Check drivers"); clicked => { root.driver-action("refresh"); } }
                         GlassButton { label: I18n.t("Atur Wi-Fi", "Set up Wi-Fi"); clicked => { root.driver-action("wifi"); } }
                     }
+                    if root.drv-filter || root.drv-restore || root.drv-bind: HorizontalLayout {
+                        spacing: 6px;
+                        if root.drv-filter: GlassButton { primary: true; label: I18n.t("Hapus filter libusb0", "Remove libusb0 filter"); clicked => { root.driver-action("removefilter"); } }
+                        if root.drv-restore: GlassButton { label: I18n.t("Kembalikan driver Apple", "Restore Apple driver"); clicked => { root.driver-action("restore"); } }
+                        if root.drv-bind: GlassButton { label: I18n.t("Pasang driver ZenLink Studio", "Install ZenLink Studio driver"); clicked => { root.driver-action("bind"); } }
+                    }
                 }
 
                 Card {
@@ -988,7 +1072,19 @@ export component AppWindow inherits Window {
     in property <bool> flow-failed: false;
     in property <string> flow-kind: "apple";
     in property <bool> device-wifi: false;
+    in property <string> device-need;
     callback flow-dismiss();
+    callback need-fix();
+    in property <bool> drv-restore;
+    in property <bool> drv-bind;
+    in property <bool> drv-filter;
+    // Notice sheet (driver changes).
+    in property <bool> sheet-open;
+    in property <string> sheet-title;
+    in property <string> sheet-body;
+    in property <string> sheet-ok;
+    in property <string> sheet-cancel;
+    callback sheet-answer(bool);
     // Connection mode chooser (shown until a mode is chosen).
     in-out property <bool> chooser-open: false;
     in property <bool> chooser-cancelable: false;
@@ -1063,6 +1159,7 @@ export component AppWindow inherits Window {
                 device: root.device;
                 phase: root.phase;
                 link: root.link;
+                need: root.device-need;
                 stats: root.prefs.stats ? root.stats-line : "";
                 settings-open: root.settings-open;
                 muted: root.muted;
@@ -1110,6 +1207,8 @@ export component AppWindow inherits Window {
                             flow-failed: root.flow-failed;
                             flow-kind: root.flow-kind;
                             wifi: root.device-wifi;
+                            need: root.device-need;
+                            fix => { root.need-fix(); }
                             start => { root.start-cast(); }
                             dismiss => { root.flow-dismiss(); }
                         }
@@ -1133,6 +1232,9 @@ export component AppWindow inherits Window {
                     connection: root.connection;
                     link: root.mode-link;
                     mode: root.mode-active;
+                    drv-restore: root.drv-restore;
+                    drv-bind: root.drv-bind;
+                    drv-filter: root.drv-filter;
                     set-link(l) => { root.set-link(l); }
                     stats-full: root.stats-full;
                     changed(p) => { root.prefs = p; root.prefs-changed(p); }
@@ -1177,6 +1279,16 @@ export component AppWindow inherits Window {
             prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
             choose(m, l, r) => { root.chooser-open = false; root.choose-mode(m, l, r); }
             cancel => { root.chooser-open = false; }
+        }
+        if root.sheet-open: NoticeSheet {
+            width: parent.width;
+            height: parent.height;
+            border-radius: root.edge ? 0px : 12px;
+            title: root.sheet-title;
+            body: root.sheet-body;
+            ok: root.sheet-ok;
+            cancel: root.sheet-cancel;
+            answer(yes) => { root.sheet-answer(yes); }
         }
         // Hover tooltip: below the control, or above it near the bottom.
         tip := Rectangle {

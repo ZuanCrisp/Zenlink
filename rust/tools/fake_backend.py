@@ -43,6 +43,7 @@ def main():
     ap.add_argument("--needs-choice", action="store_true", help="start with no connection mode (chooser shows)")
     ap.add_argument("--steps", type=float, default=0, help="seconds per connect phase (connecting, activating) before streaming")
     ap.add_argument("--fail", action="store_true", help="fail during activating (with --steps)")
+    ap.add_argument("--need", help="device needs this first (restore, bind, removefilter, trust, ...)")
     a = ap.parse_args()
     clips = [load(a.video)] + ([load(a.video2)] if a.video2 else [])
     state = {"phase": "idle", "detail": "", "device": {"name": "iPhone (fake)"}, "error": None, "rotation": 0,
@@ -51,6 +52,30 @@ def main():
     log = {"touch": 0, "button": []}
     if a.needs_choice:
         state["connection"].update(active=None, needsChoice=True)
+    drv_mode = {"restore": "replaced", "bind": "apple"}.get(a.need or "", "apple")
+    state["drivers"] = {"libusb0": {"available": True}, "devices": [{
+        "instance": "USB\\VID_05AC&PID_12A8\\FAKE", "serial": "FAKE", "family": "iPhone",
+        "mode": drv_mode, "unsafeFilter": a.need == "removefilter"}]}
+    if a.need:
+        dev = state["devices"][0]
+        dev["ready"] = False
+        if a.need != "trust":
+            dev["need"] = a.need
+    else:
+        state["devices"][0]["ready"] = True
+
+    async def drivers_action(request):
+        body = await request.json()
+        log["driver"] = body
+        await asyncio.sleep(1.5)
+        state["devices"][0].pop("need", None)
+        state["devices"][0]["ready"] = True
+        state["drivers"]["devices"][0].update(mode="replaced" if body.get("action") == "bind" else "apple", unsafeFilter=False)
+        return web.json_response({"ok": True, "message": "Driver changed (fake)."})
+
+    async def restart(_):
+        log["restart"] = log.get("restart", 0) + 1
+        return web.json_response({"ok": True})
 
     async def conn_get(_):
         return web.json_response(state["connection"])
@@ -141,7 +166,7 @@ def main():
         web.get("/cast/codec", codec), web.get("/cast/stream.bin", stream), web.post("/cast/touch", touch),
         web.post("/cast/button", button), web.post("/cast/pli", ok), web.post("/api/audio", ok),
         web.post("/api/keyboard/action", ok), web.get("/api/drivers", ok), web.post("/api/wifi/prepare", ok),
-        web.get("/debug", debug), web.get("/api/connection", conn_get), web.post("/api/connection", conn_set),
+        web.get("/debug", debug), web.post("/api/drivers/action", drivers_action), web.post("/api/app/restart", restart), web.get("/api/connection", conn_get), web.post("/api/connection", conn_set),
     ])
     web.run_app(app, host="127.0.0.1", port=a.port, print=lambda *_: print(f"fake backend on {a.port}", flush=True))
 

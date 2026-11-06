@@ -79,6 +79,34 @@ struct App {
     /// v2-style connect card: when Start was pressed (the backend may still
     /// say "idle" for a moment).
     flow_started: Option<Instant>,
+    /// USB instance id of the device, for driver changes.
+    drv_instance: Option<String>,
+    /// What the open notice sheet is for ("drv:restore", "restart", "info").
+    sheet: Option<String>,
+    /// Full screen: where the window was before (position, size, maximised).
+    full_restore: Option<(slint::PhysicalPosition, slint::PhysicalSize, bool)>,
+}
+
+/// ZenLink's own full screen (the window covers the monitor). winit's full
+/// screen left Windows' glass blur grey afterwards (light theme after dark)
+/// until the app restarted.
+fn is_full() -> bool {
+    APP.with_borrow(|a| a.full_restore.is_some())
+}
+
+/// Physical bounds of the monitor the window is on.
+fn monitor_rect(ui: &AppWindow) -> Option<(i32, i32, u32, u32)> {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    let h = hwnd_of(ui.window())?;
+    unsafe {
+        let m = MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
+        let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+        if !GetMonitorInfoW(m, &mut mi).as_bool() {
+            return None;
+        }
+        let r = mi.rcMonitor;
+        Some((r.left, r.top, (r.right - r.left) as u32, (r.bottom - r.top) as u32))
+    }
 }
 
 thread_local! {
@@ -130,15 +158,20 @@ fn apply_look(ui: &AppWindow) {
     let glass_on = p.glass_on;
     let glass_k = thick;
     // Square corners in full screen / maximised (rounded ones show the desktop).
-    let round = !ui.window().is_fullscreen() && !ui.window().is_maximized();
+    let full = is_full();
+    let round = !full && !ui.window().is_maximized();
     APP.with_borrow_mut(|a| {
         a.dark = dark;
         let glass_q = (glass_k * 20.0).round() as i32; // re-apply in 5% steps
-        if a.backdrop != Some((glass_on, dark, glass_q, round)) {
+        // Full screen paints a solid background, so no blur there. A dark
+        // blur kept through full screen came back grey afterwards (also in
+        // light theme) until the app restarted; turning it off avoids that.
+        let blur = glass_on && !full;
+        if a.backdrop != Some((blur, dark, glass_q, round)) {
             if let Some(h) = hwnd_of(ui.window()) {
-                let mode = if glass_on { backdrop::Backdrop::Accent } else { backdrop::Backdrop::None };
+                let mode = if blur { backdrop::Backdrop::Accent } else { backdrop::Backdrop::None };
                 backdrop::apply(h, mode, dark, glass_k, round);
-                a.backdrop = Some((glass_on, dark, glass_q, round));
+                a.backdrop = Some((blur, dark, glass_q, round));
             }
         }
         if a.on_top != Some(p.on_top) {
@@ -181,6 +214,20 @@ fn tr_backend(ui: &AppWindow, en: &str) -> String {
         ("Choose a connection mode first.", "Pilih mode koneksi dulu."),
         ("Connect an iPhone or iPad with a USB cable.", "Colokkan iPhone atau iPad pakai kabel USB."),
         (
+            "This device uses the ZenLink Studio driver, so Apple mode can't see it. Press Restore Apple driver in Settings > Connection & Drivers, or switch to ZenLink Studio.",
+            "Perangkat ini memakai driver ZenLink Studio, jadi mode Apple tidak bisa melihatnya. Tekan Kembalikan driver Apple di Pengaturan > Koneksi & driver, atau ganti ke ZenLink Studio.",
+        ),
+        (
+            "ZenLink Studio needs its driver on this device. Press Install ZenLink Studio driver in Settings > Connection & Drivers, or switch to Apple Driver mode.",
+            "ZenLink Studio butuh drivernya di perangkat ini. Tekan Pasang driver ZenLink Studio di Pengaturan > Koneksi & driver, atau ganti ke mode Apple Driver.",
+        ),
+        (
+            "A libusb0 filter is stacked on Apple's driver. Press Remove libusb0 filter in Settings > Connection & Drivers first.",
+            "Filter libusb0 menumpuk di driver Apple. Tekan Hapus filter libusb0 di Pengaturan > Koneksi & driver dulu.",
+        ),
+        ("Stop casting before changing drivers.", "Hentikan mirroring dulu sebelum mengganti driver."),
+        ("Another driver change is running.", "Penggantian driver lain sedang berjalan."),
+        (
             "The device isn't on Wi-Fi yet. Press Set up Wi-Fi in Settings with the cable connected, keep both on the same network, or switch to Wired.",
             "Perangkat belum tersambung Wi-Fi. Tekan Atur Wi-Fi saat kabel tersambung, pastikan di jaringan yang sama, atau pilih Kabel.",
         ),
@@ -198,7 +245,11 @@ fn tr_backend(ui: &AppWindow, en: &str) -> String {
 fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     let tr = |id: &str, en: &str| -> String { if ui.global::<I18n>().get_id() { id.into() } else { en.into() } };
     let phase = str_of(st, &["phase"]).unwrap_or("idle").to_string();
-    let first = st.get("devices").and_then(|d| d.get(0));
+    // The backend starts the first ready device; show that one.
+    let list = st.get("devices").and_then(Value::as_array);
+    let first = list
+        .and_then(|l| l.iter().find(|d| d.get("ready").and_then(Value::as_bool).unwrap_or(false)))
+        .or_else(|| list.and_then(|l| l.first()));
     let device = str_of(st, &["device", "name"]).or_else(|| first.and_then(|d| str_of(d, &["name"]))).unwrap_or("");
     let wifi = first.and_then(|d| d.get("wifi")).and_then(Value::as_bool).unwrap_or(false);
     let backend = str_of(st, &["capture", "backend"]).or_else(|| str_of(st, &["connection", "active"])).unwrap_or("");
@@ -258,6 +309,25 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     let kind = if str_of(st, &["connection", "active"]) == Some("usbdirect") { "usbdirect" } else { "apple" };
     ui.set_flow_kind(kind.into());
     ui.set_device_wifi(wifi || str_of(st, &["device", "wifi"]).is_some() && st["device"]["wifi"].as_bool().unwrap_or(false));
+    // What the device still needs before Start can work ("" = ready).
+    let need = first
+        .map(|d| match d.get("need").and_then(Value::as_str) {
+            Some(n) => n.to_string(),
+            None if !d.get("ready").and_then(Value::as_bool).unwrap_or(true) => "trust".into(),
+            None => String::new(),
+        })
+        .unwrap_or_default();
+    ui.set_device_need(need.into());
+    // Driver buttons follow the device's driver (like v2).
+    let drv = st.get("drivers");
+    let dev = drv.and_then(|d| d.get("devices")).and_then(|d| d.get(0));
+    let lib = drv.and_then(|d| d.pointer("/libusb0/available")).and_then(Value::as_bool).unwrap_or(false);
+    let unsafe_filter = dev.and_then(|d| d.get("unsafeFilter")).and_then(Value::as_bool).unwrap_or(false);
+    let dmode = dev.and_then(|d| str_of(d, &["mode"])).unwrap_or("");
+    ui.set_drv_filter(dev.is_some() && unsafe_filter);
+    ui.set_drv_restore(dev.is_some() && !unsafe_filter && (dmode == "replaced" || dmode == "unknown"));
+    ui.set_drv_bind(dev.is_some() && !unsafe_filter && dmode == "apple" && lib);
+    APP.with_borrow_mut(|a| a.drv_instance = dev.and_then(|d| str_of(d, &["instance"])).map(String::from));
     let fresh = APP.with_borrow(|a| a.flow_started.map(|t| t.elapsed() < Duration::from_secs(3)).unwrap_or(false));
     let step = ui.get_flow_step();
     match phase.as_str() {
@@ -429,6 +499,97 @@ fn drivers_summary(ui: &AppWindow, d: &Value) -> String {
     lines.join("\n")
 }
 
+fn open_sheet(ui: &AppWindow, kind: &str, title: String, body: String, ok: String, cancel: String) {
+    APP.with_borrow_mut(|a| a.sheet = Some(kind.into()));
+    ui.set_sheet_title(title.into());
+    ui.set_sheet_body(body.into());
+    ui.set_sheet_ok(ok.into());
+    ui.set_sheet_cancel(cancel.into());
+    ui.set_sheet_open(true);
+}
+
+/// Ask before a driver change (it needs administrator approval).
+fn confirm_driver(ui: &AppWindow, action: &str) {
+    if matches!(ui.get_phase().as_str(), "connecting" | "activating" | "streaming") {
+        show_toast(ui, tr_ui(ui, "Hentikan mirroring dulu sebelum mengganti driver.", "Stop casting before changing drivers."));
+        return;
+    }
+    if APP.with_borrow(|a| a.drv_instance.is_none()) {
+        show_toast(ui, tr_ui(ui, "Colokkan perangkat dulu.", "Connect the device first."));
+        return;
+    }
+    let (title, body) = match action {
+        "restore" => (
+            tr_ui(ui, "Kembalikan driver Apple?", "Restore the Apple driver?"),
+            tr_ui(ui,
+                "Mode Apple Driver bisa melihat perangkat lagi. ZenLink Studio berhenti sampai drivernya dipasang lagi. Cadangan disimpan dulu. Windows akan minta izin administrator. Cabut lalu colok lagi kabelnya setelah selesai.",
+                "Apple Driver mode can see the device again. ZenLink Studio stops until its driver is installed again. A backup is saved first. Windows will ask for administrator permission. Unplug and reconnect the cable afterwards."),
+        ),
+        "bind" => (
+            tr_ui(ui, "Pasang driver ZenLink Studio?", "Install the ZenLink Studio driver?"),
+            tr_ui(ui,
+                "Seperti TikTok LIVE Studio, ZenLink memasang driver libusb-win32 untuk perangkat ini. Selama terpasang, mode Apple dan aplikasi Apple tidak melihat perangkat; tekan Kembalikan driver Apple untuk balik. Kalau belum ada paket driver untuk model ini, ZenLink membuatnya dan menandatanganinya dengan sertifikat baru bernama \"ZenLink ZenLink Studio\" yang ditambahkan ke sertifikat tepercaya Windows (kunci privatnya dihapus). Cadangan disimpan dulu, dan driver Apple dipasang lagi otomatis kalau perangkat gagal jalan. Windows akan minta izin administrator. Cabut lalu colok lagi kabelnya setelah selesai.",
+                "Like TikTok LIVE Studio, ZenLink installs the libusb-win32 driver for this device. While it is installed, Apple mode and Apple apps can't see the device; press Restore Apple driver to switch back. If there is no driver package for this model yet, ZenLink builds one and signs it with a new certificate named \"ZenLink ZenLink Studio\", added to Windows' trusted certificates (its private key is deleted). A backup is saved first, and Apple's driver comes back automatically if the device doesn't start. Windows will ask for administrator permission. Unplug and reconnect the cable afterwards."),
+        ),
+        _ => (
+            tr_ui(ui, "Hapus filter libusb0?", "Remove the libusb0 filter?"),
+            tr_ui(ui,
+                "Filter ini menumpuk di driver Apple dan bisa membuat Windows crash. Driver Apple tetap ada. Cadangan disimpan dulu. Windows akan minta izin administrator.",
+                "It is stacked on Apple's driver, which can crash Windows. Apple's driver stays. A backup is saved first. Windows will ask for administrator permission."),
+        ),
+    };
+    open_sheet(ui, &format!("drv:{action}"), title, body, tr_ui(ui, "Lanjut", "Continue"), tr_ui(ui, "Batal", "Cancel"));
+}
+
+/// Run a confirmed driver change, then offer to restart the service.
+fn run_driver(ui: &AppWindow, api: &Api, action: String) {
+    let Some(instance) = APP.with_borrow(|a| a.drv_instance.clone()) else { return };
+    open_sheet(
+        ui,
+        "busy",
+        tr_ui(ui, "Mengganti driver perangkat…", "Changing the device's driver…"),
+        tr_ui(ui, "Setujui izin Windows. Jendela PowerShell menampilkan tiap langkah; biarkan kabel tetap tercolok sampai selesai.",
+            "Approve the Windows permission prompt. A PowerShell window shows each step; keep the cable plugged in until it finishes."),
+        String::new(),
+        String::new(),
+    );
+    let remember = ui.get_mode_remember();
+    let (api, w) = (api.clone(), ui.as_weak());
+    std::thread::spawn(move || {
+        let r = api.post_slow("/api/drivers/action", &json!({ "action": action, "instance": instance, "confirmed": true }), 900);
+        let ok = r.as_ref().and_then(|r| r.get("ok")).and_then(Value::as_bool).unwrap_or(false);
+        if ok && action != "removefilter" {
+            // Keep the connection mode in step with the driver now installed.
+            let mode = if action == "bind" { "usbdirect" } else { "apple" };
+            api.post("/api/connection", &json!({ "mode": mode, "remember": remember }));
+        }
+        let msg = r.as_ref().and_then(|r| str_of(r, &["message"])).unwrap_or("").to_string();
+        let rolled = r.as_ref().and_then(|r| r.get("rolledBack")).and_then(Value::as_bool).unwrap_or(false);
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = w.upgrade() else { return };
+            if ok {
+                let target = if action == "bind" { "ZenLink Studio" } else { "Apple Driver" };
+                open_sheet(
+                    &ui,
+                    "restart",
+                    tr_ui(&ui, "Driver sudah diganti", "Driver changed"),
+                    format!("{msg}
+
+{}", tr_ui(&ui,
+                        &format!("Layanan ZenLink perlu dimulai ulang untuk memakai mode {target}. Cabut lalu colok lagi kabelnya."),
+                        &format!("The ZenLink service needs a restart to use {target} mode. Unplug the cable and plug it in again."))),
+                    tr_ui(&ui, "Mulai ulang sekarang", "Restart now"),
+                    tr_ui(&ui, "Nanti", "Later"),
+                );
+            } else {
+                let body = if msg.is_empty() { tr_ui(&ui, "Backend tidak menjawab.", "The backend did not answer.") } else { tr_backend(&ui, &msg) };
+                let body = if rolled { format!("{body} {}", tr_ui(&ui, "Kondisi sebelumnya sudah dipulihkan.", "The previous state was restored.")) } else { body };
+                open_sheet(&ui, "info", tr_ui(&ui, "Driver tidak diubah", "Driver not changed"), body, "OK".into(), String::new());
+            }
+        });
+    });
+}
+
 /// Move the window back inside the work area if a resize pushed it out.
 fn keep_on_screen(ui: &AppWindow, (wx, wy, ww, wh): (f32, f32, f32, f32), size: LogicalSize) {
     let sf = ui.window().scale_factor();
@@ -525,6 +686,47 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() {
                 ui.set_flow_step(-1);
                 ui.set_flow_failed(false);
+            }
+        });
+    }
+    {
+        // The ready view's button when the device needs something first.
+        let weak = ui.as_weak();
+        ui.on_need_fix(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            match ui.get_device_need().as_str() {
+                n @ ("restore" | "bind" | "removefilter") => confirm_driver(&ui, n),
+                "mode" => {
+                    ui.set_chooser_cancelable(true);
+                    open_chooser(&ui);
+                }
+                _ => {
+                    ui.set_settings_open(true);
+                    ui.invoke_settings_toggled(true);
+                }
+            }
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        let api = api.clone();
+        ui.on_sheet_answer(move |yes| {
+            let Some(ui) = weak.upgrade() else { return };
+            let kind = APP.with_borrow_mut(|a| a.sheet.take()).unwrap_or_default();
+            if kind == "busy" {
+                APP.with_borrow_mut(|a| a.sheet = Some(kind));
+                return; // no buttons while the change runs
+            }
+            ui.set_sheet_open(false);
+            if !yes {
+                return;
+            }
+            if let Some(action) = kind.strip_prefix("drv:") {
+                run_driver(&ui, &api, action.to_string());
+            } else if kind == "restart" {
+                show_toast(&ui, tr_ui(&ui, "Memulai ulang layanan ZenLink…", "Restarting the ZenLink service…"));
+                let api = api.clone();
+                std::thread::spawn(move || api.post_slow("/api/app/restart", &json!({}), 20));
             }
         });
     }
@@ -767,6 +969,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let api = api.clone();
         let weak = ui.as_weak();
         ui.on_driver_action(move |a: slint::SharedString| {
+            if matches!(a.as_str(), "restore" | "bind" | "removefilter") {
+                if let Some(ui) = weak.upgrade() {
+                    confirm_driver(&ui, a.as_str());
+                }
+                return;
+            }
             if a.as_str() == "mode" {
                 if let Some(ui) = weak.upgrade() {
                     ui.set_chooser_cancelable(true);
@@ -780,7 +988,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let (api, w) = (api.clone(), weak.clone());
             let a = a.to_string();
             std::thread::spawn(move || {
-                let r = if a == "wifi" { api.post("/api/wifi/prepare", &json!({})) } else { api.get("/api/drivers") };
+                let r = if a == "wifi" { api.post_slow("/api/wifi/prepare", &json!({}), 120) } else { api.get("/api/drivers") };
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(ui) = w.upgrade() else { return };
                     let Some(r) = r else {
@@ -818,15 +1026,35 @@ fn main() -> Result<(), slint::PlatformError> {
                     let _ = slint::quit_event_loop();
                 }
                 "min" => w.set_minimized(true),
+                "max" if is_full() => {}
                 "max" => w.set_maximized(!w.is_maximized()),
                 "fullscreen" => {
-                    let on = !w.is_fullscreen();
-                    w.set_fullscreen(on);
-                    ui.set_fullscreen(on);
+                    if !is_full() {
+                        let was_max = w.is_maximized();
+                        if was_max {
+                            w.set_maximized(false);
+                        }
+                        if let Some((x, y, mw, mh)) = monitor_rect(&ui) {
+                            let (pos, size) = (w.position(), w.size());
+                            APP.with_borrow_mut(|a| a.full_restore = Some((pos, size, was_max)));
+                            w.set_position(slint::PhysicalPosition::new(x, y));
+                            // One pixel taller than the monitor: a GL window that
+                            // exactly covers it is switched by the driver to an
+                            // opaque full-screen mode that stayed after leaving
+                            // (no glass, grey window, until a restart).
+                            w.set_size(slint::PhysicalSize::new(mw, mh + 1));
+                        }
+                    } else if let Some((pos, size, was_max)) = APP.with_borrow_mut(|a| a.full_restore.take()) {
+                        w.set_position(pos);
+                        w.set_size(size);
+                        if was_max {
+                            w.set_maximized(true);
+                        }
+                    }
+                    ui.set_fullscreen(is_full());
                     // Leaving full screen: fit the window to the picture again.
-                    // Windows drops the glass backdrop and corners when the
-                    // window style changes: apply the theme again now and
-                    // once the change has settled.
+                    // Corners and glass follow the new state: apply the theme
+                    // again now and once the change has settled.
                     APP.with_borrow_mut(|a| {
                         a.fitted = None;
                         a.backdrop = None;
@@ -838,6 +1066,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                     });
                 }
+                "drag" if is_full() => {}
                 "drag" => {
                     // Second press within 400 ms = double-click: maximise / restore.
                     let now = Instant::now();
@@ -915,7 +1144,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if (lw < 640.0) != ui.get_compact() {
                 ui.set_compact(lw < 640.0);
             }
-            let (maxed, full) = (ui.window().is_maximized(), ui.window().is_fullscreen());
+            let (maxed, full) = (ui.window().is_maximized(), is_full());
             if maxed != ui.get_maximized() || full != ui.get_fullscreen() {
                 // Window style changed: corners and glass go again.
                 APP.with_borrow_mut(|a| a.backdrop = None);
@@ -928,7 +1157,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let chrome = ui.get_chrome_w();
                 let target = (stage + chrome).max(MIN_W);
                 let lh = ui.window().size().height as f32 / sf;
-                if (lw - target).abs() > 0.5 && !ui.window().is_maximized() && !ui.window().is_fullscreen() {
+                if (lw - target).abs() > 0.5 && !ui.window().is_maximized() && !is_full() {
                     let size = LogicalSize::new(target, lh);
                     ui.window().set_size(size);
                     if let Some(wa) = work_area(&ui) {
@@ -984,7 +1213,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 v.set_bounds(x.round() as i32, y.round() as i32, w.round() as i32, h.round() as i32, streaming, ((22.0 - PIC_INSET) * sf).round() as i32);
                 let shown = v.shown_size();
-                let free = !ui.window().is_fullscreen() && !ui.window().is_maximized();
+                let free = a.full_restore.is_none() && !ui.window().is_maximized();
                 if streaming && p.fit_window && shown.0 > 0 && free {
                     let key = (shown.0, shown.1, ui.get_settings_open());
                     if a.fitted != Some(key) {

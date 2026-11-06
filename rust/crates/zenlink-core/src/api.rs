@@ -81,6 +81,18 @@ impl Api {
         Some(r.body_mut().read_json::<Value>().unwrap_or(Value::Null))
     }
 
+    /// POST for work that takes long (driver changes, Wi-Fi setup). The JSON
+    /// body comes back also for error statuses: they carry the message.
+    pub fn post_slow(&self, path: &str, body: &Value, secs: u64) -> Option<Value> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(secs)))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut r = agent.post(format!("{}{path}", base_url())).send_json(body).ok()?;
+        r.body_mut().read_json::<Value>().ok()
+    }
+
     pub fn alive(&self) -> bool {
         self.get("/api/state").is_some()
     }
