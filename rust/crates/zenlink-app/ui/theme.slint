@@ -1,34 +1,36 @@
 // Liquid Glass tokens. Light is the default; Dark is its twin.
-// `glass` (0..1) is the Liquid Glass intensity from Settings: 0 = solid.
+// `glass` (0..1) is clarity, set from Rust: 0 = solid (glass off),
+// 1 = fully clear (thickness 0%), in between = thicker frosted glass.
 
 export global Theme {
     in-out property <bool> dark: false;
     in-out property <float> glass: 1.0;
 
-    out property <color> text: dark ? #f6f6fa : #20212a;
-    out property <color> text-2: dark ? #a5a7b5 : #5f6170;
-    out property <color> text-3: dark ? #8f91a3 : #6b6d7c;
+    out property <color> text: dark ? #f5f5f7 : #1d1d1f;
+    out property <color> text-2: dark ? #ebebf5a6 : #3c3c4399;
+    out property <color> text-3: dark ? #ebebf580 : #3c3c4380;
     out property <color> accent: dark ? #ff73bc : #e8509c;
     out property <color> btn: dark ? #ff73bc : #f46bac;
-    out property <color> btn-hover: dark ? #ff91cb : #e84f9c;
-    out property <color> btn-text: dark ? #24081a : #ffffff;
-    out property <color> accent-soft: dark ? #ff73bc29 : #f46bac24;
-    // Window fill over the blurred desktop. At glass 0 it is opaque.
-    out property <color> base: dark ? Colors.rgba(16, 17, 22, 1 - 0.86 * glass) : Colors.rgba(245, 246, 250, 1 - 0.96 * glass);
-    out property <color> panel: dark ? Colors.rgba(34, 35, 48, 1 - 0.72 * glass) : Colors.rgba(255, 255, 255, 1 - 0.80 * glass);
-    // The mirrored-screen area stays a calm, mostly solid surface: the glass
-    // is for the chrome around it, never over the shared screen.
-    out property <color> stage: dark ? Colors.rgba(18, 19, 26, 1 - 0.18 * glass) : Colors.rgba(246, 247, 251, 1 - 0.18 * glass);
-    out property <color> raise: dark ? Colors.rgba(52, 54, 70, 1 - 0.45 * glass) : Colors.rgba(255, 255, 255, 1 - 0.42 * glass);
-    out property <color> hover: dark ? #3a3c4ccc : #ffffffee;
-    out property <color> edge: dark ? #ffffff1f : #ffffffd0;
-    // Liquid Glass rim: bright specular edge top-left, fading, catching
-    // light again bottom-right (light bending at the lens edge).
-    out property <brush> rim: glass <= 0.01 ? (dark ? #ffffff14 : #20212a17)
-        : dark ? @linear-gradient(135deg, #ffffff59 0%, #ffffff0d 40%, #ffffff05 60%, #ffffff33 100%)
-        : @linear-gradient(135deg, #ffffffff 0%, #ffffff80 35%, #ffffff33 60%, #ffffffd9 100%);
-    out property <color> line: dark ? #ffffff14 : #20212a17;
-    out property <color> shadow: dark ? #00000066 : #20212a1f;
+    out property <color> btn-hover: dark ? #ff8fca : #e84f9c;
+    out property <color> btn-text: dark ? #2a0618 : #ffffff;
+    out property <color> accent-soft: dark ? #ff73bc2e : #f46bac24;
+    // Surfaces lerp from solid (glass off) to glass (clarity 1). Dark glass
+    // is white light over the dark blurred desktop, like iOS.
+    // At full clarity a light dim stays (iOS dark glass dims what is behind).
+    out property <color> base: dark ? #121214.mix(#0000002e, 1 - glass) : #f2f2f7.mix(#ffffff24, 1 - glass);
+    out property <color> panel: dark ? #1c1c1e.mix(#ffffff0f, 1 - glass) : #ffffff.mix(#ffffff2e, 1 - glass);
+    // Mirrored screen while streaming: calm and solid.
+    out property <color> stage: dark ? #0a0a0c.mix(#0a0a0ce0, 1 - glass) : #f2f2f7.mix(#f2f2f7e0, 1 - glass);
+    out property <color> raise: dark ? #2c2c2e.mix(#ffffff1f, 1 - glass) : #ffffff.mix(#ffffff8c, 1 - glass);
+    out property <color> hover: dark ? #ffffff2e : #ffffffd9;
+    out property <color> edge: dark ? #ffffff24 : #ffffffcc;
+    // Liquid Glass rim: specular edge from the top-left light, catching
+    // light again bottom-right where the bezel bends it back.
+    out property <brush> rim: glass <= 0.01 ? (dark ? #ffffff1a : #0000001a)
+        : dark ? @linear-gradient(135deg, #ffffff73 0%, #ffffff14 38%, #ffffff08 62%, #ffffff40 100%)
+        : @linear-gradient(135deg, #ffffffff 0%, #ffffff8c 35%, #ffffff40 62%, #ffffffe6 100%);
+    out property <color> line: dark ? #ffffff1a : #0000001a;
+    out property <color> shadow: dark ? #00000073 : #0000001f;
     out property <color> ok: #2fc26b;
     out property <color> warn: #f2a53a;
     out property <color> bad: #ef5466;

@@ -10,7 +10,9 @@ export { Theme, I18n }
 
 export struct Prefs {
     theme: string,          // light | dark | system
-    glass: float,           // 0..100
+    glass-on: bool,         // Liquid Glass on; off = solid window
+    glass: float,           // thickness 0..100: 0 = fully clear, 100 = thick frosted
+    lens: bool,             // refraction / lensing layer
     lang: string,           // id | en
     fit: string,            // contain | cover | fill
     fit-window: bool,
@@ -347,8 +349,8 @@ component SettingsPanel inherits Glass {
                     icon: "\u{E790}";
                     tint-a: #f472b6;
                     tint-b: #db2777;
-                    info: I18n.t("Liquid Glass memakai blur asli Windows di belakang jendela (bukan gambar palsu). 0% mematikan kaca: jendela jadi solid dan GPU tidak mengerjakan blur.",
-                        "Liquid Glass uses Windows' own blur behind the window (not a painted fake). 0% turns the glass off: the window is solid and the GPU does no blur work.");
+                    info: I18n.t("Liquid Glass memperlihatkan desktop di belakang jendela secara nyata. Ketebalan 0% = bening total tanpa blur, makin tinggi makin buram (blur asli Windows). Matikan untuk jendela solid tanpa kerja GPU tambahan.",
+                        "Liquid Glass shows the real desktop behind the window. Thickness 0% = fully clear with no blur, higher = more frosted (Windows' own blur). Turn it off for a solid window with no extra GPU work.");
                     Seg {
                         options: ["light", "dark", "system"];
                         labels: [I18n.t("Terang", "Light"), I18n.t("Gelap", "Dark"), I18n.t("Sistem", "System")];
@@ -357,9 +359,13 @@ component SettingsPanel inherits Glass {
                     }
                     Row {
                         label: "Liquid Glass";
-                        Text { text: round(prefs.glass) + "%"; font-size: 12px; color: Theme.text-2; vertical-alignment: center; }
+                        Toggle { checked: prefs.glass-on; toggled(v) => { root.prefs.glass-on = v; root.changed(root.prefs); } }
                     }
-                    GlassSlider {
+                    if prefs.glass-on: Row {
+                        label: I18n.t("Ketebalan kaca", "Glass thickness");
+                        Text { text: round(prefs.glass) + "%" + (prefs.glass < 1 ? I18n.t(" · bening", " · clear") : ""); font-size: 12px; color: Theme.text-2; vertical-alignment: center; }
+                    }
+                    if prefs.glass-on: GlassSlider {
                         step: 5;
                         value: prefs.glass;
                         changed(v) => { root.prefs.glass = v; root.changed(root.prefs); }
@@ -569,7 +575,13 @@ export component AppWindow inherits Window {
     out property <length> stage-w: stage.width;
     out property <length> stage-h: stage.height;
     // Everything around the picture: paddings, bars, settings.
-    out property <length> chrome-w: 16px + (settings-open ? 368px : 0px);
+    // Settings slide: 0 = closed, 1 = open. Spring-like ease-out (fast start,
+    // soft landing), shared by the panel and the window width in Rust.
+    property <float> sp: settings-open ? 1 : 0;
+    // Materialize curves (shayann07/liquidglass, Apache-2.0): in 320 ms,
+    // out 240 ms.
+    animate sp { duration: settings-open ? 320ms : 240ms; easing: cubic-bezier(0.05, 0.7, 0.1, 1); }
+    out property <length> chrome-w: 16px + 368px * sp;
     out property <length> chrome-h: 16px + 46px + 8px + 8px + 46px;
 
     callback start-cast();
@@ -622,7 +634,7 @@ export component AppWindow inherits Window {
             }
             HorizontalLayout {
                 vertical-stretch: 1;
-                spacing: 8px;
+                spacing: 0px;
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 8px;
@@ -652,8 +664,15 @@ export component AppWindow inherits Window {
                         action(a) => { root.action(a); }
                     }
                 }
-                if root.settings-open: SettingsPanel {
+                // Slides in from the right edge while the window grows.
+                if root.sp > 0.001: Rectangle {
+                    width: 368px * root.sp;
+                    clip: true;
+                    SettingsPanel {
+                    x: 8px + (1 - root.sp) * 28px;
                     width: 360px;
+                    height: parent.height;
+                    opacity: min(1, root.sp * 1.6);
                     prefs: root.prefs;
                     driver-text: root.driver-text;
                     connection: root.connection;
@@ -661,6 +680,7 @@ export component AppWindow inherits Window {
                     changed(p) => { root.prefs = p; root.prefs-changed(p); }
                     close => { root.settings-open = false; root.settings-toggled(false); }
                     driver-action(a) => { root.driver-action(a); }
+                    }
                 }
             }
         }
@@ -716,7 +736,11 @@ export component AppWindow inherits Window {
         if root.toast != "": Glass {
             strong: true;
             x: (parent.width - self.width) / 2;
-            y: parent.height - 42px;
+            property <float> t: 0;
+            init => { self.t = 1; }
+            animate t { duration: 420ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+            opacity: self.t;
+            y: parent.height - 104px + 16px * (1 - self.t); // above the dock, rises in
             width: min(parent.width - 40px, toastT.preferred-width + 32px);
             height: 36px;
             border-radius: 12px;

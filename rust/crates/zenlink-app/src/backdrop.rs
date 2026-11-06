@@ -58,9 +58,9 @@ fn set_accent(hwnd: HWND, state: u32, tint: u32) -> bool {
 }
 
 /// Apply `mode` to `hwnd`. `dark` picks the dark title bar and tint.
-/// `glass` (0..1): 1 = clear Liquid Glass (desktop shows through, lightly
-/// blurred), lower = more frosted tint.
-pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, glass: f32) -> bool {
+/// `thick` (0..1): 0 = fully clear (no blur at all, the desktop shows as
+/// is), higher = Windows Acrylic blur with a stronger tint.
+pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, thick: f32) -> bool {
     unsafe {
         let d = BOOL::from(dark);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &d as *const _ as _, 4);
@@ -83,8 +83,14 @@ pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, glass: f32) -> bool {
                 set_accent(hwnd, 0, 0);
                 set_backdrop(DWMSBT_TRANSIENTWINDOW)
             }
+            Backdrop::Accent if thick < 0.03 => {
+                // Clear: no blur, per-pixel alpha only (winit transparency).
+                set_backdrop(DWMSBT_NONE);
+                set_accent(hwnd, 0, 0)
+            }
             Backdrop::Accent => {
                 set_backdrop(DWMSBT_NONE);
+                let glass = 1.0 - thick;
                 // ACCENT_ENABLE_ACRYLICBLURBEHIND = 4, light/dark tint with low alpha.
                 // Tint alpha follows the glass level: ~0 at 100% gives clear
                 // glass (measured: background stripes stay visible), up to
@@ -102,7 +108,9 @@ pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, glass: f32) -> bool {
                     };
                     ch(0) | ch(8) | ch(16)
                 };
-                let rgb = mix(if dark { 0x16_11_10 } else { 0xfa_f6_f5 }, 0x80_80_80);
+                // Neutral grey per theme: mid-dark for dark glass (no washed-out grey),
+                // light grey for light glass.
+                let rgb = mix(if dark { 0x1e_1c_1c } else { 0xf7_f2_f2 }, if dark { 0x2c_2c_2c } else { 0xa8_a8_a8 }); // AABBGGRR
                 set_accent(hwnd, 4, (a << 24) | rgb)
             }
         }

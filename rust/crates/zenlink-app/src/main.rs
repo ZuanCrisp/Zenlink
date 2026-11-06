@@ -64,6 +64,8 @@ struct App {
     backdrop: Option<(bool, bool, i32)>,
     on_top: Option<bool>,
     dots: Option<dots::Dots>,
+    // Stage width (logical) to keep while the settings panel slides.
+    hold_stage: Option<f32>,
     dots_at: Option<Instant>,
 }
 
@@ -109,10 +111,12 @@ fn apply_look(ui: &AppWindow) {
         _ => false,
     };
     ui.global::<Theme>().set_dark(dark);
-    ui.global::<Theme>().set_glass(p.glass / 100.0);
+    // Thickness 0..100 -> clarity: 0% thick = 1.0 (clear), 100% = 0.25.
+    let thick = (p.glass / 100.0).clamp(0.0, 1.0);
+    ui.global::<Theme>().set_glass(if p.glass_on { 1.0 - 0.75 * thick } else { 0.0 });
     ui.global::<I18n>().set_id(p.lang.as_str() != "en");
-    let glass_on = p.glass > 0.0;
-    let glass_k = p.glass / 100.0;
+    let glass_on = p.glass_on;
+    let glass_k = thick;
     APP.with_borrow_mut(|a| {
         a.dark = dark;
         let glass_q = (glass_k * 20.0).round() as i32; // re-apply in 5% steps
@@ -373,18 +377,33 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         ui.on_settings_toggled(move |open| {
             let Some(ui) = weak.upgrade() else { return };
-            let fitted = APP.with_borrow(|a| a.streaming && ui.get_prefs().fit_window && a.fitted.is_some());
-            if fitted {
-                APP.with_borrow_mut(|a| a.fitted = None);
-            } else {
-                let s = ui.window().size().to_logical(ui.window().scale_factor());
-                let dw = if open { 368.0 } else { -368.0 };
-                ui.window().set_size(LogicalSize::new((s.width + dw).max(400.0), s.height));
-            }
+            // The window grows/shrinks frame by frame with the panel slide
+            // (see the frame timer), keeping the picture size steady.
+            let sf = ui.window().scale_factor();
+            let stage = ui.window().size().to_logical(sf).width - ui.get_chrome_w();
+            APP.with_borrow_mut(|a| {
+                a.hold_stage = Some(stage);
+                if let Some((w, h, _)) = a.fitted {
+                    a.fitted = Some((w, h, open));
+                }
+            });
         });
     }
     if ui.get_settings_open() {
         ui.invoke_settings_toggled(true);
+    }
+    // Test hook: ZL_DEMO_SETTINGS=1 opens/closes settings every 1.5 s so the
+    // slide can be filmed frame by frame.
+    let demo = slint::Timer::default();
+    if std::env::var_os("ZL_DEMO_SETTINGS").is_some() {
+        let weak = ui.as_weak();
+        demo.start(slint::TimerMode::Repeated, Duration::from_millis(1500), move || {
+            if let Some(ui) = weak.upgrade() {
+                let open = !ui.get_settings_open();
+                ui.set_settings_open(open);
+                ui.invoke_settings_toggled(open);
+            }
+        });
     }
     {
         let weak = ui.as_weak();
@@ -530,7 +549,25 @@ fn main() -> Result<(), slint::PlatformError> {
             let lw = ui.window().size().width as f32 / sf;
             if (lw < 640.0) != ui.get_compact() {
                 ui.set_compact(lw < 640.0);
-                ui.set_maximized(ui.window().is_maximized());
+            }
+            ui.set_maximized(ui.window().is_maximized());
+            // Settings slide: window width follows the animated chrome so
+            // the picture keeps its size; ends when the slide settles.
+            if let Some(stage) = APP.with_borrow(|a| a.hold_stage) {
+                let chrome = ui.get_chrome_w();
+                let target = (stage + chrome).max(400.0);
+                let lh = ui.window().size().height as f32 / sf;
+                if (lw - target).abs() > 0.5 && !ui.window().is_maximized() {
+                    let size = LogicalSize::new(target, lh);
+                    ui.window().set_size(size);
+                    if let Some(wa) = work_area(&ui) {
+                        keep_on_screen(&ui, wa, size);
+                    }
+                }
+                let end = if ui.get_settings_open() { 16.0 + 368.0 } else { 16.0 };
+                if (chrome - end).abs() < 0.01 {
+                    APP.with_borrow_mut(|a| a.hold_stage = None);
+                }
             }
             let bar = ui.get_stage_w() < 600.0;
             if bar != ui.get_compact_bar() {
