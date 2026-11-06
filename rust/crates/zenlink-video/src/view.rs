@@ -2,7 +2,7 @@
 
 use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering::Relaxed};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 
 use windows::core::{w, Interface, Result};
@@ -59,6 +59,10 @@ struct Inner {
     pressed: AtomicBool,
     /// Edge crop in source pixels: left, top, right, bottom.
     crop: [AtomicU32; 4],
+    /// Size changes asked for by set_bounds / shown by the render thread
+    /// (see `set_bounds`).
+    resized: Mutex<(u64, u64)>,
+    resized_cv: Condvar,
 }
 
 impl Inner {
@@ -280,6 +284,8 @@ impl VideoView {
             pointer: Mutex::new(None),
             pressed: AtomicBool::new(false),
             crop: Default::default(),
+            resized: Mutex::new((0, 0)),
+            resized_cv: Condvar::new(),
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, Arc::as_ptr(&inner) as isize) };
         let meter = Mutex::new(RateMeter::new(&inner.stats));
@@ -320,6 +326,30 @@ impl VideoView {
             }
             let flags = if visible { SWP_SHOWWINDOW } else { SWP_HIDEWINDOW };
             let _ = SetWindowPos(hwnd, Some(HWND_TOP), x, y, key.2, key.3, flags | SWP_NOACTIVATE);
+        }
+        drop(last);
+        if size_changed && visible {
+            self.wait_resized();
+        }
+    }
+
+    /// OBS Game Capture hooks both the picture (D3D11) and the window
+    /// around it (OpenGL). ResizeBuffers drops its D3D capture, and the
+    /// next Present or SwapBuffers in the process takes it over. When that
+    /// was the window's OpenGL frame, OBS showed nothing until the source
+    /// was added again. So the UI thread waits here (it is the one that
+    /// draws OpenGL) until the render thread has resized and presented.
+    fn wait_resized(&self) {
+        let mut g = self.inner.resized.lock().unwrap();
+        g.0 += 1;
+        let want = g.0;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(120);
+        while g.1 < want {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            g = self.inner.resized_cv.wait_timeout(g, left).unwrap().0;
         }
     }
 
@@ -483,6 +513,9 @@ fn render_session(inner: &Inner) -> Result<()> {
 
         while !inner.stop_render.load(Relaxed) {
             WaitForSingleObjectEx(waitable, 100, true);
+            // Size changes asked for up to now (read before the size, so a
+            // newer one is not reported as shown).
+            let asked = inner.resized.lock().unwrap().0;
             let mut rc = RECT::default();
             let _ = GetClientRect(hwnd, &mut rc);
             let (nw, nh) = (rc.right.max(1) as u32, rc.bottom.max(1) as u32);
@@ -608,6 +641,11 @@ fn render_session(inner: &Inner) -> Result<()> {
             drop(back);
             if sc.Present(1, DXGI_PRESENT(0)).is_ok() {
                 inner.stats.presented.fetch_add(1, Relaxed);
+            }
+            let mut g = inner.resized.lock().unwrap();
+            if g.1 < asked {
+                g.1 = asked;
+                inner.resized_cv.notify_all();
             }
         }
     }

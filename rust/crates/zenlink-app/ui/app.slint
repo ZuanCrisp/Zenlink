@@ -894,6 +894,22 @@ component SettingsPanel inherits Glass {
 
 
                 Card {
+                    title: I18n.t("Rekam / live di OBS", "Record / stream in OBS");
+                    icon: "\u{E714}";
+                    tint-a: #f87171;
+                    tint-b: #dc2626;
+                    info: I18n.t("Game Capture mengambil gambar langsung dari GPU: tajam, tanpa bingkai jendela, dan tetap jalan walau ZenLink tertutup jendela lain. Window Capture juga bisa, tapi ikut menangkap bingkai jendela.",
+                        "Game Capture takes the picture straight from the GPU: sharp, no window frame, and it keeps working when ZenLink is behind other windows. Window Capture also works, but it picks up the window frame too.");
+                    Text {
+                        text: I18n.t("Di OBS, tambah sumber Game Capture → Mode: tangkap jendela tertentu → pilih [ZenLink.exe]: ZenLink. Ganti potret/lanskap tidak perlu tambah ulang.",
+                            "In OBS, add a Game Capture source → Mode: capture specific window → pick [ZenLink.exe]: ZenLink. Switching portrait / landscape needs no re-adding.");
+                        font-size: 11.5px;
+                        color: Theme.text-2;
+                        wrap: word-wrap;
+                    }
+                }
+
+                Card {
                     title: I18n.t("Audio perangkat → PC", "Device audio → PC");
                     icon: "\u{E767}";
                     tint-a: #fb923c;
