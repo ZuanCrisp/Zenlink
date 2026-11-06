@@ -37,6 +37,17 @@ class PrerequisiteTests(unittest.TestCase):
         self.assertIn("call :build_next", _section(bat, ":launch"))
         self.assertIn("cargo build --release -p zenlink-app", _section(bat, ":build_next"))
 
+    def test_start_script_loads_machine_only_settings(self):
+        # A3: e.g. ANDROID_HOME for the user's SDK, kept out of the repository.
+        launch = _section(_bat(), ":launch")
+        self.assertIn('call "%~dp0Start ZenLink.local.bat"', launch)
+        self.assertLess(launch.index("Start ZenLink.local.bat"), launch.index("call :build_next"))
+
+    def test_android_fixture_is_small_and_binary(self):
+        fx = ROOT / "tests" / "fixtures" / "android" / "synthetic-h264-360x640.scrcpy"
+        self.assertLess(fx.stat().st_size, 150_000)
+        self.assertIn("*.scrcpy binary", (ROOT / ".gitattributes").read_text(encoding="utf-8"))
+
     def test_icon_font_has_windows_10_fallback(self):
         # B-12: "Segoe Fluent Icons" exists only on Windows 11.
         main = (ROOT / "rust" / "crates" / "zenlink-app" / "src" / "main.rs").read_text(encoding="utf-8")

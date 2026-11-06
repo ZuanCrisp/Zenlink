@@ -5557,6 +5557,9 @@ dependencies = [
 [[package]]
 name = "zenlink-android"
 version = "2.5.0-beta.1"
+dependencies = [
+ "log",
+]
 
 [[package]]
 name = "zenlink-app"

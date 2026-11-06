@@ -16,9 +16,8 @@ Rust client (phases A2-A4); upstream is the reference.
 
 - Up to three, opened in this order: video, audio, control. A disabled one is skipped.
 - Forward tunnel only: the device sends one dummy byte on the first socket.
-- Then, on the first socket, the device meta (currently the device name). Its exact
-  layout is in upstream `DesktopConnection.java` (`sendDeviceMeta`); read it there
-  when implementing (phase A2).
+- Then, on the first socket, the device meta: the device name, 64 bytes, UTF-8,
+  NUL-padded (`DEVICE_NAME_FIELD_LENGTH` in `DesktopConnection.java`).
 
 ## Video and audio streams
 
@@ -41,3 +40,18 @@ Rust client (phases A2-A4); upstream is the reference.
 ## Version bumps
 
 See the comment in `rust/crates/zenlink-android/src/scrcpy.rs`.
+
+## ZenLink implementation (phase A3)
+
+- `rust/crates/zenlink-android/src/mirror.rs`: `Mirror::start` pushes the server
+  (`sync:`), creates `reverse:forward:localabstract:scrcpy_<scid>;tcp:<port>` (or a
+  forward with `tunnel_forward=true` when reverse fails), runs
+  `shell:CLASSPATH=... app_process / com.genymobile.scrcpy.Server 5.0.1 scid=<scid> log_level=info video_codec=h264 audio=false control=false max_size=1920 video_bit_rate=8000000 max_fps=60`,
+  accepts the video socket (10 s limit), removes the tunnel, reads the device meta and
+  the codec id. The scid is 31 bits, formatted `%08x` (the server parses it as hex).
+- Closing the shell socket ends the server on the device (`Stopper`, `Session` drop).
+- `rust/crates/zenlink-app/src/android.rs` converts packets for the shared decoder:
+  config (Annex B SPS/PPS) to an avcC record, frames to 4-byte NAL lengths; session
+  packets are skipped because a rotation is followed by a new config.
+- Test without a device: `ZL_ANDROID_FIXTURE=tests\fixtures\android\synthetic-h264-360x640.scrcpy`
+  with `ZL_ADB=none` plays a recorded stream on the Android screen, paced by its PTS.

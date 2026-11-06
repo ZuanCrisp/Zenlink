@@ -36,6 +36,11 @@ Design references for the Rust window are listed in `docs/rust/THIRD_PARTY.md`.
   `e25671cd96b10bad896aa42ab91a695a9e573395262baed4e4a2ff178d6a3a78`) through
   `native/zlaac/tools/make_eld_fixture.cpp`. No FDK code or binary is part of
   ZenLink or its repository.
+- `tests/fixtures/android/synthetic-h264-360x640.scrcpy` is a generated picture
+  (colour bars, a moving block, a frame counter) encoded to H.264 with libx264
+  through PyAV in the developer venv (`rust/tools/make_android_fixture.py`) and
+  wrapped in the scrcpy v5.0.1 video socket format. It holds no third-party
+  content; no x264 code or binary is part of ZenLink.
 
 ## scrcpy server, in `third_party/scrcpy/`
 

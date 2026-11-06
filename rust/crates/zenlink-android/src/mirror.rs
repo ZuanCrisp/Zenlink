@@ -1,0 +1,679 @@
+//! Screen mirroring with the scrcpy server (phase A3: video only).
+//!
+//! Protocol notes: docs/android/SCRCPY.md (pinned v5.0.1). In short:
+//!
+//! 1. push the server to [`DEVICE_SERVER_PATH`];
+//! 2. tunnel `localabstract:scrcpy_<scid>`: `adb reverse` (the device connects
+//!    to us), or `adb forward` when reverse is unavailable (we connect to it);
+//! 3. start it with `app_process` and the client version as first argument;
+//! 4. read the device meta (64-byte name) and the codec id, then packets:
+//!    session packets (new capture size) and media packets (config or frame).
+//!
+//! Everything here is portable std Rust. The packets are raw `MediaCodec`
+//! output (Annex B for H.264/H.265); the app converts them for its decoder.
+
+use std::io::{self, Read, Write};
+use std::net::{Shutdown, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use crate::adb::{AdbClient, AdbError, Target};
+use crate::scrcpy::{DEVICE_SERVER_PATH, SCRCPY_VERSION};
+
+/// Video codec ids (`u32` big-endian, the codec's FourCC-like name).
+pub const CODEC_H264: u32 = 0x6832_3634;
+pub const CODEC_H265: u32 = 0x6832_3635;
+pub const CODEC_AV1: u32 = 0x0061_7631;
+
+/// Size of the device meta (the device name, NUL-padded UTF-8).
+pub const DEVICE_NAME_LEN: usize = 64;
+
+const FLAG_SESSION: u64 = 1 << 63;
+const FLAG_CONFIG: u64 = 1 << 62;
+const FLAG_KEY_FRAME: u64 = 1 << 61;
+const PTS_MASK: u64 = FLAG_KEY_FRAME - 1;
+
+/// Largest packet ZenLink accepts. A 4K keyframe is a few MB at most.
+const MAX_PACKET: usize = 32 << 20;
+
+/// Name of a codec id, for logs and the UI.
+pub fn codec_name(id: u32) -> &'static str {
+    match id {
+        CODEC_H264 => "h264",
+        CODEC_H265 => "h265",
+        CODEC_AV1 => "av1",
+        _ => "unknown",
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Packet {
+    /// A new capture session (start, rotation, display resize).
+    Session {
+        width: u32,
+        height: u32,
+        client_resized: bool,
+    },
+    /// Codec configuration (SPS/PPS for H.264), Annex B.
+    Config(Vec<u8>),
+    /// One encoded frame, Annex B. `pts` is in microseconds.
+    Media { pts: u64, key: bool, data: Vec<u8> },
+}
+
+/// Reads the device name sent first on the first socket.
+pub fn read_device_meta<R: Read>(r: &mut R) -> io::Result<String> {
+    let mut name = [0u8; DEVICE_NAME_LEN];
+    r.read_exact(&mut name)?;
+    let end = name.iter().position(|&b| b == 0).unwrap_or(DEVICE_NAME_LEN);
+    Ok(String::from_utf8_lossy(&name[..end]).trim().to_string())
+}
+
+/// Writes a device meta block (tests and recordings).
+pub fn write_device_meta<W: Write>(w: &mut W, name: &str) -> io::Result<()> {
+    let mut block = [0u8; DEVICE_NAME_LEN];
+    // Keep it NUL-terminated and cut on a character boundary.
+    let mut n = name.len().min(DEVICE_NAME_LEN - 1);
+    while !name.is_char_boundary(n) {
+        n -= 1;
+    }
+    block[..n].copy_from_slice(&name.as_bytes()[..n]);
+    w.write_all(&block)
+}
+
+/// The video socket after the device meta: codec id, then packets.
+pub struct VideoReader<R> {
+    r: R,
+    pub codec: u32,
+}
+
+impl<R: Read> VideoReader<R> {
+    /// Reads the codec id. `0` means the device could not encode (scrcpy
+    /// sends it when the stream is disabled or the encoder failed).
+    pub fn new(mut r: R) -> io::Result<Self> {
+        let mut id = [0u8; 4];
+        r.read_exact(&mut id)?;
+        Ok(Self {
+            r,
+            codec: u32::from_be_bytes(id),
+        })
+    }
+
+    /// Next packet. An error (including EOF) ends the stream.
+    pub fn next_packet(&mut self) -> io::Result<Packet> {
+        let mut head = [0u8; 12];
+        self.r.read_exact(&mut head)?;
+        let word = |i: usize| u32::from_be_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
+        if head[0] & 0x80 != 0 {
+            return Ok(Packet::Session {
+                width: word(4),
+                height: word(8),
+                client_resized: head[3] & 1 != 0,
+            });
+        }
+        let flags = u64::from_be_bytes(head[..8].try_into().unwrap());
+        let len = word(8) as usize;
+        if len == 0 || len > MAX_PACKET {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("bad packet size {len}"),
+            ));
+        }
+        let mut data = vec![0u8; len];
+        self.r.read_exact(&mut data)?;
+        if flags & FLAG_CONFIG != 0 {
+            return Ok(Packet::Config(data));
+        }
+        Ok(Packet::Media {
+            pts: flags & PTS_MASK,
+            key: flags & FLAG_KEY_FRAME != 0,
+            data,
+        })
+    }
+
+    pub fn into_inner(self) -> R {
+        self.r
+    }
+}
+
+/// Writes one packet in the server's wire format (tests and recordings).
+pub fn write_packet<W: Write>(w: &mut W, p: &Packet) -> io::Result<()> {
+    match p {
+        Packet::Session {
+            width,
+            height,
+            client_resized,
+        } => {
+            let flags = (FLAG_SESSION >> 32) as u32 | u32::from(*client_resized);
+            w.write_all(&flags.to_be_bytes())?;
+            w.write_all(&width.to_be_bytes())?;
+            w.write_all(&height.to_be_bytes())
+        }
+        Packet::Config(d) => {
+            w.write_all(&FLAG_CONFIG.to_be_bytes())?;
+            w.write_all(&(d.len() as u32).to_be_bytes())?;
+            w.write_all(d)
+        }
+        Packet::Media { pts, key, data } => {
+            let flags = (pts & PTS_MASK) | if *key { FLAG_KEY_FRAME } else { 0 };
+            w.write_all(&flags.to_be_bytes())?;
+            w.write_all(&(data.len() as u32).to_be_bytes())?;
+            w.write_all(data)
+        }
+    }
+}
+
+/// A random 31-bit session id; it names the device socket `scrcpy_<scid>`.
+pub fn random_scid() -> u32 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    (h.finish() as u32) & 0x7fff_ffff
+}
+
+/// Device socket name for a session id (the server formats it with `%08x`).
+pub fn socket_name(scid: u32) -> String {
+    format!("scrcpy_{scid:08x}")
+}
+
+/// Server options for a video-only session (phase A3). Later phases add
+/// audio, control and the per-device profiles.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VideoOptions {
+    /// Longest side in pixels, 0 = native.
+    pub max_size: u32,
+    /// Bits per second, 0 = server default (8 Mbps).
+    pub bit_rate: u32,
+    /// Frames per second cap, 0 = no cap.
+    pub max_fps: u32,
+    /// `h264` (the default; `h265`/`av1` only after Smart Encoder Detection).
+    pub codec: &'static str,
+}
+
+impl Default for VideoOptions {
+    fn default() -> Self {
+        Self {
+            max_size: 1920,
+            bit_rate: 8_000_000,
+            max_fps: 60,
+            codec: "h264",
+        }
+    }
+}
+
+/// The `adb shell` command that starts the server.
+pub fn server_command(scid: u32, tunnel_forward: bool, o: &VideoOptions) -> String {
+    let mut cmd = format!(
+        "CLASSPATH={DEVICE_SERVER_PATH} app_process / com.genymobile.scrcpy.Server {SCRCPY_VERSION} \
+         scid={scid:08x} log_level=info video_codec={} audio=false control=false",
+        o.codec
+    );
+    if tunnel_forward {
+        cmd.push_str(" tunnel_forward=true");
+    }
+    if o.max_size > 0 {
+        cmd.push_str(&format!(" max_size={}", o.max_size));
+    }
+    if o.bit_rate > 0 {
+        cmd.push_str(&format!(" video_bit_rate={}", o.bit_rate));
+    }
+    if o.max_fps > 0 {
+        cmd.push_str(&format!(" max_fps={}", o.max_fps));
+    }
+    cmd
+}
+
+/// How long the server gets to connect after it was started.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A running mirror session: the video socket and the server's shell.
+/// Destructure it to keep `video` and `session` apart; dropping the
+/// session ends the server.
+pub struct Mirror {
+    pub device_name: String,
+    pub video: VideoReader<TcpStream>,
+    pub session: Session,
+}
+
+/// The server's shell and a handle on the video socket.
+pub struct Session {
+    /// Closing the shell socket ends `app_process` on the device.
+    shell: TcpStream,
+    video_ctl: TcpStream,
+}
+
+impl Mirror {
+    /// Pushes `server` (the bundled jar), starts it and connects the video
+    /// socket. Blocks for at most a few seconds.
+    pub fn start(
+        client: &AdbClient,
+        target: &Target,
+        server: &[u8],
+        opts: &VideoOptions,
+    ) -> Result<Self, AdbError> {
+        client.push(target, server, DEVICE_SERVER_PATH, 0o100644)?;
+        let scid = random_scid();
+        let remote = format!("localabstract:{}", socket_name(scid));
+
+        // Prefer reverse: no port has to be free on the device side, and the
+        // server does not need to send a dummy byte.
+        let listener = TcpListener::bind("127.0.0.1:0")?;
+        let local = format!("tcp:{}", listener.local_addr()?.port());
+        let forward = match client.reverse(target, &remote, &local) {
+            Ok(()) => None,
+            Err(e) => {
+                log::info!("android: adb reverse failed ({e}), using forward");
+                let port = TcpListener::bind("127.0.0.1:0")?.local_addr()?.port();
+                let local = format!("tcp:{port}");
+                client.forward(target, &local, &remote)?;
+                Some((port, local))
+            }
+        };
+
+        let shell = client.open_service(
+            target,
+            &format!("shell:{}", server_command(scid, forward.is_some(), opts)),
+        )?;
+        shell.set_read_timeout(None)?;
+        let ended = Arc::new(AtomicBool::new(false));
+        log_shell(shell.try_clone()?, ended.clone());
+
+        let video = match &forward {
+            None => {
+                let r = accept(&listener, &ended);
+                let _ = client.reverse_remove(target, &remote);
+                r
+            }
+            Some((port, local)) => {
+                let r = connect_forward(*port, &ended);
+                let _ = client.forward_remove(target, local);
+                r
+            }
+        };
+        let mut video = match video {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = shell.shutdown(Shutdown::Both);
+                return Err(e.into());
+            }
+        };
+        video.set_read_timeout(None)?;
+        video.set_nodelay(true)?;
+        let device_name = read_device_meta(&mut video)?;
+        let video_ctl = video.try_clone()?;
+        let video = VideoReader::new(video)?;
+        log::info!(
+            "android: mirroring {device_name:?} codec={}",
+            codec_name(video.codec)
+        );
+        Ok(Self {
+            device_name,
+            video,
+            session: Session { shell, video_ctl },
+        })
+    }
+
+    /// A handle that ends the session from another thread.
+    pub fn stopper(&self) -> io::Result<Stopper> {
+        self.session.stopper()
+    }
+}
+
+impl Session {
+    pub fn stopper(&self) -> io::Result<Stopper> {
+        Ok(Stopper {
+            shell: self.shell.try_clone()?,
+            video: self.video_ctl.try_clone()?,
+        })
+    }
+}
+
+/// Ends a [`Mirror`] from another thread: the blocked read returns.
+pub struct Stopper {
+    shell: TcpStream,
+    video: TcpStream,
+}
+
+impl Stopper {
+    pub fn stop(&self) {
+        let _ = self.video.shutdown(Shutdown::Both);
+        let _ = self.shell.shutdown(Shutdown::Both);
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let _ = self.video_ctl.shutdown(Shutdown::Both);
+        let _ = self.shell.shutdown(Shutdown::Both);
+    }
+}
+
+/// Logs the server's output; sets `ended` when the shell closes.
+fn log_shell(mut shell: TcpStream, ended: Arc<AtomicBool>) {
+    let _ = std::thread::Builder::new()
+        .name("scrcpy-server-log".into())
+        .spawn(move || {
+            let mut buf = [0u8; 2048];
+            let mut line = Vec::new();
+            loop {
+                match shell.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        for &b in &buf[..n] {
+                            if b == b'\n' {
+                                log::info!("scrcpy: {}", String::from_utf8_lossy(&line).trim_end());
+                                line.clear();
+                            } else if line.len() < 4096 {
+                                line.push(b);
+                            }
+                        }
+                    }
+                }
+            }
+            if !line.is_empty() {
+                log::info!("scrcpy: {}", String::from_utf8_lossy(&line).trim_end());
+            }
+            ended.store(true, Relaxed);
+        });
+}
+
+fn accept(listener: &TcpListener, ended: &AtomicBool) -> io::Result<TcpStream> {
+    listener.set_nonblocking(true)?;
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    loop {
+        match listener.accept() {
+            Ok((s, _)) => {
+                s.set_nonblocking(false)?;
+                return Ok(s);
+            }
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+            Err(e) => return Err(e),
+        }
+        if ended.load(Relaxed) {
+            return Err(io::Error::other(
+                "the scrcpy server exited before connecting",
+            ));
+        }
+        if Instant::now() > deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the scrcpy server did not connect",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Forward tunnel: adb accepts our connection even before the server
+/// listens, so a connection only counts once the server's dummy byte arrives.
+fn connect_forward(port: u16, ended: &AtomicBool) -> io::Result<TcpStream> {
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    loop {
+        if let Ok(mut s) = TcpStream::connect(("127.0.0.1", port)) {
+            s.set_read_timeout(Some(Duration::from_secs(2)))?;
+            let mut dummy = [0u8; 1];
+            if s.read_exact(&mut dummy).is_ok() {
+                return Ok(s);
+            }
+        }
+        if ended.load(Relaxed) {
+            return Err(io::Error::other(
+                "the scrcpy server exited before connecting",
+            ));
+        }
+        if Instant::now() > deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "could not connect to the scrcpy server",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::adb::read_frame;
+    use std::sync::Mutex;
+
+    /// A stand-in for the adb server plus a device running the scrcpy server:
+    /// takes the push, the reverse tunnel and the shell command, then
+    /// connects back through the "tunnel" and streams `wire`.
+    fn fake_device(wire: Vec<u8>) -> (u16, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let log = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log2 = log.clone();
+        std::thread::spawn(move || {
+            let tunnel = Arc::new(Mutex::new(0u16));
+            for conn in listener.incoming() {
+                let Ok(mut c) = conn else { break };
+                let (log, tunnel, wire) = (log2.clone(), tunnel.clone(), wire.clone());
+                std::thread::spawn(move || {
+                    let t = String::from_utf8(read_frame(&mut c).unwrap()).unwrap();
+                    assert_eq!(t, "host:transport:SER");
+                    c.write_all(b"OKAY").unwrap();
+                    let svc = String::from_utf8(read_frame(&mut c).unwrap()).unwrap();
+                    log.lock().unwrap().push(svc.clone());
+                    c.write_all(b"OKAY").unwrap();
+                    if svc == "sync:" {
+                        let mut total = 0usize;
+                        loop {
+                            let mut h = [0u8; 8];
+                            c.read_exact(&mut h).unwrap();
+                            let n = u32::from_le_bytes(h[4..].try_into().unwrap()) as usize;
+                            match &h[..4] {
+                                b"SEND" | b"DATA" => {
+                                    let mut b = vec![0u8; n];
+                                    c.read_exact(&mut b).unwrap();
+                                    if &h[..4] == b"DATA" {
+                                        total += n;
+                                    }
+                                }
+                                b"DONE" => break,
+                                _ => panic!("sync"),
+                            }
+                        }
+                        log.lock().unwrap().push(format!("pushed {total}"));
+                        c.write_all(b"OKAY\0\0\0\0").unwrap();
+                    } else if let Some(rest) = svc.strip_prefix("reverse:forward:") {
+                        *tunnel.lock().unwrap() =
+                            rest.rsplit("tcp:").next().unwrap().parse().unwrap();
+                        c.write_all(b"OKAY").unwrap();
+                    } else if svc.starts_with("reverse:killforward:") {
+                        c.write_all(b"OKAY").unwrap();
+                    } else if svc.starts_with("shell:") {
+                        let p = *tunnel.lock().unwrap();
+                        let mut v = TcpStream::connect(("127.0.0.1", p)).unwrap();
+                        c.write_all(b"[server] INFO: Device: [Google] Pixel 9\n")
+                            .unwrap();
+                        v.write_all(&wire).unwrap();
+                        // Keep the shell open until the client closes it.
+                        let mut sink = [0u8; 64];
+                        while matches!(c.read(&mut sink), Ok(n) if n > 0) {}
+                        log.lock().unwrap().push("shell closed".into());
+                    }
+                });
+            }
+        });
+        (port, log)
+    }
+
+    #[test]
+    fn start_pushes_tunnels_and_reads_the_stream() {
+        let mut wire = Vec::new();
+        write_device_meta(&mut wire, "Pixel 9").unwrap();
+        wire.extend_from_slice(&CODEC_H264.to_be_bytes());
+        let first = Packet::Session {
+            width: 1080,
+            height: 2424,
+            client_resized: false,
+        };
+        let config = Packet::Config(vec![0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f]);
+        write_packet(&mut wire, &first).unwrap();
+        write_packet(&mut wire, &config).unwrap();
+        let (port, log) = fake_device(wire);
+        let mut client = AdbClient::new(port);
+        client.timeout = Duration::from_secs(2);
+        let jar = vec![1u8; 100_000];
+        let mut m = Mirror::start(
+            &client,
+            &Target::Serial("SER"),
+            &jar,
+            &VideoOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(m.device_name, "Pixel 9");
+        assert_eq!(m.video.codec, CODEC_H264);
+        assert_eq!(m.video.next_packet().unwrap(), first);
+        assert_eq!(m.video.next_packet().unwrap(), config);
+        m.stopper().unwrap().stop();
+        assert!(m.video.next_packet().is_err(), "stop ends the stream");
+        drop(m);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !log.lock().unwrap().iter().any(|l| l == "shell closed") {
+            assert!(
+                Instant::now() < deadline,
+                "shell not closed: {:?}",
+                log.lock().unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let log = log.lock().unwrap();
+        assert_eq!(log[0], "sync:");
+        assert_eq!(log[1], "pushed 100000");
+        assert!(
+            log[2].starts_with("reverse:forward:localabstract:scrcpy_"),
+            "{}",
+            log[2]
+        );
+        assert!(log[3].starts_with("shell:CLASSPATH=/data/local/tmp/scrcpy-server.jar"));
+        assert!(log[4].starts_with("reverse:killforward:localabstract:scrcpy_"));
+    }
+
+    #[test]
+    fn packets_round_trip() {
+        let packets = [
+            Packet::Session {
+                width: 1080,
+                height: 2400,
+                client_resized: false,
+            },
+            Packet::Config(vec![0, 0, 0, 1, 0x67, 1]),
+            Packet::Media {
+                pts: 33_333,
+                key: true,
+                data: vec![0, 0, 0, 1, 0x65, 2],
+            },
+            Packet::Media {
+                pts: (1 << 61) - 1,
+                key: false,
+                data: vec![0, 0, 1, 0x41],
+            },
+            Packet::Session {
+                width: 2400,
+                height: 1080,
+                client_resized: true,
+            },
+        ];
+        let mut wire = Vec::new();
+        write_device_meta(&mut wire, "Pixel 9").unwrap();
+        wire.extend_from_slice(&CODEC_H264.to_be_bytes());
+        for p in &packets {
+            write_packet(&mut wire, p).unwrap();
+        }
+        let mut r = &wire[..];
+        assert_eq!(read_device_meta(&mut r).unwrap(), "Pixel 9");
+        let mut v = VideoReader::new(r).unwrap();
+        assert_eq!(codec_name(v.codec), "h264");
+        for p in &packets {
+            assert_eq!(&v.next_packet().unwrap(), p);
+        }
+        assert!(v.next_packet().is_err(), "EOF ends the stream");
+    }
+
+    #[test]
+    fn wire_layout_matches_the_server() {
+        // Values from scrcpy's Streamer.java: config = 1<<62, key frame = 1<<61.
+        let mut w = Vec::new();
+        write_packet(&mut w, &Packet::Config(vec![9])).unwrap();
+        assert_eq!(w, [0x40, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 9]);
+        let mut w = Vec::new();
+        write_packet(
+            &mut w,
+            &Packet::Media {
+                pts: 1,
+                key: true,
+                data: vec![7],
+            },
+        )
+        .unwrap();
+        assert_eq!(w, [0x20, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 7]);
+        let mut w = Vec::new();
+        write_packet(
+            &mut w,
+            &Packet::Session {
+                width: 2,
+                height: 3,
+                client_resized: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(w, [0x80, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3]);
+    }
+
+    #[test]
+    fn rejects_bad_sizes() {
+        let mut wire = CODEC_H264.to_be_bytes().to_vec();
+        wire.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0]);
+        let mut v = VideoReader::new(&wire[..]).unwrap();
+        assert!(v.next_packet().is_err(), "zero-size packet");
+    }
+
+    #[test]
+    fn device_meta_is_nul_padded_and_cut_safely() {
+        let mut w = Vec::new();
+        write_device_meta(&mut w, &"é".repeat(40)).unwrap();
+        assert_eq!(w.len(), DEVICE_NAME_LEN);
+        let name = read_device_meta(&mut &w[..]).unwrap();
+        assert_eq!(name, "é".repeat(31));
+    }
+
+    #[test]
+    fn server_command_has_version_scid_and_options() {
+        let cmd = server_command(0xabcd, false, &VideoOptions::default());
+        assert!(cmd.starts_with(
+            "CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server 5.0.1 "
+        ));
+        assert!(cmd.contains(" scid=0000abcd "), "{cmd}");
+        assert!(cmd.contains(" audio=false control=false"));
+        assert!(cmd.contains(" video_codec=h264"));
+        assert!(cmd.contains(" max_size=1920 video_bit_rate=8000000 max_fps=60"));
+        assert!(!cmd.contains("tunnel_forward"));
+        let fwd = server_command(
+            1,
+            true,
+            &VideoOptions {
+                max_size: 0,
+                bit_rate: 0,
+                max_fps: 0,
+                codec: "h264",
+            },
+        );
+        assert!(fwd.ends_with("control=false tunnel_forward=true"), "{fwd}");
+    }
+
+    #[test]
+    fn scid_is_31_bit_and_named_like_the_server() {
+        for _ in 0..50 {
+            assert!(random_scid() <= 0x7fff_ffff);
+        }
+        assert_eq!(socket_name(0x1a2b), "scrcpy_00001a2b");
+    }
+}

@@ -6,3 +6,6 @@
 
 # Upstream files kept byte-exact (signatures and checksums).
 third_party/** -text
+
+# Recorded scrcpy video streams (test fixtures).
+*.scrcpy binary

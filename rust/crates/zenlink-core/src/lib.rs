@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 pub mod api;
 pub mod nal;
 pub mod sidecar;
+pub mod source;
 pub mod stream;
 
 pub const HOST: &str = "127.0.0.1";

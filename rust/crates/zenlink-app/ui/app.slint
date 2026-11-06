@@ -1042,12 +1042,16 @@ export struct AndroidRow {
     ok: bool,
 }
 
-// Android workspace (phase A2): setup steps and the devices ADB already
-// sees. Mirroring arrives in the next phases.
+// Android workspace: setup steps, the devices ADB sees, and Start per
+// ready device (phase A3: video only).
 component AndroidHome inherits Rectangle {
     in property <string> status;
     in property <[AndroidRow]> devices;
+    // "idle", "connecting", "error" (the workspace hides while streaming).
+    in property <string> phase: "idle";
+    in property <string> message;
     callback back();
+    callback start-device(int);
     Glass {
         width: min(parent.width - 32px, 460px);
         height: min(parent.height - 32px, acol.preferred-height + 2px);
@@ -1074,7 +1078,7 @@ component AndroidHome inherits Rectangle {
                         Text { text: root.status; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
                     }
                 }
-                for d in root.devices: HorizontalLayout {
+                for d[i] in root.devices: HorizontalLayout {
                     spacing: 8px;
                     VerticalLayout {
                         alignment: start;
@@ -1086,6 +1090,28 @@ component AndroidHome inherits Rectangle {
                         Text { text: d.title; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
                         Text { text: d.sub; font-size: 11px; color: Theme.text-2; wrap: word-wrap; }
                     }
+                    if d.ok && root.phase != "connecting": VerticalLayout {
+                        alignment: center;
+                        GlassButton {
+                            primary: true;
+                            icon: "\u{E768}";
+                            label: I18n.t("Mulai", "Start");
+                            tip: I18n.t("Mulai mirroring perangkat ini", "Start mirroring this device");
+                            clicked => { root.start-device(i); }
+                        }
+                    }
+                }
+                if root.phase == "connecting": Text {
+                    text: I18n.t("Menyambung… HP akan memulai server scrcpy.", "Connecting… the phone starts the scrcpy server.");
+                    font-size: 11.5px;
+                    color: Theme.accent;
+                    wrap: word-wrap;
+                }
+                if root.message != "": Text {
+                    text: root.message;
+                    font-size: 11.5px;
+                    color: Theme.warn;
+                    wrap: word-wrap;
                 }
                 FlowStep {
                     title: I18n.t("Aktifkan Debugging USB", "Turn on USB debugging");
@@ -1104,7 +1130,7 @@ component AndroidHome inherits Rectangle {
                     last: true;
                 }
                 Text {
-                    text: I18n.t("Pencerminan Android sedang dibangun di beta ini. Tidak ada driver yang dipasang atau diubah.", "Android mirroring is still being built in this beta. No driver is installed or changed.");
+                    text: I18n.t("Beta: video saja (suara dan kontrol menyusul). Tidak ada driver yang dipasang atau diubah.", "Beta: video only (sound and control come later). No driver is installed or changed.");
                     font-size: 11px;
                     color: Theme.text-3;
                     wrap: word-wrap;
@@ -1467,6 +1493,17 @@ export component AppWindow inherits Window {
     in property <int> android-count;
     in property <string> android-status;
     in property <[AndroidRow]> android-devices;
+    // Android session (phase A3): "idle", "connecting", "streaming", "error".
+    in property <string> android-phase: "idle";
+    in property <string> android-device;
+    in property <string> android-link;
+    in property <string> android-message;
+    callback android-start(int);
+    callback android-stop();
+    callback android-restart();
+    property <bool> on-android: root.screen == "android";
+    // A picture is on the stage (either platform).
+    property <bool> picture: root.on-android ? root.android-phase == "streaming" : root.phase == "streaming";
     callback choose-platform(string, bool);
     callback change-platform();
     // Animated dot field (rendered in Rust) and the cursor over the stage.
@@ -1532,18 +1569,26 @@ export component AppWindow inherits Window {
                 compact: root.compact;
                 maximized: root.maximized;
                 fullscreen: root.fullscreen;
-                device: root.screen == "apple" ? root.device : "";
-                phase: root.screen == "apple" ? root.phase : "idle";
-                link: root.screen == "apple" ? root.link : "";
+                device: root.screen == "apple" ? root.device : root.on-android ? root.android-device : "";
+                phase: root.screen == "apple" ? root.phase : root.on-android ? root.android-phase : "idle";
+                link: root.screen == "apple" ? root.link : root.on-android ? root.android-link : "";
                 need: root.screen == "apple" ? root.device-need : "";
                 stats: root.prefs.stats ? root.stats-line : "";
                 settings-open: root.settings-open;
                 muted: root.muted;
                 fit: root.prefs.fit;
                 window-action(a) => { root.window-action(a); }
-                start => { if root.screen == "apple" { root.start-cast(); } }
-                stop => { root.stop-cast(); }
-                restart => { if root.screen == "apple" { root.restart(); } }
+                start => {
+                    if root.screen == "apple" { root.start-cast(); }
+                    if root.on-android { root.android-start(-1); }
+                }
+                stop => {
+                    if root.on-android { root.android-stop(); } else { root.stop-cast(); }
+                }
+                restart => {
+                    if root.screen == "apple" { root.restart(); }
+                    if root.on-android { root.android-restart(); }
+                }
                 settings => {
                     root.settings-open = !root.settings-open;
                     root.settings-toggled(root.settings-open);
@@ -1564,21 +1609,24 @@ export component AppWindow inherits Window {
                     stage := Rectangle {
                         vertical-stretch: 1;
                         border-radius: 22px;
-                        background: root.phase == "streaming" ? Theme.stage : Theme.panel;
+                        background: root.picture ? Theme.stage : Theme.panel;
                         border-width: 1px;
                         border-color: Theme.edge;
                         clip: true;
                         stage-ta := TouchArea { }
-                        if root.phase != "streaming" && root.prefs.dots: Image {
+                        if !root.picture && root.prefs.dots: Image {
                             source: root.dots-image;
                             width: parent.width;
                             height: parent.height;
                             image-fit: fill;
                         }
-                        if root.screen == "android": AndroidHome {
+                        if root.on-android && root.android-phase != "streaming": AndroidHome {
                             status: root.android-status;
                             devices: root.android-devices;
+                            phase: root.android-phase;
+                            message: root.android-message;
                             back => { root.change-platform(); }
+                            start-device(i) => { root.android-start(i); }
                         }
                         if root.screen == "apple" && root.phase != "streaming": Placeholder {
                             phase: root.phase;

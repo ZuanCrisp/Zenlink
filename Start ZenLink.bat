@@ -64,6 +64,11 @@ echo Setup complete. Run Create-Desktop-Shortcut.bat for a desktop shortcut.
 :launch
 rem ZenLink window (Rust, native GPU video). It starts the Python backend
 rem from .venv by itself. Set ZENLINK_UI=classic for the old window.
+rem Android: ZenLink Next finds adb in the Android SDK (ANDROID_HOME,
+rem ANDROID_SDK_ROOT, %LOCALAPPDATA%\Android\Sdk) or on PATH. Machine-only
+rem settings such as ANDROID_HOME can go in "Start ZenLink.local.bat" next
+rem to this file (not part of the repository).
+if exist "%~dp0Start ZenLink.local.bat" call "%~dp0Start ZenLink.local.bat"
 if /i "%ZENLINK_UI%"=="classic" goto :classic
 set "NEXT=%~dp0ZenLink.exe"
 if exist "%NEXT%" goto :start_next

@@ -119,6 +119,67 @@ impl Target<'_> {
             Target::TransportId(id) => format!("host:transport-id:{id}"),
         }
     }
+
+    /// Prefix for host services aimed at one device (`forward`, `killforward`).
+    fn host_prefix(&self) -> String {
+        match self {
+            Target::Serial(s) => format!("host-serial:{s}:"),
+            Target::TransportId(id) => format!("host-transport-id:{id}:"),
+        }
+    }
+}
+
+/// Largest DATA chunk of the sync protocol (`SYNC_DATA_MAX`).
+const SYNC_DATA_MAX: usize = 64 * 1024;
+
+/// Sends one file over an open `sync:` socket (`SEND`, `DATA`..., `DONE`),
+/// waits for the device's reply and ends the sync session with `QUIT`.
+/// `mode` is the Unix file mode, e.g. `0o100644`.
+pub fn sync_send<S: Read + Write>(
+    s: &mut S,
+    remote: &str,
+    mode: u32,
+    data: &[u8],
+    mtime: u32,
+) -> Result<()> {
+    let spec = format!("{remote},{mode}");
+    if spec.len() > 1024 {
+        return Err(AdbError::Protocol("remote path too long".into()));
+    }
+    let mut head = Vec::with_capacity(8 + spec.len());
+    head.extend_from_slice(b"SEND");
+    head.extend_from_slice(&(spec.len() as u32).to_le_bytes());
+    head.extend_from_slice(spec.as_bytes());
+    s.write_all(&head)?;
+    for chunk in data.chunks(SYNC_DATA_MAX) {
+        let mut d = Vec::with_capacity(8 + chunk.len());
+        d.extend_from_slice(b"DATA");
+        d.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
+        d.extend_from_slice(chunk);
+        s.write_all(&d)?;
+    }
+    let mut done = Vec::with_capacity(8);
+    done.extend_from_slice(b"DONE");
+    done.extend_from_slice(&mtime.to_le_bytes());
+    s.write_all(&done)?;
+    s.flush()?;
+    let mut reply = [0u8; 8];
+    s.read_exact(&mut reply)?;
+    let len = u32::from_le_bytes([reply[4], reply[5], reply[6], reply[7]]) as usize;
+    let result = match &reply[..4] {
+        b"OKAY" => Ok(()),
+        b"FAIL" => {
+            let mut msg = vec![0u8; len.min(MAX_FRAME)];
+            s.read_exact(&mut msg)?;
+            Err(AdbError::Fail(String::from_utf8_lossy(&msg).into_owned()))
+        }
+        other => Err(AdbError::Protocol(format!(
+            "sync: expected OKAY/FAIL, got {:?}",
+            String::from_utf8_lossy(other)
+        ))),
+    };
+    let _ = s.write_all(b"QUIT\0\0\0\0");
+    result
 }
 
 #[derive(Clone, Debug)]
@@ -202,6 +263,54 @@ impl AdbClient {
         let mut out = Vec::new();
         s.take(limit as u64).read_to_end(&mut out)?;
         Ok(out)
+    }
+
+    /// Copies `data` to `remote` on the device (`adb push`).
+    pub fn push(&self, target: &Target, data: &[u8], remote: &str, mode: u32) -> Result<()> {
+        let mut s = self.open_service(target, "sync:")?;
+        // A slow USB 2 link moves the 700 KB scrcpy server in well under this.
+        let slow = self.timeout.max(Duration::from_secs(15));
+        s.set_read_timeout(Some(slow))?;
+        s.set_write_timeout(Some(slow))?;
+        let mtime = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as u32);
+        sync_send(&mut s, remote, mode, data, mtime)
+    }
+
+    /// `adb reverse <remote> <local>`: connections the device opens to
+    /// `remote` (e.g. `localabstract:scrcpy_0000abcd`) arrive at `local`
+    /// (e.g. `tcp:27183`) on this PC.
+    pub fn reverse(&self, target: &Target, remote: &str, local: &str) -> Result<()> {
+        let mut s = self.open_service(target, &format!("reverse:forward:{remote};{local}"))?;
+        read_status(&mut s)
+    }
+
+    /// `adb reverse --remove <remote>`.
+    pub fn reverse_remove(&self, target: &Target, remote: &str) -> Result<()> {
+        let mut s = self.open_service(target, &format!("reverse:killforward:{remote}"))?;
+        read_status(&mut s)
+    }
+
+    /// `adb forward <local> <remote>`: connections to `local` on this PC
+    /// (e.g. `tcp:27183`) go to `remote` on the device.
+    pub fn forward(&self, target: &Target, local: &str, remote: &str) -> Result<()> {
+        let mut s = self.connect()?;
+        let req = format!("{}forward:{local};{remote}", target.host_prefix());
+        write_request(&mut s, &req)?;
+        // The first OKAY says the server took the request, the second that the forward exists.
+        read_status(&mut s)?;
+        read_status(&mut s)
+    }
+
+    /// `adb forward --remove <local>`.
+    pub fn forward_remove(&self, target: &Target, local: &str) -> Result<()> {
+        let mut s = self.connect()?;
+        write_request(
+            &mut s,
+            &format!("{}killforward:{local}", target.host_prefix()),
+        )?;
+        read_status(&mut s)
     }
 
     /// All system properties of a device (`getprop`).
@@ -298,6 +407,8 @@ pub(crate) mod fake {
         Fail(String),
         /// `OKAY`, then these frames in order (track-devices).
         Frames(Vec<Vec<u8>>),
+        /// These exact bytes, then close (e.g. `OKAYOKAY` for forward).
+        Raw(Vec<u8>),
     }
 
     pub struct FakeAdb {
@@ -365,6 +476,10 @@ pub(crate) mod fake {
                                         );
                                         out.extend_from_slice(&p);
                                     }
+                                    true
+                                }
+                                Reply::Raw(p) => {
+                                    out.extend_from_slice(&p);
                                     true
                                 }
                                 Reply::Fail(m) => {
@@ -480,6 +595,100 @@ mod tests {
             Err(AdbError::Fail(m)) => assert!(m.contains("not found")),
             r => panic!("{r:?}"),
         }
+    }
+
+    /// Records writes and replays a scripted reply, like one sync socket.
+    struct Duplex {
+        sent: Vec<u8>,
+        reply: io::Cursor<Vec<u8>>,
+    }
+
+    impl Read for Duplex {
+        fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+            self.reply.read(b)
+        }
+    }
+
+    impl Write for Duplex {
+        fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+            self.sent.extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn sync_send_chunks_and_reads_reply() {
+        let data = vec![7u8; SYNC_DATA_MAX + 10];
+        let mut d = Duplex {
+            sent: Vec::new(),
+            reply: io::Cursor::new(b"OKAY\0\0\0\0".to_vec()),
+        };
+        sync_send(&mut d, "/data/local/tmp/x.jar", 0o100644, &data, 5).unwrap();
+        let spec = b"/data/local/tmp/x.jar,33188";
+        let s = &d.sent;
+        assert_eq!(&s[..4], b"SEND");
+        assert_eq!(&s[4..8], &(spec.len() as u32).to_le_bytes());
+        assert_eq!(&s[8..8 + spec.len()], spec);
+        let mut i = 8 + spec.len();
+        for want in [SYNC_DATA_MAX, 10] {
+            assert_eq!(&s[i..i + 4], b"DATA");
+            assert_eq!(&s[i + 4..i + 8], &(want as u32).to_le_bytes());
+            i += 8 + want;
+        }
+        assert_eq!(&s[i..i + 8], b"DONE\x05\0\0\0");
+        assert_eq!(&s[i + 8..], b"QUIT\0\0\0\0");
+
+        let mut msg = b"FAIL\x0b\0\0\0".to_vec();
+        msg.extend_from_slice(b"no space!!!");
+        let mut d = Duplex {
+            sent: Vec::new(),
+            reply: io::Cursor::new(msg),
+        };
+        match sync_send(&mut d, "/x", 0o100644, b"abc", 0) {
+            Err(AdbError::Fail(m)) => assert_eq!(m, "no space!!!"),
+            r => panic!("{r:?}"),
+        }
+    }
+
+    #[test]
+    fn reverse_and_forward_requests() {
+        let ok2 = || Reply::Raw(b"OKAYOKAY".to_vec());
+        let fake = FakeAdb::start(HashMap::from([
+            ("host:transport:SER".to_string(), Reply::Okay),
+            (
+                "reverse:forward:localabstract:scrcpy_0000abcd;tcp:27183".to_string(),
+                ok2(),
+            ),
+            (
+                "reverse:killforward:localabstract:scrcpy_0000abcd".to_string(),
+                ok2(),
+            ),
+            (
+                "host-serial:SER:forward:tcp:27183;localabstract:scrcpy_0000abcd".to_string(),
+                ok2(),
+            ),
+            (
+                "host-transport-id:3:killforward:tcp:27183".to_string(),
+                ok2(),
+            ),
+        ]));
+        let c = fake.client();
+        let t = Target::Serial("SER");
+        c.reverse(&t, "localabstract:scrcpy_0000abcd", "tcp:27183")
+            .unwrap();
+        c.reverse_remove(&t, "localabstract:scrcpy_0000abcd")
+            .unwrap();
+        c.forward(&t, "tcp:27183", "localabstract:scrcpy_0000abcd")
+            .unwrap();
+        c.forward_remove(&Target::TransportId(3), "tcp:27183")
+            .unwrap();
+        // A device that cannot reverse answers FAIL, so the caller can fall back to forward.
+        assert!(c
+            .reverse(&Target::Serial("old"), "localabstract:x", "tcp:1")
+            .is_err());
     }
 
     #[test]

@@ -16,6 +16,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use zenlink_core::api::Api;
+use zenlink_core::source::{BackendSource, VideoSource};
 
 use crate::d3d::{Gpu, Ring, SharedRing};
 use crate::decoder;
@@ -474,7 +475,13 @@ impl VideoView {
         self.meter.lock().unwrap().sample(&self.inner.stats)
     }
 
+    /// Decode the backend's cast stream (Apple devices).
     pub fn start(&mut self, api: Api) {
+        self.start_source(Box::new(BackendSource(api)));
+    }
+
+    /// Decode any video source (Android, a recording).
+    pub fn start_source(&mut self, source: Box<dyn VideoSource>) {
         self.stop();
         let stop = Arc::new(AtomicBool::new(false));
         let (g, r, s, st) = (
@@ -485,7 +492,7 @@ impl VideoView {
         );
         if let Ok(h) = std::thread::Builder::new()
             .name("zenlink-decode".into())
-            .spawn(move || decoder::run(g, r, s, st, api))
+            .spawn(move || decoder::run(g, r, s, st, source))
         {
             self.decode = Some((stop, h));
         }

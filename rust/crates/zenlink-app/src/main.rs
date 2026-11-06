@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 //! ZenLink Next: Rust shell (ADR-0001 Stage 1).
 
+mod android;
 mod backdrop;
 mod dots;
 mod flow;
@@ -105,6 +106,22 @@ struct App {
     flow: Option<flow::Flow>,
     /// The backend's last "needsChoice" (None until it first answered).
     apple_needs: Option<bool>,
+    /// Android session (phase A3); `None` when none runs.
+    android: Option<Arc<android::Shared>>,
+    /// The Android picture is live (the window shows video, fits to it).
+    android_live: bool,
+    /// Android status last shown in the window.
+    android_shown: Option<android::Status>,
+    /// USB / Wi-Fi of the device being mirrored.
+    android_link: String,
+    /// Which list entry was started (-1 = first ready), for Restart.
+    android_index: i32,
+    /// A source waiting for the video view to exist.
+    android_pending: Option<Box<dyn zenlink_core::source::VideoSource>>,
+    /// Devices the Android workspace shows, in row order.
+    android_list: Vec<zenlink_android::discovery::AndroidDevice>,
+    /// ZL_ANDROID_FIXTURE: started once when the Android workspace opens.
+    fixture_started: bool,
 }
 
 /// ZenLink's own full screen (the window covers the monitor). winit's full
@@ -970,7 +987,11 @@ fn apply_flow(ui: &AppWindow, f: &flow::Flow) {
 static ANDROID_POLL: AtomicU8 = AtomicU8::new(0);
 
 enum AdbView {
-    /// No ADB server: ZenLink does not start one yet (bundled adb in A3).
+    /// No ADB server, and no `adb` program to start one with.
+    NoAdb,
+    /// No ADB server yet; ZenLink is starting it.
+    Starting,
+    /// No ADB server; starting it failed.
     NotRunning,
     /// Port 5037 answers, but not as an ADB server.
     Foreign,
@@ -978,9 +999,10 @@ enum AdbView {
     Running { version: u32, other: bool },
 }
 
-/// Polls the ADB server that is already running (never starts or kills one)
-/// while the platform screen or the Android workspace shows. Properties are
-/// read once per transport and cached.
+/// Polls the ADB server while the platform screen or the Android workspace
+/// shows. When none runs, it starts one with the `adb` it finds (once; it
+/// never kills or replaces a running server). Properties are read once per
+/// transport and cached.
 fn start_android_poll(ui: &AppWindow) {
     use zenlink_android::adb::{check_server, AdbClient, ServerStatus, BUNDLED_SERVER_VERSION};
     use zenlink_android::{devices, discovery};
@@ -994,6 +1016,7 @@ fn start_android_poll(ui: &AppWindow) {
             (String, Option<u64>),
             zenlink_android::props::Props,
         > = Default::default();
+        let mut tried_start = false;
         loop {
             let mode = ANDROID_POLL.load(Relaxed);
             if mode == 0 {
@@ -1001,7 +1024,44 @@ fn start_android_poll(ui: &AppWindow) {
                 continue;
             }
             let (view, list) = match check_server(&client, BUNDLED_SERVER_VERSION) {
-                ServerStatus::NotRunning => (AdbView::NotRunning, Vec::new()),
+                ServerStatus::NotRunning if !tried_start => {
+                    tried_start = true;
+                    match android::find_adb() {
+                        None => (AdbView::NoAdb, Vec::new()),
+                        Some(adb) => {
+                            log::info!("android: starting the ADB server with {}", adb.display());
+                            let port = client.addr.port();
+                            let w = weak.clone();
+                            let _ = slint::invoke_from_event_loop(move || {
+                                if let Some(ui) = w.upgrade() {
+                                    show_android(&ui, &AdbView::Starting, &[]);
+                                }
+                            });
+                            match zenlink_android::adb::start_server(&adb, port) {
+                                Ok(s) if s.success() => {
+                                    // Next round lists the devices.
+                                    continue;
+                                }
+                                Ok(s) => {
+                                    log::warn!("android: adb start-server exited with {s}");
+                                    (AdbView::NotRunning, Vec::new())
+                                }
+                                Err(e) => {
+                                    log::warn!("android: adb start-server: {e}");
+                                    (AdbView::NotRunning, Vec::new())
+                                }
+                            }
+                        }
+                    }
+                }
+                ServerStatus::NotRunning => (
+                    if android::find_adb().is_some() {
+                        AdbView::NotRunning
+                    } else {
+                        AdbView::NoAdb
+                    },
+                    Vec::new(),
+                ),
                 ServerStatus::Foreign(_) => (AdbView::Foreign, Vec::new()),
                 s => {
                     let (version, other) = match s {
@@ -1061,10 +1121,16 @@ fn show_android(
     use zenlink_android::discovery::Readiness;
     ui.set_android_count(list.len() as i32);
     let status = match view {
+        AdbView::NoAdb => tr_ui(
+            ui,
+            "ADB tidak ditemukan. Pasang Android SDK Platform-Tools (resmi Google) atau atur ANDROID_HOME, lalu buka lagi layar ini.",
+            "ADB was not found. Install the Android SDK Platform-Tools (official, from Google) or set ANDROID_HOME, then open this screen again.",
+        ),
+        AdbView::Starting => tr_ui(ui, "Menyalakan ADB…", "Starting ADB…"),
         AdbView::NotRunning => tr_ui(
             ui,
-            "ADB belum berjalan. ADB bawaan ZenLink Next datang di fase berikutnya; untuk sekarang siapkan HP dengan langkah di bawah.",
-            "ADB is not running. ZenLink Next's own ADB comes in a later phase; for now, prepare the phone with the steps below.",
+            "ADB tidak mau menyala. Tutup aplikasi lain yang memakai ADB, lalu coba lagi.",
+            "ADB did not start. Close other apps that use ADB, then try again.",
         ),
         AdbView::Foreign => tr_ui(
             ui,
@@ -1141,6 +1207,162 @@ fn show_android(
         })
         .collect();
     ui.set_android_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
+    APP.with_borrow_mut(|a| a.android_list = list.to_vec());
+    // Test hook: play a recorded scrcpy stream as soon as the workspace shows.
+    let fixture = std::env::var_os("ZL_ANDROID_FIXTURE").is_some();
+    if fixture && !APP.with_borrow(|a| a.fixture_started) {
+        APP.with_borrow_mut(|a| a.fixture_started = true);
+        android_start(ui, -1);
+    }
+}
+
+/// The bundled scrcpy server, read once.
+fn scrcpy_server() -> Result<Arc<Vec<u8>>, String> {
+    static SERVER: OnceLock<Result<Arc<Vec<u8>>, String>> = OnceLock::new();
+    SERVER
+        .get_or_init(|| android::load_server().map(Arc::new))
+        .clone()
+}
+
+/// Starts mirroring list entry `index` (-1 = the first ready device), or the
+/// recording in ZL_ANDROID_FIXTURE.
+fn android_start(ui: &AppWindow, index: i32) {
+    use zenlink_android::devices::Connection;
+    use zenlink_android::discovery::Readiness;
+    android_stop(ui);
+    let shared = Arc::new(android::Shared::default());
+    let (source, link): (Box<dyn zenlink_core::source::VideoSource>, String) = if let Some(f) =
+        std::env::var_os("ZL_ANDROID_FIXTURE")
+    {
+        (
+            Box::new(android::FixtureSource::new(f.into(), shared.clone())),
+            tr_ui(ui, "Rekaman uji", "Test recording"),
+        )
+    } else {
+        let dev = APP.with_borrow(|a| {
+            let ready =
+                |d: &&zenlink_android::discovery::AndroidDevice| d.readiness == Readiness::Ready;
+            if index >= 0 {
+                a.android_list.get(index as usize).filter(ready).cloned()
+            } else {
+                a.android_list.iter().find(ready).cloned()
+            }
+        });
+        let Some(d) = dev else {
+            show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    "Belum ada perangkat Android yang siap.",
+                    "No Android device is ready yet.",
+                ),
+            );
+            return;
+        };
+        let server = match scrcpy_server() {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("android: {e}");
+                ui.set_android_message(
+                    tr_ui(
+                        ui,
+                        &format!("File server scrcpy tidak ada ({e}). Pasang ulang ZenLink Next."),
+                        &format!(
+                            "The scrcpy server file is missing ({e}). Reinstall ZenLink Next."
+                        ),
+                    )
+                    .into(),
+                );
+                return;
+            }
+        };
+        let link = match d.primary.connection {
+            Connection::Usb => "USB",
+            Connection::WifiTcp { .. } | Connection::WifiTls { .. } => "Wi-Fi",
+            Connection::Emulator => "Emulator",
+            Connection::Unknown => "",
+        };
+        (
+            Box::new(android::DeviceSource::new(
+                d.primary.serial.clone(),
+                d.primary.transport_id,
+                d.name.display.clone(),
+                server,
+                shared.clone(),
+            )),
+            link.to_string(),
+        )
+    };
+    ui.set_android_message("".into());
+    APP.with_borrow_mut(|a| {
+        a.android = Some(shared);
+        a.android_index = index;
+        a.android_link = link;
+        a.android_shown = None;
+        a.fitted = None;
+        match a.view.as_mut() {
+            Some(v) => v.start_source(source),
+            None => a.android_pending = Some(source),
+        }
+    });
+    android_tick(ui);
+}
+
+/// Ends the Android session, if any.
+fn android_stop(ui: &AppWindow) {
+    let had = APP.with_borrow_mut(|a| {
+        a.android_pending = None;
+        let Some(s) = a.android.take() else {
+            return false;
+        };
+        s.stop();
+        if let Some(v) = a.view.as_mut() {
+            v.stop();
+        }
+        a.android_live = false;
+        a.android_shown = None;
+        a.fitted = None;
+        true
+    });
+    if had {
+        ui.set_android_phase("idle".into());
+    }
+}
+
+/// Mirrors the Android session's status into the window (every frame tick;
+/// cheap when nothing changed).
+fn android_tick(ui: &AppWindow) {
+    let Some((st, link)) = APP.with_borrow(|a| {
+        let st = a.android.as_ref()?.status();
+        (a.android_shown.as_ref() != Some(&st)).then(|| (st, a.android_link.clone()))
+    }) else {
+        return;
+    };
+    let live = st.phase == android::Phase::Streaming;
+    ui.set_android_phase(st.phase.as_str().into());
+    ui.set_android_device(st.device.clone().into());
+    ui.set_android_link(link.into());
+    let message = match st.phase {
+        android::Phase::Error => tr_ui(
+            ui,
+            &format!("Mirroring gagal: {}. Cabut-colok kabel atau ketuk Izinkan di HP, lalu Mulai lagi.", st.error),
+            &format!("Mirroring failed: {}. Reconnect the cable or tap Allow on the phone, then Start again.", st.error),
+        ),
+        android::Phase::Connecting if !st.error.is_empty() => tr_ui(
+            ui,
+            &format!("Mencoba lagi… ({})", st.error),
+            &format!("Retrying… ({})", st.error),
+        ),
+        _ => String::new(),
+    };
+    ui.set_android_message(message.into());
+    APP.with_borrow_mut(|a| {
+        if live != a.android_live {
+            a.android_live = live;
+            a.fitted = None;
+        }
+        a.android_shown = Some(st);
+    });
 }
 
 fn tr_ui_static(ui: &AppWindow, id: &'static str, en: &'static str) -> &'static str {
@@ -1432,6 +1654,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let a = api.clone();
                 std::thread::spawn(move || a.stop_cast());
             }
+            android_stop(&ui);
             let f = APP.with_borrow_mut(|a| {
                 let f = a
                     .flow
@@ -1440,6 +1663,35 @@ fn main() -> Result<(), slint::PlatformError> {
                 f.clone()
             });
             apply_flow(&ui, &f);
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_android_start(move |i| {
+            if let Some(ui) = weak.upgrade() {
+                android_start(&ui, i);
+            }
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_android_stop(move || {
+            if let Some(ui) = weak.upgrade() {
+                android_stop(&ui);
+            }
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_android_restart(move || {
+            if let Some(ui) = weak.upgrade() {
+                let i = APP.with_borrow(|a| a.android_index);
+                show_toast(
+                    &ui,
+                    tr_ui(&ui, "Memulai ulang koneksi…", "Restarting the connection…"),
+                );
+                android_start(&ui, i);
+            }
         });
     }
     start_android_poll(&ui);
@@ -1847,6 +2099,8 @@ fn main() -> Result<(), slint::PlatformError> {
                             a.view = Some(v);
                             if a.streaming {
                                 a.view.as_mut().unwrap().start(Api::new());
+                            } else if let Some(src) = a.android_pending.take() {
+                                a.view.as_mut().unwrap().start_source(src);
                             }
                         }
                         Err(e) => {
@@ -1899,9 +2153,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.set_compact_bar(bar);
             }
             let on_apple = ui.get_screen().as_str() == "apple";
+            let on_android = ui.get_screen().as_str() == "android";
+            if on_android {
+                android_tick(&ui);
+            }
             APP.with_borrow_mut(|a| {
-                let streaming = a.streaming && on_apple;
-                let device_rotation = a.device_rotation;
+                let streaming = (a.streaming && on_apple) || (a.android_live && on_android);
+                // scrcpy sends the picture already turned; Apple reports the angle separately.
+                let device_rotation = if on_android { 0 } else { a.device_rotation };
                 let Some(v) = a.view.as_ref() else { return };
                 v.set_crop(p.crop_l as u32, p.crop_t as u32, p.crop_r as u32, p.crop_b as u32);
                 v.set_fit(match p.fit.as_str() {

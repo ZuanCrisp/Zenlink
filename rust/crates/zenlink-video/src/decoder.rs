@@ -14,9 +14,10 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_MULTITHREADED};
 
-use zenlink_core::api::{Api, Codec, CodecInfo};
+use zenlink_core::api::{Codec, CodecInfo};
 use zenlink_core::nal::{parse_config, to_annexb, ParamSets};
-use zenlink_core::stream::{Record, StreamReader};
+use zenlink_core::source::{RecordStream, VideoSource};
+use zenlink_core::stream::Record;
 
 use crate::d3d::{Gpu, SharedRing, Slot};
 use crate::stats::Stats;
@@ -340,23 +341,21 @@ pub fn startup() {
     }
 }
 
-/// Decode until `stop` is set. Reconnects when the stream ends.
-pub fn run(gpu: Arc<Gpu>, ring: SharedRing, stats: Arc<Stats>, stop: Arc<AtomicBool>, api: Api) {
+/// Decode until `stop` is set. Reopens the source when a session ends.
+pub fn run(
+    gpu: Arc<Gpu>,
+    ring: SharedRing,
+    stats: Arc<Stats>,
+    stop: Arc<AtomicBool>,
+    mut source: Box<dyn VideoSource>,
+) {
     startup();
-    while !stop.load(Relaxed) {
-        let Some(info) = api.codec() else {
+    while !stop.load(Relaxed) && !source.finished() {
+        let Some((info, mut stream)) = source.open() else {
             std::thread::sleep(Duration::from_millis(400));
             continue;
         };
-        let mut stream = match StreamReader::open() {
-            Ok(s) => s,
-            Err(e) => {
-                log::warn!("stream: {e}");
-                std::thread::sleep(Duration::from_millis(600));
-                continue;
-            }
-        };
-        if let Err(e) = session(&gpu, &ring, &stats, &stop, &api, info, &mut stream) {
+        if let Err(e) = session(&gpu, &ring, &stats, &stop, &*source, info, &mut *stream) {
             log::warn!("decoder: {e}");
             stats.errors.fetch_add(1, Relaxed);
         }
@@ -371,9 +370,9 @@ fn session(
     ring: &SharedRing,
     stats: &Stats,
     stop: &AtomicBool,
-    api: &Api,
+    source: &dyn VideoSource,
     mut info: CodecInfo,
-    stream: &mut StreamReader,
+    stream: &mut dyn RecordStream,
 ) -> Result<()> {
     let mut ps: ParamSets = parse_config(&info.codec, &info.description).unwrap_or_default();
     let mut mft = Mft::new(gpu, &info.codec)?;
@@ -445,7 +444,7 @@ fn session(
                     mft.flush();
                     got_key = false;
                     if info.keyframes_on_request {
-                        api.request_keyframe();
+                        source.request_keyframe();
                     }
                 }
             }
