@@ -57,6 +57,7 @@ def main():
             c["link"] = body["link"]
         else:
             c.update(active=body.get("mode"), remember=bool(body.get("remember")), needsChoice=False)
+            return web.json_response(state)  # like the real backend: the whole state ("error": null)
         return web.json_response(c)
 
     async def get_state(_):

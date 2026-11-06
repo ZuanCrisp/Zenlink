@@ -463,7 +463,7 @@ component ModeChooser inherits Rectangle {
                     badge: I18n.t("Disarankan", "Recommended");
                     desc: I18n.t("Pakai driver bawaan Apple. Paling kompatibel, stabil dan gampang.", "Uses Apple's own driver. Most compatible, stable and easy.");
                     points: [
-                        { ok: true, text: I18n.t("HEVC, dibatasi perangkat sekitar 4–6 Mbps", "HEVC, device-limited to about 4–6 Mbps") },
+                        { ok: true, text: I18n.t("Sampai 60 fps, HEVC (bitrate dibatasi perangkat, sekitar 4–6 Mbps)", "Up to 60 fps, HEVC (device-limited bitrate, about 4–6 Mbps)") },
                         { ok: true, text: I18n.t("Sentuh pakai mouse, keyboard, gestur dan tombol", "Mouse touch, keyboard, gestures and buttons") },
                         { ok: true, text: I18n.t("Driver Apple sendiri, tidak perlu pasang apa-apa", "Apple's own driver, nothing to install") },
                         { ok: true, text: I18n.t("Kabel atau Wi-Fi (setelah setup sekali pakai kabel)", "Cable or Wi-Fi (after a one-time setup with the cable)") },
@@ -478,9 +478,9 @@ component ModeChooser inherits Rectangle {
                     tint: #ff5fa8;
                     title: "ZenLink Studio";
                     tag: I18n.t("Untuk live streaming", "For live streaming");
-                    desc: I18n.t("Kualitas terbaik untuk streaming: bitrate tinggi (terukur 12–30 Mbps), sampai ~56 fps, latensi sangat rendah. Butuh driver libusb0.", "Best quality for streaming: high bitrate (measured 12–30 Mbps), up to ~56 fps, very low latency. Needs the libusb0 driver.");
+                    desc: I18n.t("Kualitas terbaik untuk streaming: bitrate tinggi (terukur 12–30 Mbps), sampai 60 fps, latensi sangat rendah. Butuh driver libusb0.", "Best quality for streaming: high bitrate (measured 12–30 Mbps), up to 60 fps, very low latency. Needs the libusb0 driver.");
                     points: [
-                        { ok: true, text: I18n.t("Resolusi native penuh lewat kabel, H.264 bitrate tinggi", "Full native resolution over the cable, high-bitrate H.264") },
+                        { ok: true, text: I18n.t("Sampai 60 fps, resolusi native penuh lewat kabel, H.264 bitrate tinggi", "Up to 60 fps, full native resolution over the cable, high-bitrate H.264") },
                         { ok: true, text: I18n.t("Kabel (USB) atau Wi-Fi (AirPlay, tanpa driver)", "Cable (USB) or Wi-Fi (AirPlay, no driver)") },
                         { ok: false, text: I18n.t("Gambar dan suara saja: tanpa sentuh, keyboard, gestur", "Picture and sound only: no touch, keyboard or gestures") },
                         { ok: false, text: I18n.t("Aplikasi Apple tidak melihat perangkat sampai balik ke Apple Driver", "Apple apps can't see the device until you switch back") },

@@ -70,6 +70,8 @@ struct App {
     /// A mode choice was just sent: keep the chooser closed until the
     /// backend's state catches up.
     mode_sent: Option<Instant>,
+    /// A choice is waiting for the backend (it may still be starting).
+    mode_pending: bool,
     /// Result of the last "Check drivers", shown under the service line.
     drivers_text: Option<String>,
 }
@@ -190,10 +192,15 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     ui.set_mode_active(str_of(st, &["connection", "active"]).unwrap_or("").into());
     ui.set_mode_link(str_of(st, &["connection", "link"]).unwrap_or("wired").into());
     ui.set_mode_remember(c.and_then(|c| c.get("remember")).and_then(Value::as_bool).unwrap_or(true) || needs);
-    let just_sent = APP.with_borrow(|a| a.mode_sent.map(|t| t.elapsed() < Duration::from_secs(3)).unwrap_or(false));
+    let just_sent = APP.with_borrow(|a| a.mode_pending || a.mode_sent.map(|t| t.elapsed() < Duration::from_secs(3)).unwrap_or(false));
     if needs && !just_sent && !ui.get_chooser_open() {
         ui.set_chooser_cancelable(false);
         open_chooser(ui);
+    }
+    // Opened at launch before the backend answered, but a remembered mode
+    // is already active: nothing to choose.
+    if !needs && !just_sent && ui.get_chooser_open() && !ui.get_chooser_cancelable() {
+        ui.set_chooser_open(false);
     }
     if let Some(p) = str_of(st, &["connection", "pending"]) {
         let name = if p == "apple" { "Apple Driver" } else { "ZenLink Studio" };
@@ -297,6 +304,27 @@ fn open_chooser(ui: &AppWindow) {
         ui.window().set_size(size);
         keep_on_screen(ui, (wx, wy, ww, wh), size);
     }
+}
+
+/// True when the backend's settings.json remembers a connection mode
+/// (source checkout: next to zenlink/; installed: %LOCALAPPDATA%\ZenLink).
+fn mode_remembered() -> bool {
+    let mut files = Vec::new();
+    if let Ok(exe) = std::env::current_exe() {
+        for dir in exe.ancestors().skip(1) {
+            if dir.join("zenlink").join("connection.py").exists() || dir.join("portable.txt").exists() {
+                files.push(dir.join("settings.json"));
+                break;
+            }
+        }
+    }
+    if let Some(l) = std::env::var_os("LOCALAPPDATA") {
+        files.push(std::path::PathBuf::from(l).join("ZenLink").join("settings.json"));
+    }
+    files.iter().filter_map(|f| std::fs::read(f).ok()).filter_map(|b| serde_json::from_slice::<Value>(&b).ok()).any(|v| {
+        v.get("rememberConnectionMode").and_then(Value::as_bool).unwrap_or(false)
+            && matches!(v.get("connectionMode").and_then(Value::as_str), Some("apple" | "usbdirect"))
+    })
 }
 
 /// Short message above the dock for 3.5 s.
@@ -463,6 +491,21 @@ fn main() -> Result<(), slint::PlatformError> {
     if ui.get_settings_open() {
         ui.invoke_settings_toggled(true);
     }
+    // Show the chooser at once unless a remembered mode exists; the
+    // backend can take a while to start.
+    if !mode_remembered() {
+        ui.set_chooser_cancelable(false);
+        ui.set_chooser_open(true);
+        // Widen once the window exists on screen.
+        let w = ui.as_weak();
+        slint::Timer::single_shot(Duration::from_millis(60), move || {
+            if let Some(ui) = w.upgrade() {
+                if ui.get_chooser_open() {
+                    open_chooser(&ui);
+                }
+            }
+        });
+    }
     // Test hook: ZL_DEMO_SETTINGS=1 opens/closes settings every 1.5 s so the
     // slide can be filmed frame by frame.
     let demo = slint::Timer::default();
@@ -517,19 +560,32 @@ fn main() -> Result<(), slint::PlatformError> {
         let api = api.clone();
         let weak = ui.as_weak();
         ui.on_choose_mode(move |mode, link, remember| {
-            APP.with_borrow_mut(|a| a.mode_sent = Some(Instant::now()));
+            APP.with_borrow_mut(|a| a.mode_pending = true);
             let (api, w) = (api.clone(), weak.clone());
             let (mode, link) = (mode.to_string(), link.to_string());
             std::thread::spawn(move || {
-                let cur = api.get("/api/connection");
-                let ok_link = cur.as_ref().and_then(|c| c.get("link")).and_then(Value::as_str) == Some(link.as_str())
-                    || api.post("/api/connection", &json!({ "link": link })).is_some();
-                let r = api.post("/api/connection", &json!({ "mode": mode, "remember": remember }));
-                let failed = !ok_link || r.as_ref().map(|v| v.get("error").is_some()).unwrap_or(true);
+                // The backend may still be starting (the chooser shows at
+                // launch): wait for it, up to a minute.
+                let t0 = Instant::now();
+                let mut cur = api.get("/api/connection");
+                while cur.is_none() && t0.elapsed() < Duration::from_secs(60) {
+                    std::thread::sleep(Duration::from_millis(500));
+                    cur = api.get("/api/connection");
+                }
+                let ok_link = cur.is_some()
+                    && (cur.as_ref().and_then(|c| c.get("link")).and_then(Value::as_str) == Some(link.as_str())
+                        || api.post("/api/connection", &json!({ "link": link })).is_some());
+                // A refused choice answers HTTP 400 (post() gives None). The
+                // reply is the whole app state, whose "error" field is
+                // usually null: not a failure.
+                let failed = !ok_link || api.post("/api/connection", &json!({ "mode": mode, "remember": remember })).is_none();
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(ui) = w.upgrade() else { return };
+                    APP.with_borrow_mut(|a| {
+                        a.mode_pending = false;
+                        a.mode_sent = (!failed).then(Instant::now);
+                    });
                     if failed {
-                        APP.with_borrow_mut(|a| a.mode_sent = None);
                         show_toast(&ui, tr_ui(&ui, "Mode belum tersimpan, coba lagi.", "The mode was not saved, try again."));
                         open_chooser(&ui);
                     }

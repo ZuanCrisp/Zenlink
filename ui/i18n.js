@@ -109,8 +109,8 @@ const ID = {
   "for Live Streaming": "untuk Live Streaming",
   "Standard mode with Apple's driver. Built for compatibility, a stable connection and ease of use.":
     "Mode standar menggunakan driver Apple. Mengutamakan kompatibilitas, koneksi stabil, dan kemudahan penggunaan.",
-  "Best quality for live streaming: high bitrate (measured 12–30 Mbps), up to ~56 fps and very low latency, like TikTok LIVE Studio. Needs the libusb0 driver.":
-    "Kualitas terbaik untuk livestream: bitrate tinggi (diukur 12–30 Mbps), hingga ~56 fps, latensi sangat rendah, seperti TikTok LIVE Studio. Memerlukan driver libusb0.",
+  "Best quality for live streaming: high bitrate (measured 12–30 Mbps), up to 60 fps and very low latency, like TikTok LIVE Studio. Needs the libusb0 driver.":
+    "Kualitas terbaik untuk livestream: bitrate tinggi (diukur 12–30 Mbps), hingga 60 fps, latensi sangat rendah, seperti TikTok LIVE Studio. Memerlukan driver libusb0.",
   "HEVC, device-limited to about 4–6 Mbps": "HEVC, dibatasi perangkat sekitar 4–6 Mbps",
   "Mouse touch, keyboard, gestures and buttons": "Sentuh dengan mouse, keyboard, gestur dan tombol",
   "Apple's own driver, nothing to install": "Driver Apple sendiri, tanpa instalasi",
