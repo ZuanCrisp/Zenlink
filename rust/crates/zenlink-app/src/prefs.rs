@@ -42,17 +42,25 @@ pub fn defaults() -> Prefs {
         on_top: false,
         stats: false,
         dots: true,
+        platform: "".into(),
+        remember_platform: false,
     }
 }
 
 pub fn load() -> Prefs {
-    let mut p = defaults();
-    let Some(v) = path()
+    match path()
         .and_then(|f| std::fs::read(f).ok())
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-    else {
-        return p;
-    };
+    {
+        Some(v) => from_value(&v),
+        None => defaults(),
+    }
+}
+
+/// Reads a saved file; unknown or invalid values keep their defaults, so
+/// files from older versions load without losing language, theme or others.
+pub fn from_value(v: &Value) -> Prefs {
+    let mut p = defaults();
     let s = |k: &str, d: &mut slint::SharedString, allowed: &[&str]| {
         if let Some(x) = v.get(k).and_then(Value::as_str) {
             if allowed.contains(&x) {
@@ -105,11 +113,24 @@ pub fn load() -> Prefs {
     b("onTop", &mut p.on_top);
     b("stats", &mut p.stats);
     b("dots", &mut p.dots);
+    // Device platform (phase A2). Separate from the backend's Apple
+    // "Remember my choice" (rememberConnectionMode in settings.json).
+    s("platform", &mut p.platform, &["apple", "android"]);
+    b("rememberPlatform", &mut p.remember_platform);
     p
 }
 
 pub fn save(p: &Prefs) {
-    let v = json!({
+    if let Some(f) = path() {
+        let _ = std::fs::write(
+            f,
+            serde_json::to_vec_pretty(&to_value(p)).unwrap_or_default(),
+        );
+    }
+}
+
+pub fn to_value(p: &Prefs) -> Value {
+    json!({
         "version": 2, "theme": p.theme.as_str(), "glassOn": p.glass_on, "glassThick": p.glass, "lens": p.lens, "lang": p.lang.as_str(), "fit": p.fit.as_str(),
         "fitWindow": p.fit_window, "rotation": p.rotation.as_str(),
         "cropL": p.crop_l, "cropT": p.crop_t, "cropR": p.crop_r, "cropB": p.crop_b,
@@ -117,8 +138,44 @@ pub fn save(p: &Prefs) {
         "audioBuffer": p.audio_buffer.as_str(), "touch": p.touch, "keyboard": p.keyboard,
         "gestures": p.gestures, "autoStart": p.auto_start, "closeToTray": p.close_to_tray,
         "onTop": p.on_top, "stats": p.stats, "dots": p.dots,
-    });
-    if let Some(f) = path() {
-        let _ = std::fs::write(f, serde_json::to_vec_pretty(&v).unwrap_or_default());
+        "platform": p.platform.as_str(), "rememberPlatform": p.remember_platform,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fresh_install_defaults() {
+        let p = defaults();
+        assert_eq!(p.lang.as_str(), "id", "Indonesian on a fresh install");
+        assert_eq!(p.theme.as_str(), "dark", "Liquid Glass Dark by default");
+        assert_eq!(p.platform.as_str(), "");
+        assert!(!p.remember_platform);
+    }
+
+    #[test]
+    fn old_file_keeps_language_and_theme_and_has_no_platform() {
+        let old = json!({"version": 2, "theme": "light", "lang": "en", "glassThick": 55.0});
+        let p = from_value(&old);
+        assert_eq!(
+            (p.theme.as_str(), p.lang.as_str(), p.glass),
+            ("light", "en", 55.0)
+        );
+        assert_eq!(p.platform.as_str(), "");
+        assert!(!p.remember_platform);
+    }
+
+    #[test]
+    fn platform_round_trip_and_validation() {
+        let mut p = defaults();
+        p.platform = "android".into();
+        p.remember_platform = true;
+        let back = from_value(&to_value(&p));
+        assert_eq!(back.platform.as_str(), "android");
+        assert!(back.remember_platform);
+        let bad = from_value(&json!({"platform": "windows-phone"}));
+        assert_eq!(bad.platform.as_str(), "");
     }
 }

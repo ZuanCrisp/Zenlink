@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **A1 (Android foundation) done; next A2**, see `docs/ROADMAP.md`.
+Current phase: **A2 (platform selector UI) done; next A3**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is
@@ -79,3 +79,15 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Cause: n/a (new code).
 - Fix: `rust/crates/zenlink-android` (adb host-protocol client, `devices -l` parser, getprop parser, naming, identity, discovery); notes in `docs/android/`.
 - Verification: 43 Rust tests pass (`cargo test --release -p zenlink-android`), including a fake in-process ADB server; `tests/test_scrcpy_pin.py` passes. Unverified on hardware: needs real Android phones over USB and Wi-Fi (with the user's consent) to confirm names and identity.
+
+### B-12: Icons show as empty boxes (v2.2.31)            Status: open
+- Reported: 2026-11-06 by the user, with a photo of v2.2.31 on another PC: every icon in the top bar, the settings cards and the window header is drawn as an empty rectangle (missing glyph); text renders fine.
+- Cause (suspected, not proven yet): all icons use the font "Segoe Fluent Icons" (`ui/theme.slint` `Theme.icons`, and `FlowStep` in `ui/app.slint`). That font ships with Windows 11 only. Windows 10 has "Segoe MDL2 Assets" instead, with mostly the same code points. Needs the Windows version of the affected PC to confirm.
+- Fix: planned: pick the icon font at startup (Segoe Fluent Icons if installed, else Segoe MDL2 Assets), use `Theme.icons` everywhere, and check that every code point used exists in MDL2. The fonts may not be bundled (Microsoft licence).
+- Verification: unverified: needs a Windows 10 PC (or the user's affected PC) showing the icons.
+
+### B-13: Platform selection before the Apple chooser (phase A2)            Status: fixed (unverified)
+- Reported: 2026-11-06, phase A2 gate (master prompt section 2, startup flow acceptance tests).
+- Cause: n/a (new flow). v2.2.31 opened the Apple Driver / ZenLink Studio chooser directly.
+- Fix: `rust/crates/zenlink-app/src/flow.rs` (navigation rules), `prefs.rs` (`platform`, `rememberPlatform`, separate from the backend's `rememberConnectionMode`), `ui/app.slint` (`PlatformSelector`, `PlatformCard`, `AndroidHome`, Back in the Apple chooser, Settings card "Device type"), `main.rs` (wiring; Android poll reads an already running ADB server only, never starts or stops one; video and Apple Start only in the Apple workspace; going back stops a running Apple session).
+- Verification: 10 app tests pass (`flow::tests` 7: fresh install, old config, iPhone path, Android path, Back from both paths, remembered platform, backend needs choice; `prefs::tests` 3: Indonesian + dark defaults, old file keeps language/theme, platform round trip). Screenshots with a stub backend and temporary prefs (no device, ADB port redirected): fresh install Indonesian, English, light theme with a saved selection, remembered Android, remembered Apple (chooser with Back). Unverified: clicking through Continue/Back in the real window, keyboard focus and screen-reader labels, and the Apple path with a real iPhone (needs the user).

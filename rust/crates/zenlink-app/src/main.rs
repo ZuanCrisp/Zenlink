@@ -3,11 +3,12 @@
 
 mod backdrop;
 mod dots;
+mod flow;
 mod input;
 mod prefs;
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -100,6 +101,10 @@ struct App {
     sheet: Option<String>,
     /// Full screen: where the window was before (position, size, maximised).
     full_restore: Option<(slint::PhysicalPosition, slint::PhysicalSize, bool)>,
+    /// Startup navigation: platform screen, Apple or Android (phase A2).
+    flow: Option<flow::Flow>,
+    /// The backend's last "needsChoice" (None until it first answered).
+    apple_needs: Option<bool>,
 }
 
 /// ZenLink's own full screen (the window covers the monitor). winit's full
@@ -335,6 +340,18 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
         .and_then(|c| c.get("needsChoice"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    APP.with_borrow_mut(|a| a.apple_needs = Some(needs));
+    ui.set_apple_detected(!device.is_empty());
+    // Only the Apple workspace may show the Apple chooser (flow.rs).
+    let on_apple = APP.with_borrow_mut(|a| match a.flow.as_mut() {
+        Some(f) => {
+            if needs {
+                f.backend_needs_choice();
+            }
+            f.apple_active()
+        }
+        None => false,
+    });
     ui.set_mode_active(str_of(st, &["connection", "active"]).unwrap_or("").into());
     ui.set_mode_link(
         str_of(st, &["connection", "link"])
@@ -353,7 +370,7 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
                 .map(|t| t.elapsed() < Duration::from_secs(3))
                 .unwrap_or(false)
     });
-    if needs && !just_sent && !ui.get_chooser_open() {
+    if needs && !just_sent && on_apple && !ui.get_chooser_open() {
         ui.set_chooser_cancelable(false);
         open_chooser(ui);
     }
@@ -598,6 +615,11 @@ fn fit_window(ui: &AppWindow, shown: (u32, u32), scale: f32) -> Option<(f32, f32
 /// Show the connection mode chooser, widening the window so the sheet fits.
 fn open_chooser(ui: &AppWindow) {
     ui.set_chooser_open(true);
+    widen_for_sheet(ui);
+}
+
+/// Widens the window so a full-window sheet (mode chooser, platform screen) fits.
+fn widen_for_sheet(ui: &AppWindow) {
     let Some((wx, wy, ww, wh)) = work_area(ui) else {
         return;
     };
@@ -888,6 +910,214 @@ fn keep_on_screen(ui: &AppWindow, (wx, wy, ww, wh): (f32, f32, f32, f32), size: 
     }
 }
 
+/// Mirrors the startup navigation into the window.
+fn apply_flow(ui: &AppWindow, f: &flow::Flow) {
+    ui.set_screen(f.screen.as_str().into());
+    ANDROID_POLL.store(
+        match f.screen {
+            flow::Screen::Platform => 1,
+            flow::Screen::Android => 2,
+            flow::Screen::Apple => 0,
+        },
+        Relaxed,
+    );
+    if f.apple_chooser {
+        ui.set_chooser_cancelable(false);
+        open_chooser(ui);
+    } else if f.screen != flow::Screen::Apple {
+        ui.set_chooser_open(false);
+    }
+    if f.screen == flow::Screen::Platform {
+        widen_for_sheet(ui);
+    }
+}
+
+/// What the Android poll does: 0 = nothing (Apple workspace), 1 = count
+/// devices (platform screen), 2 = list them with names (Android workspace).
+static ANDROID_POLL: AtomicU8 = AtomicU8::new(0);
+
+enum AdbView {
+    /// No ADB server: ZenLink does not start one yet (bundled adb in A3).
+    NotRunning,
+    /// Port 5037 answers, but not as an ADB server.
+    Foreign,
+    /// An ADB server runs; `other` = a different version than ZenLink's.
+    Running { version: u32, other: bool },
+}
+
+/// Polls the ADB server that is already running (never starts or kills one)
+/// while the platform screen or the Android workspace shows. Properties are
+/// read once per transport and cached.
+fn start_android_poll(ui: &AppWindow) {
+    use zenlink_android::adb::{check_server, AdbClient, ServerStatus, BUNDLED_SERVER_VERSION};
+    use zenlink_android::{devices, discovery};
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let client = AdbClient {
+            timeout: Duration::from_millis(500),
+            ..AdbClient::default()
+        };
+        let mut cache: std::collections::HashMap<
+            (String, Option<u64>),
+            zenlink_android::props::Props,
+        > = Default::default();
+        loop {
+            let mode = ANDROID_POLL.load(Relaxed);
+            if mode == 0 {
+                std::thread::sleep(Duration::from_millis(500));
+                continue;
+            }
+            let (view, list) = match check_server(&client, BUNDLED_SERVER_VERSION) {
+                ServerStatus::NotRunning => (AdbView::NotRunning, Vec::new()),
+                ServerStatus::Foreign(_) => (AdbView::Foreign, Vec::new()),
+                s => {
+                    let (version, other) = match s {
+                        ServerStatus::Mismatch { found, .. } => (found, true),
+                        ServerStatus::Compatible(v) => (v, false),
+                        _ => (0, true),
+                    };
+                    let entries = client
+                        .devices_l()
+                        .map(|t| devices::parse_list(&t))
+                        .unwrap_or_default();
+                    cache.retain(|k, _| {
+                        entries
+                            .iter()
+                            .any(|e| (e.serial.clone(), e.transport_id) == *k)
+                    });
+                    let list = discovery::build(entries, |d| {
+                        if mode < 2 {
+                            return None;
+                        }
+                        let key = (d.serial.clone(), d.transport_id);
+                        if let Some(p) = cache.get(&key) {
+                            return Some(p.clone());
+                        }
+                        let target = match d.transport_id {
+                            Some(id) => zenlink_android::adb::Target::TransportId(id),
+                            None => zenlink_android::adb::Target::Serial(&d.serial),
+                        };
+                        let p = client.getprop(&target).ok()?;
+                        cache.insert(key, p.clone());
+                        Some(p)
+                    });
+                    (AdbView::Running { version, other }, list)
+                }
+            };
+            let w = weak.clone();
+            if slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    show_android(&ui, &view, &list);
+                }
+            })
+            .is_err()
+            {
+                return;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
+}
+
+fn show_android(
+    ui: &AppWindow,
+    view: &AdbView,
+    list: &[zenlink_android::discovery::AndroidDevice],
+) {
+    use zenlink_android::devices::Connection;
+    use zenlink_android::discovery::Readiness;
+    ui.set_android_count(list.len() as i32);
+    let status = match view {
+        AdbView::NotRunning => tr_ui(
+            ui,
+            "ADB belum berjalan. ADB bawaan ZenLink Next datang di fase berikutnya; untuk sekarang siapkan HP dengan langkah di bawah.",
+            "ADB is not running. ZenLink Next's own ADB comes in a later phase; for now, prepare the phone with the steps below.",
+        ),
+        AdbView::Foreign => tr_ui(
+            ui,
+            "Port ADB 5037 dipakai program lain. ZenLink tidak mengubahnya.",
+            "ADB port 5037 is used by another program. ZenLink does not change it.",
+        ),
+        AdbView::Running { version, other } => {
+            let base = if list.is_empty() {
+                tr_ui(ui, "Belum ada perangkat Android. Ikuti langkah di bawah.", "No Android device yet. Follow the steps below.")
+            } else {
+                format!("{} {}", list.len(), tr_ui(ui, "perangkat terlihat lewat ADB.", "device(s) seen through ADB."))
+            };
+            if *other {
+                format!(
+                    "{base} {}",
+                    tr_ui(
+                        ui,
+                        &format!("Server ADB versi {version} milik aplikasi lain sedang berjalan; ZenLink tidak menghentikannya."),
+                        &format!("Another app's ADB server (version {version}) is running; ZenLink does not stop it."),
+                    )
+                )
+            } else {
+                base
+            }
+        }
+    };
+    ui.set_android_status(status.into());
+    let rows: Vec<AndroidRow> = list
+        .iter()
+        .map(|d| {
+            let link = match d.primary.connection {
+                Connection::Usb => "USB",
+                Connection::WifiTcp { .. } | Connection::WifiTls { .. } => "Wi-Fi",
+                Connection::Emulator => tr_ui_static(ui, "Emulator", "Emulator"),
+                Connection::Unknown => "?",
+            };
+            let state = match &d.readiness {
+                Readiness::Ready => tr_ui(ui, "Siap", "Ready"),
+                Readiness::NeedsAuthorization => {
+                    tr_ui(ui, "Ketuk Izinkan di HP", "Tap Allow on the phone")
+                }
+                Readiness::Offline => tr_ui(
+                    ui,
+                    "Offline, colok ulang kabel",
+                    "Offline, reconnect the cable",
+                ),
+                Readiness::NoPermission => tr_ui(
+                    ui,
+                    "Tidak ada izin/driver USB",
+                    "No USB permission or driver",
+                ),
+                Readiness::NotAndroidSystem => tr_ui(
+                    ui,
+                    "Mode recovery/bootloader",
+                    "Recovery or bootloader mode",
+                ),
+                Readiness::TooOld { sdk } => tr_ui(
+                    ui,
+                    &format!("Android terlalu lama (API {sdk}, perlu 21+)"),
+                    &format!("Android too old (API {sdk}, needs 21+)"),
+                ),
+                Readiness::Unknown => tr_ui(ui, "Membaca info perangkat…", "Reading device info…"),
+            };
+            let mut sub = vec![link.to_string()];
+            if let Some(r) = &d.android_release {
+                sub.push(format!("Android {r}"));
+            }
+            sub.push(state);
+            AndroidRow {
+                title: d.name.display.clone().into(),
+                sub: sub.join(" · ").into(),
+                ok: d.readiness == Readiness::Ready,
+            }
+        })
+        .collect();
+    ui.set_android_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
+}
+
+fn tr_ui_static(ui: &AppWindow, id: &'static str, en: &'static str) -> &'static str {
+    if ui.global::<I18n>().get_id() {
+        id
+    } else {
+        en
+    }
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     init_log();
     slint::BackendSelector::new()
@@ -1108,21 +1338,77 @@ fn main() -> Result<(), slint::PlatformError> {
         // has no size yet here, so do not measure it).
         APP.with_borrow_mut(|a| a.hold_stage = Some(IDLE_STAGE_W));
     }
-    // Show the chooser at once unless a remembered mode exists; the
-    // backend can take a while to start.
-    if !mode_remembered() {
-        ui.set_chooser_cancelable(false);
-        ui.set_chooser_open(true);
+    // First screen: the platform selector, unless the user opted in to
+    // remembering the platform. On iPhone / iPad the Apple chooser shows at
+    // once unless a remembered mode exists (the backend can take a while).
+    {
+        let p = ui.get_prefs();
+        let f = flow::Flow::launch(&p.platform, p.remember_platform, mode_remembered());
+        apply_flow(&ui, &f);
+        APP.with_borrow_mut(|a| a.flow = Some(f));
         // Widen once the window exists on screen.
         let w = ui.as_weak();
         slint::Timer::single_shot(Duration::from_millis(60), move || {
             if let Some(ui) = w.upgrade() {
-                if ui.get_chooser_open() {
-                    open_chooser(&ui);
+                if ui.get_chooser_open() || ui.get_screen().as_str() == "platform" {
+                    widen_for_sheet(&ui);
                 }
             }
         });
     }
+    {
+        let weak = ui.as_weak();
+        ui.on_choose_platform(move |platform, remember| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(screen) = flow::parse_platform(platform.as_str()) else {
+                return;
+            };
+            let mut p = ui.get_prefs();
+            p.platform = platform.clone();
+            p.remember_platform = remember;
+            ui.set_prefs(p.clone());
+            prefs::save(&p);
+            // Before the backend answered, its settings file tells whether
+            // the Apple chooser is needed.
+            let needs = APP
+                .with_borrow(|a| a.apple_needs)
+                .unwrap_or_else(|| !mode_remembered());
+            let f = APP.with_borrow_mut(|a| {
+                let f = a
+                    .flow
+                    .get_or_insert_with(|| flow::Flow::launch("", false, true));
+                f.choose(screen, needs);
+                f.clone()
+            });
+            apply_flow(&ui, &f);
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        let api = api.clone();
+        ui.on_change_platform(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            // Leave safely: end a running Apple session first.
+            if APP.with_borrow(|a| a.streaming)
+                || matches!(
+                    ui.get_phase().as_str(),
+                    "connecting" | "activating" | "streaming"
+                )
+            {
+                let a = api.clone();
+                std::thread::spawn(move || a.stop_cast());
+            }
+            let f = APP.with_borrow_mut(|a| {
+                let f = a
+                    .flow
+                    .get_or_insert_with(|| flow::Flow::launch("", false, true));
+                f.back();
+                f.clone()
+            });
+            apply_flow(&ui, &f);
+        });
+    }
+    start_android_poll(&ui);
     // Test hook: ZL_DEMO_SETTINGS=1 opens/closes settings every 1.5 s so the
     // slide can be filmed frame by frame.
     let demo = slint::Timer::default();
@@ -1332,6 +1618,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(ui) = weak.upgrade() {
                     ui.set_chooser_cancelable(true);
                     open_chooser(&ui);
+                }
+                return;
+            }
+            if a.as_str() == "platform" {
+                if let Some(ui) = weak.upgrade() {
+                    ui.invoke_change_platform();
                 }
                 return;
             }
@@ -1572,8 +1864,9 @@ fn main() -> Result<(), slint::PlatformError> {
             if bar != ui.get_compact_bar() {
                 ui.set_compact_bar(bar);
             }
+            let on_apple = ui.get_screen().as_str() == "apple";
             APP.with_borrow_mut(|a| {
-                let streaming = a.streaming;
+                let streaming = a.streaming && on_apple;
                 let device_rotation = a.device_rotation;
                 let Some(v) = a.view.as_ref() else { return };
                 v.set_crop(p.crop_l as u32, p.crop_t as u32, p.crop_r as u32, p.crop_b as u32);

@@ -30,6 +30,8 @@ export struct Prefs {
     on-top: bool,
     stats: bool,
     dots: bool,             // animated dot background
+    platform: string,       // "" | apple | android (first screen)
+    remember-platform: bool,
 }
 
 // Window controls, Windows order (min, max, close) on the right, drawn as
@@ -666,6 +668,7 @@ component ModeChooser inherits Rectangle {
     callback prefs-changed(Prefs);
     callback choose(string, string, bool);
     callback cancel();
+    callback back();
     property <string> pick: active;
     property <string> link-pick: link;
     property <bool> keep: remember;
@@ -769,8 +772,9 @@ component ModeChooser inherits Rectangle {
                     wrap: word-wrap;
                 }
                 HorizontalLayout {
-                    alignment: end;
                     spacing: 8px;
+                    GlassButton { icon: "\u{E72B}"; label: I18n.t("Kembali", "Back"); tip: I18n.t("Ganti jenis perangkat", "Change device type"); clicked => { root.back(); } }
+                    Rectangle { horizontal-stretch: 1; }
                     if root.cancelable: GlassButton { label: I18n.t("Batal", "Cancel"); clicked => { root.cancel(); } }
                     GlassButton {
                         primary: true;
@@ -785,6 +789,335 @@ component ModeChooser inherits Rectangle {
     }
 }
 
+// One platform on the first screen: a large selectable glass card.
+// Click or Space selects it; Enter or a double-click also continues.
+component PlatformCard inherits Rectangle {
+    in property <string> icon;
+    in property <string> title;
+    in property <string> desc;
+    in property <[string]> points;
+    in property <string> badge;
+    in property <bool> selected;
+    in property <color> tint;
+    callback pick();
+    callback activate();
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-description: root.desc;
+    accessible-action-default => { root.pick(); }
+    // Wrapped text can be taller than the layout's estimate: keep room.
+    min-height: col.preferred-height + 20px;
+    border-radius: 18px;
+    background: selected ? tint.with-alpha(Theme.dark ? 0.15 : 0.11) : ta.has-hover ? Theme.hover.with-alpha(Theme.dark ? 0.10 : 0.5) : (Theme.dark ? #ffffff08 : #ffffff73);
+    border-width: selected || fs.has-focus ? 1.5px : 1px;
+    border-color: selected ? tint : fs.has-focus ? Theme.accent : Theme.line;
+    animate background, border-color { duration: 220ms; easing: ease-out; }
+    transform-scale-x: ta.pressed ? 98.5% : 100%;
+    transform-scale-y: ta.pressed ? 98.5% : 100%;
+    animate transform-scale-x, transform-scale-y { duration: ta.pressed ? 120ms : 320ms; easing: cubic-bezier(0.34, 1.45, 0.64, 1); }
+    fs := FocusScope {
+        key-pressed(ev) => {
+            if ev.text == " " { root.pick(); return accept; }
+            if ev.text == Key.Return { root.pick(); root.activate(); return accept; }
+            reject
+        }
+    }
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { fs.focus(); root.pick(); }
+        double-clicked => { root.pick(); root.activate(); }
+    }
+    col := VerticalLayout {
+        padding: 18px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 12px;
+            Rectangle {
+                width: 46px;
+                height: 46px;
+                border-radius: 14px;
+                background: @linear-gradient(135deg, root.tint 0%, root.tint.darker(0.35) 100%);
+                Icon { text: root.icon; color: white; font-size: 22px; }
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 1;
+                spacing: 4px;
+                Text { text: root.title; font-size: 16px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
+                if root.badge != "": HorizontalLayout {
+                    alignment: start;
+                    Rectangle {
+                        height: 20px;
+                        width: badgeT.preferred-width + 14px;
+                        border-radius: 10px;
+                        background: root.tint.with-alpha(0.18);
+                        badgeT := Text { text: root.badge; font-size: 10.5px; font-weight: 700; color: root.tint; }
+                    }
+                }
+            }
+            // Radio dot.
+            VerticalLayout {
+                alignment: start;
+                Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 10px;
+                    border-width: root.selected ? 0px : 1.5px;
+                    border-color: Theme.text-3;
+                    background: root.selected ? root.tint : transparent;
+                    animate background { duration: 200ms; }
+                    Rectangle {
+                        width: root.selected ? 8px : 0px;
+                        height: self.width;
+                        border-radius: self.width / 2;
+                        background: white;
+                        animate width { duration: 300ms; easing: cubic-bezier(0.34, 1.56, 0.64, 1); }
+                    }
+                }
+            }
+        }
+        Text { text: root.desc; font-size: 12px; color: Theme.text-2; wrap: word-wrap; }
+        for p in root.points: HorizontalLayout {
+            spacing: 7px;
+            Icon { text: "\u{E73E}"; font-size: 10px; width: 14px; vertical-alignment: top; color: Theme.ok; }
+            Text { text: p; font-size: 11.5px; color: Theme.text; wrap: word-wrap; horizontal-stretch: 1; }
+        }
+    }
+}
+
+// First screen (phase A2): which device family to connect. Nothing connects
+// and no driver changes here; iPhone / iPad leads to the Apple mode chooser.
+component PlatformSelector inherits Rectangle {
+    in property <string> picked;          // "" | apple | android
+    in property <bool> remember;
+    in property <bool> apple-detected;
+    in property <int> android-count;
+    in-out property <Prefs> prefs;
+    callback prefs-changed(Prefs);
+    callback choose(string, bool);
+    property <string> pick: picked;
+    property <bool> keep: remember;
+    property <string> apple-badge: root.apple-detected ? I18n.t("Terdeteksi", "Detected") : "";
+    property <string> android-badge: root.android-count > 0 ? (root.android-count + I18n.t(" terdeteksi", " detected")) : "";
+    property <string> apple-desc: I18n.t("Cerminkan dan kendalikan perangkat Apple lewat USB atau Wi-Fi.", "Mirror and control compatible Apple devices using USB or Wi-Fi.");
+    property <string> android-title: I18n.t("Ponsel / Tablet Android", "Android Phone / Tablet");
+    property <string> android-desc: I18n.t("Pencerminan dan kontrol Android berperforma tinggi lewat USB atau Wi-Fi.", "High-performance Android mirroring and control over USB or Wi-Fi.");
+    property <[string]> apple-points: [
+        I18n.t("Apple Driver atau ZenLink Studio", "Apple Driver or ZenLink Studio"),
+        I18n.t("Kabel atau Wi-Fi", "Cable or Wi-Fi"),
+    ];
+    property <[string]> android-points: [
+        I18n.t("Lewat ADB dan scrcpy, tanpa aplikasi di HP", "Through ADB and scrcpy, no app on the phone"),
+        I18n.t("Kabel atau Wi-Fi, semua merek Android", "Cable or Wi-Fi, any Android brand"),
+    ];
+    property <float> t: 0;
+    init => { self.t = 1; }
+    animate t { duration: 380ms; easing: cubic-bezier(0.05, 0.7, 0.1, 1); }
+    background: #000000.with-alpha(0.5 * t);
+    TouchArea { } // swallow clicks behind the sheet
+    sheet := Glass {
+        strong: true;
+        background: Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
+        border-radius: 22px;
+        width: min(parent.width - 24px, 640px);
+        height: min(parent.height - 24px, col.preferred-height + 2px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + 24px * (1 - root.t);
+        opacity: root.t;
+        transform-scale-x: 0.96 + 0.04 * root.t;
+        transform-scale-y: 0.96 + 0.04 * root.t;
+        property <bool> wide: self.width >= 560px;
+        ScrollView {
+            col := VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Image { source: @image-url("../../../../ui/logo-256.png"); width: 44px; height: 44px; }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text { text: I18n.t("Selamat datang di ZenLink Next", "Welcome to ZenLink Next"); font-size: 12px; font-weight: 600; color: Theme.accent; }
+                        Text { text: I18n.t("Perangkat apa yang ingin kamu sambungkan?", "Which device would you like to connect?"); font-size: 18px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
+                    Seg {
+                        width: 190px;
+                        options: ["id", "en"];
+                        labels: ["Indonesia", "English"];
+                        value: root.prefs.lang;
+                        changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
+                    }
+                }
+                if sheet.wide: HorizontalLayout {
+                    spacing: 12px;
+                    PlatformCard {
+                        horizontal-stretch: 1;
+                        icon: "\u{E8EA}";
+                        tint: #5ac8fa;
+                        title: "iPhone / iPad";
+                        desc: root.apple-desc;
+                        points: root.apple-points;
+                        badge: root.apple-badge;
+                        selected: root.pick == "apple";
+                        pick => { root.pick = "apple"; }
+                        activate => { root.choose("apple", root.keep); }
+                    }
+                    PlatformCard {
+                        horizontal-stretch: 1;
+                        icon: "\u{E70A}";
+                        tint: #3ddc84;
+                        title: root.android-title;
+                        desc: root.android-desc;
+                        points: root.android-points;
+                        badge: root.android-badge;
+                        selected: root.pick == "android";
+                        pick => { root.pick = "android"; }
+                        activate => { root.choose("android", root.keep); }
+                    }
+                }
+                if !sheet.wide: VerticalLayout {
+                    spacing: 10px;
+                    PlatformCard {
+                        icon: "\u{E8EA}";
+                        tint: #5ac8fa;
+                        title: "iPhone / iPad";
+                        desc: root.apple-desc;
+                        points: root.apple-points;
+                        badge: root.apple-badge;
+                        selected: root.pick == "apple";
+                        pick => { root.pick = "apple"; }
+                        activate => { root.choose("apple", root.keep); }
+                    }
+                    PlatformCard {
+                        icon: "\u{E70A}";
+                        tint: #3ddc84;
+                        title: root.android-title;
+                        desc: root.android-desc;
+                        points: root.android-points;
+                        badge: root.android-badge;
+                        selected: root.pick == "android";
+                        pick => { root.pick = "android"; }
+                        activate => { root.choose("android", root.keep); }
+                    }
+                }
+                if root.apple-detected && root.android-count > 0: Text {
+                    text: I18n.t("Perangkat Apple dan Android sama-sama tersambung. Pilih yang ingin dicerminkan.", "Apple and Android devices are both connected. Choose the one to mirror.");
+                    font-size: 11.5px;
+                    color: Theme.warn;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: I18n.t("Ingat jenis perangkat", "Remember device type"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Toggle { checked: root.keep; toggled(v) => { root.keep = v; } }
+                }
+                Text {
+                    text: I18n.t("Bisa diganti kapan saja lewat Pengaturan › Jenis perangkat atau tombol Kembali.", "You can change it any time in Settings › Device type or with the Back button.");
+                    font-size: 11px;
+                    color: Theme.text-3;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    GlassButton {
+                        primary: true;
+                        enabled: root.pick != "";
+                        icon: "\u{E72A}";
+                        label: I18n.t("Lanjut", "Continue");
+                        clicked => { root.choose(root.pick, root.keep); }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export struct AndroidRow {
+    title: string,
+    sub: string,
+    ok: bool,
+}
+
+// Android workspace (phase A2): setup steps and the devices ADB already
+// sees. Mirroring arrives in the next phases.
+component AndroidHome inherits Rectangle {
+    in property <string> status;
+    in property <[AndroidRow]> devices;
+    callback back();
+    Glass {
+        width: min(parent.width - 32px, 460px);
+        height: min(parent.height - 32px, acol.preferred-height + 2px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 20px;
+        ScrollView {
+            acol := VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 11px;
+                        background: @linear-gradient(135deg, #3ddc84 0%, #3ddc84.darker(0.35) 100%);
+                        Icon { text: "\u{E70A}"; color: white; font-size: 17px; }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text { text: I18n.t("Ponsel / Tablet Android", "Android Phone / Tablet"); font-size: 15px; font-weight: 800; color: Theme.text; }
+                        Text { text: root.status; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                    }
+                }
+                for d in root.devices: HorizontalLayout {
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: 5px;
+                        Rectangle { width: 8px; height: 8px; border-radius: 4px; background: d.ok ? Theme.ok : Theme.warn; }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        Text { text: d.title; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
+                        Text { text: d.sub; font-size: 11px; color: Theme.text-2; wrap: word-wrap; }
+                    }
+                }
+                FlowStep {
+                    title: I18n.t("Aktifkan Debugging USB", "Turn on USB debugging");
+                    sub: I18n.t("Pengaturan › Tentang ponsel › ketuk Nomor bentukan 7×, lalu Opsi pengembang › Debugging USB.", "Settings › About phone › tap Build number 7×, then Developer options › USB debugging.");
+                    state: "todo";
+                }
+                FlowStep {
+                    title: I18n.t("Colok kabel USB", "Plug in the USB cable");
+                    sub: I18n.t("Pakai kabel data, bukan kabel isi daya saja.", "Use a data cable, not a charge-only cable.");
+                    state: "todo";
+                }
+                FlowStep {
+                    title: I18n.t("Izinkan di HP", "Allow it on the phone");
+                    sub: I18n.t("Ketuk Izinkan pada pesan Izinkan debugging USB.", "Tap Allow on the Allow USB debugging prompt.");
+                    state: "todo";
+                    last: true;
+                }
+                Text {
+                    text: I18n.t("Pencerminan Android sedang dibangun di beta ini. Tidak ada driver yang dipasang atau diubah.", "Android mirroring is still being built in this beta. No driver is installed or changed.");
+                    font-size: 11px;
+                    color: Theme.text-3;
+                    wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    GlassButton { icon: "\u{E72B}"; label: I18n.t("Ganti jenis perangkat", "Change device type"); clicked => { root.back(); } }
+                }
+            }
+        }
+    }
+}
+
 component SettingsPanel inherits Glass {
     in-out property <Prefs> prefs;
     in property <string> driver-text;
@@ -792,6 +1125,7 @@ component SettingsPanel inherits Glass {
     // Cable or Wi-Fi, for both Apple Driver and ZenLink Studio.
     in property <string> link: "wired";
     in property <string> mode;
+    in property <string> screen: "apple";
     // Driver changes that fit the device (each asks for confirmation).
     in property <bool> drv-restore;
     in property <bool> drv-bind;
@@ -952,6 +1286,24 @@ component SettingsPanel inherits Glass {
                 }
 
                 Card {
+                    title: I18n.t("Jenis perangkat", "Device type");
+                    icon: "\u{E8EA}";
+                    tint-a: #5ac8fa;
+                    tint-b: #0a84ff;
+                    info: I18n.t("Pilih iPhone / iPad atau Android. Sesi yang berjalan dihentikan dulu dengan aman. Pengaturan Apple dan Android tetap tersimpan terpisah.",
+                        "Choose iPhone / iPad or Android. A running session is stopped safely first. Apple and Android settings are kept separately.");
+                    Text { text: root.screen == "android" ? I18n.t("Ponsel / Tablet Android", "Android Phone / Tablet") : "iPhone / iPad"; font-size: 12.5px; font-weight: 600; color: Theme.text; }
+                    Row {
+                        label: I18n.t("Ingat jenis perangkat", "Remember device type");
+                        Toggle { checked: prefs.remember-platform; toggled(v) => { root.prefs.remember-platform = v; root.changed(root.prefs); } }
+                    }
+                    HorizontalLayout {
+                        alignment: start;
+                        GlassButton { icon: "\u{E72B}"; label: I18n.t("Ganti jenis perangkat", "Change device type"); clicked => { root.driver-action("platform"); } }
+                    }
+                }
+
+                if root.screen != "android": Card {
                     title: I18n.t("Koneksi & driver", "Connection & driver");
                     icon: "\u{E88E}";
                     tint-a: #34d399;
@@ -1109,6 +1461,14 @@ export component AppWindow inherits Window {
     in property <bool> mode-remember: true;
     callback choose-mode(string, string, bool);
     callback set-link(string);
+    // First screen and Android workspace (phase A2): platform | apple | android.
+    in-out property <string> screen: "platform";
+    in property <bool> apple-detected;
+    in property <int> android-count;
+    in property <string> android-status;
+    in property <[AndroidRow]> android-devices;
+    callback choose-platform(string, bool);
+    callback change-platform();
     // Animated dot field (rendered in Rust) and the cursor over the stage.
     in property <image> dots-image;
     out property <bool> stage-hover: stage-ta.has-hover;
@@ -1172,18 +1532,18 @@ export component AppWindow inherits Window {
                 compact: root.compact;
                 maximized: root.maximized;
                 fullscreen: root.fullscreen;
-                device: root.device;
-                phase: root.phase;
-                link: root.link;
-                need: root.device-need;
+                device: root.screen == "apple" ? root.device : "";
+                phase: root.screen == "apple" ? root.phase : "idle";
+                link: root.screen == "apple" ? root.link : "";
+                need: root.screen == "apple" ? root.device-need : "";
                 stats: root.prefs.stats ? root.stats-line : "";
                 settings-open: root.settings-open;
                 muted: root.muted;
                 fit: root.prefs.fit;
                 window-action(a) => { root.window-action(a); }
-                start => { root.start-cast(); }
+                start => { if root.screen == "apple" { root.start-cast(); } }
                 stop => { root.stop-cast(); }
-                restart => { root.restart(); }
+                restart => { if root.screen == "apple" { root.restart(); } }
                 settings => {
                     root.settings-open = !root.settings-open;
                     root.settings-toggled(root.settings-open);
@@ -1215,7 +1575,12 @@ export component AppWindow inherits Window {
                             height: parent.height;
                             image-fit: fill;
                         }
-                        if root.phase != "streaming": Placeholder {
+                        if root.screen == "android": AndroidHome {
+                            status: root.android-status;
+                            devices: root.android-devices;
+                            back => { root.change-platform(); }
+                        }
+                        if root.screen == "apple" && root.phase != "streaming": Placeholder {
                             phase: root.phase;
                             device: root.device;
                             message: root.message;
@@ -1248,6 +1613,7 @@ export component AppWindow inherits Window {
                     connection: root.connection;
                     link: root.mode-link;
                     mode: root.mode-active;
+                    screen: root.screen;
                     drv-restore: root.drv-restore;
                     drv-bind: root.drv-bind;
                     drv-filter: root.drv-filter;
@@ -1283,7 +1649,19 @@ export component AppWindow inherits Window {
                 }
             }
         }
-        if root.chooser-open: ModeChooser {
+        if root.screen == "platform": PlatformSelector {
+            width: parent.width;
+            height: parent.height;
+            border-radius: root.edge ? 0px : 12px;
+            picked: root.prefs.platform;
+            remember: root.prefs.remember-platform;
+            apple-detected: root.apple-detected;
+            android-count: root.android-count;
+            prefs: root.prefs;
+            prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
+            choose(p, r) => { root.choose-platform(p, r); }
+        }
+        if root.chooser-open && root.screen == "apple": ModeChooser {
             width: parent.width;
             height: parent.height;
             border-radius: root.edge ? 0px : 12px;
@@ -1295,6 +1673,7 @@ export component AppWindow inherits Window {
             prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
             choose(m, l, r) => { root.chooser-open = false; root.choose-mode(m, l, r); }
             cancel => { root.chooser-open = false; }
+            back => { root.change-platform(); }
         }
         if root.sheet-open: NoticeSheet {
             width: parent.width;
