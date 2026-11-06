@@ -44,6 +44,15 @@ def selftest(out_path: str) -> int:
             results[name] = "ok"
         except BaseException:  # noqa: BLE001 - report everything
             results[name] = traceback.format_exc(limit=3)
+    # zlaac.dll (sound decoder) must load and decode inside the frozen exe.
+    try:
+        from zenlink.aac import AacDecoder, avcodec_version
+
+        avcodec_version()
+        AacDecoder(bytes.fromhex("f8e85000"), 44100).close()
+        results["zenlink.aac (zlaac.dll)"] = "ok"
+    except BaseException:  # noqa: BLE001
+        results["zenlink.aac (zlaac.dll)"] = traceback.format_exc(limit=3)
     ok = all(v == "ok" for v in results.values())
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump({"ok": ok, "modules": results}, fh, indent=1)

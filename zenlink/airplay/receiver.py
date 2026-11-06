@@ -635,10 +635,10 @@ class _Reorder:
 
 
 class _AudioDecoder:
-    """RTP -> AES-CBC decrypt -> AAC-ELD (PyAV) -> s16le stereo 48 kHz."""
+    """RTP -> AES-CBC decrypt -> AAC-ELD (zlaac) -> s16le stereo 48 kHz."""
 
     def __init__(self, key: bytes, iv: bytes, ct: int) -> None:
-        import av
+        from zenlink.aac import AacDecoder
 
         self._key, self._iv = key, iv
         self._ok = ct == 8
@@ -647,13 +647,7 @@ class _AudioDecoder:
             return
         cookie = bytearray(AAC_ELD_44K)
         cookie[2] |= 0x10  # ELD frameLengthFlag = 1 (480 samples), as in apple/audio.py
-        self._av = av
-        self._ctx = av.codec.CodecContext.create("aac", "r")
-        self._ctx.extradata = bytes(cookie)
-        self._ctx.sample_rate = 44100
-        self._ctx.layout = "stereo"
-        self._ctx.open()
-        self._resampler = av.AudioResampler(format="s16", layout="stereo", rate=48000)
+        self._dec = AacDecoder(bytes(cookie), 44100, channels=2, out_rate=48000)
         self._last_seq = None
         self.decoded = 0
         self.failed = 0
@@ -675,11 +669,8 @@ class _AudioDecoder:
                 log.warning("airplay: audio packet not AAC-ELD after decryption (first byte %02x, %d so far)",
                             payload[0] if payload else 0, self.failed)
             return b""
-        out = bytearray()
         try:
-            for frame in self._ctx.decode(self._av.Packet(payload)):
-                for pcm in self._resampler.resample(frame):
-                    out += bytes(pcm.planes[0])[: pcm.samples * 4]
+            out = self._dec.decode(payload)
         except Exception as error:  # noqa: BLE001
             self.failed += 1
             if self.failed in (1, 50, 500):
@@ -688,7 +679,7 @@ class _AudioDecoder:
         if out and not self.decoded:
             log.info("airplay: sound is playing (AAC-ELD 44.1 kHz -> 48 kHz)")
         self.decoded += 1
-        return bytes(out)
+        return out
 
 
 def receiver_name() -> str:

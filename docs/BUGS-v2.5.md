@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **Phase 0 (bootstrap and isolation)**, see `docs/ROADMAP.md`.
+Current phase: **Phase 1 (slim FFmpeg) done; next A1**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is

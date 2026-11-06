@@ -56,6 +56,10 @@ $pyiArgs = @(
     "--collect-all", "_sounddevice_data",
     "--collect-all", "zeroconf",
     "--add-binary", "zenlink\airplay\playfair.dll${sep}zenlink\airplay",
+    # Sound: minimal FFmpeg AAC decoder (native\zlaac). PyAV (full FFmpeg,
+    # ~65 MB) is only pulled in by pymobiledevice3's unused VNC transcoder.
+    "--add-binary", "zenlink\zlaac.dll${sep}zenlink",
+    "--exclude-module", "av",
     "--hidden-import", "Crypto.Cipher.AES",
     "--collect-submodules", "zenlink",
     "--hidden-import", "clr",
@@ -115,6 +119,8 @@ function Test-FrozenExe([string]$exe) {
     Write-Host "    self-test OK: $exe ($(@($r.modules.PSObject.Properties).Count) modules)" -ForegroundColor Green
 }
 Test-FrozenExe (Join-Path $app "ZenLinkService.exe")
+# The full FFmpeg from PyAV must not come back (Phase 1 size win).
+if (Get-ChildItem $app -Recurse -Filter "avcodec-*.dll") { throw "PyAV/FFmpeg DLLs found in $app" }
 foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat") {
     Copy-Item $f $app
 }
