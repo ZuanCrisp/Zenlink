@@ -71,6 +71,18 @@ struct Inner {
     /// Latest resize request (a copy of `resized.0`), read by the render
     /// thread while it holds the ring lock (no lock-order inversion).
     resize_asked: std::sync::atomic::AtomicU64,
+    /// Picture snapshot (Alt+C, text from the screen): asked by `snapshot`,
+    /// filled by the render thread from the picture it just drew.
+    snap_asked: AtomicBool,
+    snap: Mutex<Option<Snapshot>>,
+    snap_cv: Condvar,
+}
+
+/// The picture as shown (rotated, cropped), 32-bit BGRA rows, top first.
+pub struct Snapshot {
+    pub width: u32,
+    pub height: u32,
+    pub bgra: Vec<u8>,
 }
 
 impl Inner {
@@ -125,8 +137,11 @@ pub struct VideoView {
     render: Option<JoinHandle<()>>,
     decode: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
     meter: Mutex<RateMeter>,
-    bounds: Mutex<Option<(i32, i32, i32, i32, bool, i32)>>,
+    bounds: Mutex<Option<Bounds>>,
 }
+
+/// Last `set_bounds`: x, y, width, height, visible, corner radius.
+type Bounds = (i32, i32, i32, i32, bool, i32);
 
 /// Where the picture lands inside a `cw` x `ch` view (physical pixels).
 pub fn picture_rect(cw: i32, ch: i32, sw: u32, sh: u32, rotation: u32, fit: Fit) -> RECT {
@@ -353,6 +368,9 @@ impl VideoView {
             resized: Mutex::new((0, 0)),
             resized_cv: Condvar::new(),
             resize_asked: std::sync::atomic::AtomicU64::new(0),
+            snap_asked: AtomicBool::new(false),
+            snap: Mutex::new(None),
+            snap_cv: Condvar::new(),
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, Arc::as_ptr(&inner) as isize) };
         let meter = Mutex::new(RateMeter::new(&inner.stats));
@@ -376,6 +394,28 @@ impl VideoView {
 
     pub fn hwnd(&self) -> isize {
         self.inner.hwnd
+    }
+
+    /// The picture on screen right now, as shown (rotation and crop
+    /// applied, at the view's size). Waits for the next drawn frame, at
+    /// most `timeout`; `None` without a picture.
+    pub fn snapshot(&self, timeout: std::time::Duration) -> Option<Snapshot> {
+        let mut g = self.inner.snap.lock().unwrap();
+        *g = None;
+        self.inner.snap_asked.store(true, Relaxed);
+        // Wake a render thread that waits for a new frame.
+        self.inner.ring.lock().unwrap().arrived.notify_all();
+        let t0 = std::time::Instant::now();
+        while g.is_none() && t0.elapsed() < timeout {
+            g = self
+                .inner
+                .snap_cv
+                .wait_timeout(g, timeout.saturating_sub(t0.elapsed()))
+                .unwrap()
+                .0;
+        }
+        self.inner.snap_asked.store(false, Relaxed);
+        g.take()
     }
 
     /// Place the view inside its parent (physical pixels).
@@ -793,6 +833,67 @@ impl PacingProbe {
     }
 }
 
+/// Copies `dest` (the picture's place in the back buffer) to the CPU.
+unsafe fn read_back(
+    gpu: &Gpu,
+    back: &ID3D11Texture2D,
+    dest: RECT,
+    cw: u32,
+    ch: u32,
+) -> Option<Snapshot> {
+    let l = dest.left.clamp(0, cw as i32) as u32;
+    let t = dest.top.clamp(0, ch as i32) as u32;
+    let r = dest.right.clamp(0, cw as i32) as u32;
+    let b = dest.bottom.clamp(0, ch as i32) as u32;
+    let (w, h) = (r.checked_sub(l)?, b.checked_sub(t)?);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let mut desc = D3D11_TEXTURE2D_DESC::default();
+    back.GetDesc(&mut desc);
+    desc.Width = w;
+    desc.Height = h;
+    desc.Usage = D3D11_USAGE_STAGING;
+    desc.BindFlags = 0;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+    desc.MiscFlags = 0;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
+    let mut staging = None;
+    gpu.device
+        .CreateTexture2D(&desc, None, Some(&mut staging))
+        .ok()?;
+    let staging = staging?;
+    let bx = D3D11_BOX {
+        left: l,
+        top: t,
+        front: 0,
+        right: r,
+        bottom: b,
+        back: 1,
+    };
+    gpu.context
+        .CopySubresourceRegion(&staging, 0, 0, 0, 0, back, 0, Some(&bx));
+    let mut m = D3D11_MAPPED_SUBRESOURCE::default();
+    gpu.context
+        .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut m))
+        .ok()?;
+    let row = (w * 4) as usize;
+    let mut bgra = Vec::with_capacity(row * h as usize);
+    for y in 0..h as usize {
+        let p = (m.pData as *const u8).add(y * m.RowPitch as usize);
+        bgra.extend_from_slice(std::slice::from_raw_parts(p, row));
+    }
+    gpu.context.Unmap(&staging, 0);
+    Some(Snapshot {
+        width: w,
+        height: h,
+        bgra,
+    })
+}
+
 fn render_loop(inner: &Inner) -> Result<()> {
     // A failed swap chain / processor step used to end this thread, which
     // froze the picture (seen after changing fit or rotation). Start over
@@ -803,7 +904,7 @@ fn render_loop(inner: &Inner) -> Result<()> {
             Ok(()) => return Ok(()),
             Err(e) => {
                 errors += 1;
-                if errors <= 20 || errors % 100 == 0 {
+                if errors <= 20 || errors.is_multiple_of(100) {
                     log::warn!("render: {e}; starting the swap chain again ({errors})");
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -1041,6 +1142,14 @@ fn render_session(inner: &Inner) -> Result<()> {
                     if seq != shown_seq {
                         shown_seq = seq;
                         new_frame = true;
+                    }
+                    if inner.snap_asked.swap(false, Relaxed) {
+                        let shot = read_back(gpu, &back, dest, cw, ch);
+                        if shot.is_none() {
+                            log::warn!("snapshot: read back failed");
+                        }
+                        *inner.snap.lock().unwrap() = shot;
+                        inner.snap_cv.notify_all();
                     }
                 }
                 None => {

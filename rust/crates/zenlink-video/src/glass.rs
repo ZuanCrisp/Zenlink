@@ -364,7 +364,7 @@ impl Gfx {
                 .CreateRenderTargetView(&tex, None, Some(&mut rtv))
                 .ok();
             Ok(Target {
-                rtv: rtv.unwrap_or_else(|| unreachable_rtv()),
+                rtv: rtv.unwrap_or_else(unreachable_rtv),
                 srv: srv.unwrap(),
                 tex,
                 w,

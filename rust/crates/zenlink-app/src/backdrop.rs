@@ -8,8 +8,8 @@
 use windows::core::BOOL;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{
-    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_NONE, DWMSBT_TRANSIENTWINDOW,
-    DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWM_SYSTEMBACKDROP_TYPE,
+    DwmExtendFrameIntoClientArea, DwmSetWindowAttribute, DWMSBT_NONE, DWMWA_SYSTEMBACKDROP_TYPE,
+    DWMWA_USE_IMMERSIVE_DARK_MODE, DWM_SYSTEMBACKDROP_TYPE,
 };
 use windows::Win32::UI::Controls::MARGINS;
 
@@ -17,8 +17,6 @@ use windows::Win32::UI::Controls::MARGINS;
 pub enum Backdrop {
     /// No translucency: solid background (glass intensity 0%).
     None,
-    /// DWM Acrylic (system backdrop). Solid while the window is inactive.
-    Acrylic,
     /// Blur-behind that stays on while inactive.
     Accent,
 }
@@ -93,10 +91,6 @@ pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, thick: f32, round: bool) ->
             Backdrop::None => {
                 set_accent(hwnd, 0, 0);
                 set_backdrop(DWMSBT_NONE)
-            }
-            Backdrop::Acrylic => {
-                set_accent(hwnd, 0, 0);
-                set_backdrop(DWMSBT_TRANSIENTWINDOW)
             }
             Backdrop::Accent if thick < 0.03 => {
                 // Clear: no blur, per-pixel alpha only (winit transparency).

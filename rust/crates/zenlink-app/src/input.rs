@@ -15,7 +15,6 @@ pub enum Cmd {
     Up(f32, f32),
     /// u0, v0, u1, v1, steps, ms per step
     Stroke(f32, f32, f32, f32, u32, u64),
-    Button(&'static str),
     Home(u32),
     Action(&'static str),
     /// Apple hardware keyboard: one key tap (HID usages held, then none).
@@ -94,7 +93,6 @@ fn worker(api: Api, rx: Receiver<Cmd>, rot: Arc<AtomicU32>) {
                 let (x, y) = pt(u1, v1);
                 api.touch(TouchKind::Release, x, y);
             }
-            Cmd::Button(name) => api.button(name),
             Cmd::Home(n) => {
                 for i in 0..n {
                     if i > 0 {

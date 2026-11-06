@@ -337,6 +337,9 @@ fn publish(
 /// Whether Windows has a decoder for `codec` (HEVC needs the "HEVC Video
 /// Extensions" or a GPU driver that ships one).
 pub fn decoder_available(codec: &Codec) -> bool {
+    if !media_foundation_present() {
+        return false;
+    }
     startup();
     unsafe {
         let input = MFT_REGISTER_TYPE_INFO {
@@ -365,7 +368,36 @@ pub fn decoder_available(codec: &Codec) -> bool {
     }
 }
 
+/// Whether Windows has Media Foundation (`mfplat.dll`). Windows 10/11 "N"
+/// and "KN" editions ship without it until the Media Feature Pack is
+/// installed (B-27). ZenLink.exe delay-loads `mfplat.dll` (build.rs), so
+/// this check must come before any Media Foundation call.
+pub fn media_foundation_present() -> bool {
+    use windows::Win32::Foundation::FreeLibrary;
+    use windows::Win32::System::LibraryLoader::{LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
+    static PRESENT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *PRESENT.get_or_init(|| unsafe {
+        match LoadLibraryExW(
+            windows::core::w!("mfplat.dll"),
+            None,
+            LOAD_LIBRARY_SEARCH_SYSTEM32,
+        ) {
+            Ok(h) => {
+                let _ = FreeLibrary(h);
+                true
+            }
+            Err(e) => {
+                log::warn!("mfplat.dll not found ({e}): no Media Foundation (Windows N without the Media Feature Pack?)");
+                false
+            }
+        }
+    })
+}
+
 pub fn startup() {
+    if !media_foundation_present() {
+        return;
+    }
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         let _ = MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET);

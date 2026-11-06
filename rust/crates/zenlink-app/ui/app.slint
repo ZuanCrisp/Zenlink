@@ -1072,6 +1072,44 @@ export struct AndroidRow {
     title: string,
     sub: string,
     ok: bool,
+    // Ready over USB with no Wi-Fi link yet: offer "Wi-Fi" (adb tcpip).
+    wifi: bool,
+}
+
+// A single-line glass text field (Wi-Fi address, pairing code).
+component Field inherits Rectangle {
+    in property <string> placeholder;
+    in-out property <string> text <=> ti.text;
+    in property <InputType> input-type: InputType.text;
+    callback accepted();
+    height: 32px;
+    horizontal-stretch: 1;
+    border-radius: 10px;
+    background: ti.has-focus ? Theme.fill-hover : Theme.fill;
+    border-width: 0.75px;
+    border-color: ti.has-focus ? Theme.accent : (Theme.glass > 0.01 ? Theme.rim : Theme.line);
+    animate background, border-color { duration: 180ms; easing: ease-out; }
+    TouchArea { mouse-cursor: MouseCursor.text; clicked => { ti.focus(); } }
+    if ti.text == "": Text {
+        x: 11px;
+        text: root.placeholder;
+        font-size: 12px;
+        color: Theme.text-3;
+        vertical-alignment: center;
+        height: parent.height;
+    }
+    ti := TextInput {
+        x: 11px;
+        width: parent.width - 22px;
+        height: parent.height;
+        vertical-alignment: center;
+        single-line: true;
+        input-type: root.input-type;
+        font-size: 12px;
+        color: Theme.text;
+        selection-background-color: Theme.accent-soft;
+        accepted => { root.accepted(); }
+    }
 }
 
 // Android workspace: setup steps, the devices ADB sees, and Start per
@@ -1159,6 +1197,12 @@ component AndroidHome inherits Rectangle {
     callback prefs-changed(Prefs);
     callback back();
     callback start-device(int);
+    // Phase A6: Android over Wi-Fi.
+    in property <bool> wifi-busy;
+    callback wifi-device(int);
+    callback wifi-connect(string);
+    callback wifi-pair(string, string);
+    property <bool> wifi-open: false;
     Glass {
         width: min(parent.width - 32px, 460px);
         height: min(parent.height - 32px, acol.preferred-height + 2px);
@@ -1197,6 +1241,16 @@ component AndroidHome inherits Rectangle {
                         Text { text: d.title; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
                         Text { text: d.sub; font-size: 11px; color: Theme.text-2; wrap: word-wrap; }
                     }
+                    if d.wifi && root.phase != "connecting": VerticalLayout {
+                        alignment: center;
+                        GlassButton {
+                            icon: "\u{E701}";
+                            label: "Wi-Fi";
+                            enabled: !root.wifi-busy;
+                            tip: I18n.t("Pindah ke Wi-Fi: setelah tersambung, kabel boleh dicabut", "Switch to Wi-Fi: once connected, you can unplug the cable");
+                            clicked => { root.wifi-device(i); }
+                        }
+                    }
                     if d.ok && root.phase != "connecting": VerticalLayout {
                         alignment: center;
                         GlassButton {
@@ -1219,6 +1273,61 @@ component AndroidHome inherits Rectangle {
                     font-size: 11.5px;
                     color: Theme.warn;
                     wrap: word-wrap;
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    GlassButton {
+                        icon: "\u{E701}";
+                        label: I18n.t("Sambung lewat Wi-Fi", "Connect over Wi-Fi");
+                        active: root.wifi-open;
+                        tip: I18n.t("Wireless debugging (Android 11+) atau alamat IP:port", "Wireless debugging (Android 11+) or an IP:port address");
+                        clicked => { root.wifi-open = !root.wifi-open; }
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+                if root.wifi-open: Card {
+                    VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: I18n.t("Android 11+: Opsi pengembang › Wireless debugging › Pair device with pairing code. Isi alamat dan kode yang tampil, tekan Pair. Lalu isi alamat di layar Wireless debugging dan tekan Sambung.", "Android 11+: Developer options › Wireless debugging › Pair device with pairing code. Enter the address and code shown, press Pair. Then enter the address on the Wireless debugging screen and press Connect.");
+                            font-size: 11px;
+                            color: Theme.text-2;
+                            wrap: word-wrap;
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            addr := Field {
+                                placeholder: I18n.t("IP:port, mis. 192.168.1.20:37099", "IP:port, e.g. 192.168.1.20:37099");
+                                accepted => { if !root.wifi-busy { root.wifi-connect(self.text); } }
+                            }
+                            code := Field {
+                                horizontal-stretch: 0;
+                                width: 96px;
+                                placeholder: I18n.t("Kode 6 digit", "6-digit code");
+                                input-type: InputType.number;
+                                accepted => { if !root.wifi-busy { root.wifi-pair(addr.text, self.text); } }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: end;
+                            GlassButton {
+                                icon: "\u{E8D7}";
+                                label: "Pair";
+                                enabled: !root.wifi-busy && code.text != "";
+                                tip: I18n.t("Pairing sekali dengan kode dari HP", "Pair once with the code from the phone");
+                                clicked => { root.wifi-pair(addr.text, code.text); }
+                            }
+                            GlassButton {
+                                primary: true;
+                                icon: "\u{E71B}";
+                                label: I18n.t("Sambung", "Connect");
+                                enabled: !root.wifi-busy && addr.text != "";
+                                tip: I18n.t("Sambung ke alamat ini (adb connect)", "Connect to this address (adb connect)");
+                                clicked => { root.wifi-connect(addr.text); }
+                            }
+                        }
+                    }
                 }
                 AndroidVideoCard {
                     prefs: root.prefs;
@@ -1463,12 +1572,14 @@ component SettingsPanel inherits Glass {
                     KeyRow { keys: "Ctrl + ,"; text: I18n.t("Buka / tutup Pengaturan", "Open / close Settings"); }
                     KeyRow { keys: "Alt + H"; text: I18n.t("Putar tampilan (Auto, 90°, 180°, 270°, 0°)", "Rotate the view (Auto, 90°, 180°, 270°, 0°)"); }
                     KeyRow { keys: "Alt + ←"; text: "Back"; }
+                    KeyRow { keys: "Alt + C"; text: I18n.t("Salin teks di layar perangkat ke PC (OCR)", "Copy the text on the device screen to the PC (OCR)"); }
+                    KeyRow { keys: "Alt + R"; text: I18n.t("Hapus riwayat teks yang disalin", "Clear the copied-text history"); }
                     KeyRow { keys: "Alt + L"; text: root.screen == "android" ? I18n.t("Tombol power (kunci / nyalakan layar)", "Power button (lock / wake the screen)") : I18n.t("Kunci perangkat", "Lock the device"); }
                     if root.screen == "android": KeyRow { keys: "Ctrl + V"; text: I18n.t("Paste clipboard PC di HP", "Paste the PC clipboard on the phone"); }
                     if root.screen == "android": KeyRow { keys: "Ctrl + C / X / A / Z"; text: I18n.t("Copy, cut, select all, undo di HP", "Copy, cut, select all, undo on the phone"); }
                     if root.screen == "android": KeyRow { keys: "Alt + N"; text: "Notifications"; }
-                    if root.screen == "android": KeyRow { keys: "Alt + S"; text: "Quick Settings"; }
-                    if root.screen == "android": KeyRow { keys: "Alt + R"; text: "Recent Apps"; }
+                    if root.screen == "android": KeyRow { keys: "Alt + Q"; text: "Quick Settings"; }
+                    if root.screen == "android": KeyRow { keys: "Alt + S"; text: "Recent Apps"; }
                     if root.screen == "android": KeyRow { keys: "Alt + ↑ / ↓"; text: I18n.t("Volume HP naik / turun", "Phone volume up / down"); }
                     if root.screen != "android": KeyRow { keys: "Alt + U"; text: I18n.t("Wake & unlock (passcode tersimpan)", "Wake & unlock (saved passcode)"); }
                     if root.screen != "android": KeyRow { keys: "Alt + D"; text: I18n.t("Stealth dim: layar perangkat 0% / pulihkan", "Stealth dim: device screen to 0% / restore"); }
@@ -1681,6 +1792,10 @@ export component AppWindow inherits Window {
     in property <string> android-message;
     in property <bool> hevc-ok;
     callback android-start(int);
+    in property <bool> android-wifi-busy;
+    callback android-wifi-device(int);
+    callback android-wifi-connect(string);
+    callback android-wifi-pair(string, string);
     callback android-stop();
     callback android-restart();
     property <bool> on-android: root.screen == "android";
@@ -1818,6 +1933,10 @@ export component AppWindow inherits Window {
                             prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
                             back => { root.change-platform(); }
                             start-device(i) => { root.android-start(i); }
+                            wifi-busy: root.android-wifi-busy;
+                            wifi-device(i) => { root.android-wifi-device(i); }
+                            wifi-connect(a) => { root.android-wifi-connect(a); }
+                            wifi-pair(a, c) => { root.android-wifi-pair(a, c); }
                         }
                         if root.screen == "apple" && root.phase != "streaming": Placeholder {
                             phase: root.phase;

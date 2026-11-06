@@ -34,11 +34,11 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: v2.2.31 (322822b).
 - Verification: confirmed in a fake-stream test (`rust/tools/fake_backend.py`). unverified: needs user confirmation on a real device.
 
-### B-5: Portable.exe / Source-zip `ZenLink.exe` need the Visual C++ runtime            Status: open
+### B-5: Portable.exe / Source-zip `ZenLink.exe` need the Visual C++ runtime            Status: fixed (unverified)
 - Reported: carried over (item 5).
 - Cause: the Rust exe imports `VCRUNTIME140.dll`. The installer works only because PyInstaller's onedir ships it next to the exe; Portable.exe and the source zip do not. On a PC without the VC++ Redistributable, Windows fails before ZenLink can explain anything.
-- Fix: planned: static CRT via `rust/.cargo/config.toml` (`-C target-feature=+crt-static` for `x86_64-pc-windows-msvc`). Measure the exe size before and after.
-- Verification: unverified: needs an import check (`dumpbin /imports` or `pefile`: no `VCRUNTIME140*.dll`, no `api-ms-win-crt-*`) and a run on a clean PC / Windows Sandbox.
+- Fix: static CRT via `rust/.cargo/config.toml` (`-C target-feature=+crt-static` for `x86_64-pc-windows-msvc`); it also covers the `embedded-backend` and `CARGO_TARGET_DIR` builds.
+- Verification: import check with `pefile` on `rust/target/release/ZenLink.exe`: no `VCRUNTIME140*.dll` and no `api-ms-win-crt-*` imports (2026-11-07). Exe 11,746,304 → 11,916,800 B (includes the OCR snapshot and B-27 code of the same build). Unverified: a run on a clean PC / Windows Sandbox (needs the user's approval).
 
 ### B-6: Stale WebView2 warning in the installer and Start ZenLink.bat            Status: fixed (unverified)
 - Reported: carried over (item 6).
@@ -199,12 +199,13 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 ### B-26: Settings and README list shortcuts the Rust window does not have            Status: fixed (unverified)
 - Reported: 2026-11-07, by the user (screenshot of the README "Keyboard Shortcuts" table: "belum lengkap di setting").
 - Cause: the shortcuts (Space, Alt+H/C/R/V/D/U/L, Ctrl+K, Alt+Left, G/M) live in the classic web UI (`ui/app.js`, `ui/keys.js`). The Rust window handles only F11/Esc and, for Android, typed keys. The Settings card "Control & shortcuts" and the README still describe the classic set.
-- Fix: `src/shortcuts.rs` (routing + US-layout HID table, 5 tests) and `main.rs` `run_shortcut`. Both: Space, M, Ctrl+, , Alt+H, Alt+Left, Alt+L. Apple Driver mode: the PC keyboard as a hardware keyboard (`/cast/key`), Alt+U/D/V, Ctrl+K, Ctrl+C/X/V/A/Z (`/api/keyboard/action`). Android: Alt+N/S/R, Alt+Up/Down. A click on the picture gives the keys to the window on both platforms. Settings now show a "Keyboard shortcuts" card listing exactly this set per platform. Not ported yet: Alt+C / Alt+R (OCR needs the frame read back from the GPU); the README must drop them until then.
+- Fix: `src/shortcuts.rs` (routing + US-layout HID table, 5 tests) and `main.rs` `run_shortcut`. Both: Space, M, Ctrl+, , Alt+H, Alt+Left, Alt+L. Apple Driver mode: the PC keyboard as a hardware keyboard (`/cast/key`), Alt+U/D/V, Ctrl+K, Ctrl+C/X/V/A/Z (`/api/keyboard/action`). Android: Alt+N/S/R, Alt+Up/Down. A click on the picture gives the keys to the window on both platforms. Settings now show a "Keyboard shortcuts" card listing exactly this set per platform. Alt+C / Alt+R (OCR) ported too: the renderer reads the shown picture back from the swap chain (`VideoView::snapshot`), ZenLink sends it as BMP to the backend's Windows OCR (`/api/ocr`) and puts the text on the PC clipboard.
 - Verification: unverified: needs an iPhone in Apple Driver mode and an Android phone. Routing is unit-tested.
 
-### B-27: Windows "N" editions have no Media Foundation decoder            Status: open
+### B-27: Windows "N" editions have no Media Foundation decoder            Status: fixed (unverified)
 - Reported: 2026-11-07, from the clean-PC review (user asked whether ZenLink runs on other PCs without extra installs).
 - Cause: N/KN editions ship without the Media Feature Pack, so the H.264 decoder the picture needs is missing. Not seen on a device yet; from Microsoft's edition notes.
-- Fix: pending (A6): detect a missing H.264 decoder at start and show a bilingual message with the official Media Feature Pack link.
+- Fix: `ZenLink.exe` delay-loads `mfplat.dll` (`build.rs`: `/DELAYLOAD:mfplat.dll` + `delayimp.lib`), so Windows can start it without Media Foundation. `zenlink_video::media_foundation_present()` guards every Media Foundation call; at start a bilingual sheet explains the missing Media Feature Pack and opens Windows' own Settings › Optional features (`ms-settings:optionalfeatures`). ZenLink downloads nothing.
+- Evidence: `pefile` shows `mfplat.dll` only in the delay-import table.
 - Verification: unverified: needs an N edition (VM or Windows Sandbox, with the user's approval).
 

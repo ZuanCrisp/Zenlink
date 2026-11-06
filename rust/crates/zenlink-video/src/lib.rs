@@ -15,6 +15,6 @@ pub mod glass;
 mod stats;
 mod view;
 
-pub use decoder::decoder_available;
+pub use decoder::{decoder_available, media_foundation_present};
 pub use stats::{Stats, StatsSnapshot};
-pub use view::{Fit, PointerEvent, VideoView};
+pub use view::{Fit, PointerEvent, Snapshot, VideoView};

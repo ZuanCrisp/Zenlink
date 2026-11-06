@@ -4,6 +4,14 @@ use std::process::Command;
 fn main() {
     slint_build::compile("ui/app.slint").expect("compile Slint UI");
     windows_resources();
+    // B-27: Windows N / KN have no mfplat.dll until the Media Feature Pack
+    // is installed. A normal import would stop the loader before ZenLink
+    // runs; delay-loaded, ZenLink starts and explains instead
+    // (zenlink_video::media_foundation_present guards every call).
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        println!("cargo:rustc-link-arg-bins=/DELAYLOAD:mfplat.dll");
+        println!("cargo:rustc-link-arg-bins=delayimp.lib");
+    }
 }
 
 /// The exe's icon and version (Explorer, taskbar, OBS window list). Needs
@@ -50,7 +58,7 @@ BEGIN
     BLOCK "040904B0"
     BEGIN
       VALUE "CompanyName", "Zenvy Zenshiro"
-      VALUE "FileDescription", "ZenLink - iPhone and iPad mirroring for Windows"
+      VALUE "FileDescription", "ZenLink - iPhone, iPad and Android mirroring for Windows"
       VALUE "FileVersion", "{ver}"
       VALUE "InternalName", "ZenLink"
       VALUE "LegalCopyright", "Copyright (C) 2026 Zenvy Zenshiro. GPL-3.0-or-later."

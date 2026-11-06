@@ -803,6 +803,32 @@ fn drivers_summary(ui: &AppWindow, d: &Value) -> String {
     lines.join("\n")
 }
 
+/// B-27: without Media Foundation (Windows N/KN without the Media Feature
+/// Pack) there is no picture. Say so and open the official place to add it.
+fn check_media_foundation(ui: &AppWindow) {
+    let ok = zenlink_video::media_foundation_present() && {
+        // On its own thread: Media Foundation and COM, see hevc_ok.
+        std::thread::spawn(|| zenlink_video::decoder_available(&zenlink_core::api::Codec::H264))
+            .join()
+            .unwrap_or(false)
+    };
+    if ok {
+        return;
+    }
+    open_sheet(
+        ui,
+        "mfp",
+        tr_ui(ui, "Media Feature Pack belum terpasang", "The Media Feature Pack is missing"),
+        tr_ui(
+            ui,
+            "Windows ini (edisi N atau KN) tidak punya komponen video Windows, jadi ZenLink tidak bisa menampilkan gambar. Pasang \"Media Feature Pack\" dari Microsoft (gratis): Settings › Apps › Optional features › View features › Media Feature Pack. Lalu restart PC.",
+            "This Windows (an N or KN edition) has no Windows video components, so ZenLink cannot show the picture. Add the free \"Media Feature Pack\" from Microsoft: Settings › Apps › Optional features › View features › Media Feature Pack. Then restart the PC.",
+        ),
+        tr_ui(ui, "Buka Optional features", "Open Optional features"),
+        tr_ui(ui, "Nanti", "Later"),
+    );
+}
+
 fn open_sheet(ui: &AppWindow, kind: &str, title: String, body: String, ok: String, cancel: String) {
     APP.with_borrow_mut(|a| a.sheet = Some(kind.into()));
     ui.set_sheet_title(title.into());
@@ -1244,10 +1270,19 @@ fn show_android(
                 sub.push(format!("Android {r}"));
             }
             sub.push(state);
+            let on_wifi = d.transports.iter().any(|t| {
+                matches!(
+                    t.connection,
+                    Connection::WifiTcp { .. } | Connection::WifiTls { .. }
+                )
+            });
             AndroidRow {
                 title: d.name.display.clone().into(),
                 sub: sub.join(" · ").into(),
                 ok: d.readiness == Readiness::Ready,
+                wifi: d.readiness == Readiness::Ready
+                    && d.primary.connection == Connection::Usb
+                    && !on_wifi,
             }
         })
         .collect();
@@ -1435,6 +1470,143 @@ fn refresh_encoder_ui(ui: &AppWindow) {
     g.set_detected(parts.join(" · ").into());
 }
 
+/// Alt+C: reads the text on the picture with Windows OCR (through the
+/// backend's /api/ocr, as in the classic window) and puts it on the PC
+/// clipboard. Lines from earlier captures are stitched (Alt+R clears).
+fn copy_screen_text(ui: &AppWindow) {
+    static BUSY: AtomicBool = AtomicBool::new(false);
+    let live = APP.with_borrow(|a| a.streaming || a.android_live);
+    if !live {
+        show_toast(
+            ui,
+            tr_ui(ui, "Mulai mirroring dulu.", "Start mirroring first."),
+        );
+        return;
+    }
+    if BUSY.swap(true, Relaxed) {
+        return;
+    }
+    let shot = APP.with_borrow(|a| a.view.as_ref()?.snapshot(Duration::from_millis(400)));
+    let Some(shot) = shot else {
+        BUSY.store(false, Relaxed);
+        show_toast(
+            ui,
+            tr_ui(
+                ui,
+                "Belum ada gambar untuk dibaca.",
+                "No picture to read yet.",
+            ),
+        );
+        return;
+    };
+    show_toast(
+        ui,
+        tr_ui(
+            ui,
+            "Membaca teks di layar…",
+            "Reading the text on the screen…",
+        ),
+    );
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let image = format!(
+            "data:image/bmp;base64,{}",
+            shortcuts::base64(&shortcuts::bmp(shot.width, shot.height, &shot.bgra))
+        );
+        let r = Api::new().post_slow("/api/ocr", &json!({ "image": image }), 40);
+        let _ = slint::invoke_from_event_loop(move || {
+            BUSY.store(false, Relaxed);
+            let Some(ui) = weak.upgrade() else { return };
+            let ok = r
+                .as_ref()
+                .and_then(|v| v.get("ok"))
+                .and_then(Value::as_bool)
+                == Some(true);
+            let text = r
+                .as_ref()
+                .and_then(|v| v.get("text"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let num = |k: &str| {
+                r.as_ref()
+                    .and_then(|v| v.get(k))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+            };
+            let msg = if !ok {
+                tr_ui(
+                    &ui,
+                    "Gagal membaca teks (Windows OCR).",
+                    "Text recognition failed (Windows OCR).",
+                )
+            } else if text.is_empty() {
+                tr_ui(
+                    &ui,
+                    "Tidak ada teks di layar.",
+                    "No text found on the screen.",
+                )
+            } else if !set_pc_clipboard_text(&text) {
+                tr_ui(
+                    &ui,
+                    "Teks terbaca, tapi Windows tidak mengizinkan menyalin ke clipboard.",
+                    "Text read, but Windows didn't allow copying it to the clipboard.",
+                )
+            } else if num("added") == 0 {
+                tr_ui(
+                    &ui,
+                    "Tidak ada yang baru di layar ini; teks yang disalin tidak berubah.",
+                    "Nothing new on this screen; the copied text is unchanged.",
+                )
+            } else {
+                let (n, total) = (num("added"), num("total"));
+                tr_ui(
+                    &ui,
+                    &format!(
+                        "Disalin ke PC: {n} baris baru ({total} total). Alt+R mulai dari awal."
+                    ),
+                    &format!(
+                        "Copied to the PC: {n} new line(s) ({total} in total). Alt+R starts over."
+                    ),
+                )
+            };
+            show_toast(&ui, msg);
+        });
+    });
+}
+
+/// Puts `text` on the Windows clipboard. False when the clipboard is busy.
+fn set_pc_clipboard_text(text: &str) -> bool {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    const CF_UNICODETEXT: u32 = 13;
+    let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return false;
+        }
+        let ok = (|| {
+            EmptyClipboard().ok()?;
+            let g = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2).ok()?;
+            let p = GlobalLock(g) as *mut u16;
+            if p.is_null() {
+                return None;
+            }
+            std::ptr::copy_nonoverlapping(wide.as_ptr(), p, wide.len());
+            let _ = GlobalUnlock(g);
+            // The clipboard owns the memory after this.
+            SetClipboardData(CF_UNICODETEXT, Some(HANDLE(g.0))).ok()?;
+            Some(())
+        })()
+        .is_some();
+        let _ = CloseClipboard();
+        ok
+    }
+}
+
 /// Text on the Windows clipboard (Ctrl+V to Android), `None` without text.
 fn pc_clipboard_text() -> Option<String> {
     use windows::Win32::Foundation::HGLOBAL;
@@ -1484,6 +1656,171 @@ fn scrcpy_server() -> Result<Arc<Vec<u8>>, String> {
 
 /// Starts mirroring list entry `index` (-1 = the first ready device), or the
 /// recording in ZL_ANDROID_FIXTURE.
+/// Runs one Wi-Fi step on a worker thread (the ADB calls block for
+/// seconds) and shows its message. `Ok` is a success message.
+fn android_wifi_job(
+    ui: &AppWindow,
+    job: impl FnOnce()
+            -> Result<(&'static str, &'static str, String), (&'static str, &'static str, String)>
+        + Send
+        + 'static,
+) {
+    if ui.get_android_wifi_busy() {
+        return;
+    }
+    ui.set_android_wifi_busy(true);
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let r = job();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_android_wifi_busy(false);
+            let ((id, en, detail), _ok) = match r {
+                Ok(m) => (m, true),
+                Err(m) => (m, false),
+            };
+            let tail = if detail.is_empty() {
+                String::new()
+            } else {
+                format!(" ({detail})")
+            };
+            show_toast(&ui, format!("{}{tail}", tr_ui(&ui, id, en)));
+        });
+    });
+}
+
+/// "Wi-Fi" on a USB device: read its Wi-Fi address, switch adbd to TCP
+/// (`adb tcpip 5555`) and `adb connect` to it. The settings follow the
+/// device, because its identity is the hardware serial.
+fn android_wifi_device(ui: &AppWindow, index: i32) {
+    use zenlink_android::adb::{AdbClient, Target};
+    use zenlink_android::wireless::{Reply, TCPIP_PORT};
+    let dev = APP.with_borrow(|a| a.android_list.get(index.max(0) as usize).cloned());
+    let Some(d) = dev else { return };
+    android_wifi_job(ui, move || {
+        let c = AdbClient::default();
+        let serial = d.primary.serial.clone();
+        let target = match d.primary.transport_id {
+            Some(id) => Target::TransportId(id),
+            None => Target::Serial(&serial),
+        };
+        let ip = match c.wifi_address(&target) {
+            Ok(Some(ip)) => ip,
+            Ok(None) => {
+                return Err((
+                    "HP belum tersambung ke Wi-Fi",
+                    "The phone is not on Wi-Fi",
+                    String::new(),
+                ))
+            }
+            Err(e) => {
+                return Err((
+                    "Gagal membaca alamat Wi-Fi",
+                    "Couldn't read the Wi-Fi address",
+                    e.to_string(),
+                ))
+            }
+        };
+        if let Err(e) = c.tcpip(&target, TCPIP_PORT) {
+            return Err((
+                "Gagal mengaktifkan mode TCP/IP",
+                "Couldn't turn on TCP/IP mode",
+                e.to_string(),
+            ));
+        }
+        // adbd restarts on the phone; give it a moment, then retry.
+        let mut last = String::new();
+        for _ in 0..4 {
+            std::thread::sleep(Duration::from_millis(1200));
+            match c.connect_device(&ip, TCPIP_PORT) {
+                Ok(Reply::Ok(_)) => {
+                    log::info!("android: Wi-Fi connected to {ip}:{TCPIP_PORT}");
+                    return Ok((
+                        "Tersambung lewat Wi-Fi. Kabel boleh dicabut",
+                        "Connected over Wi-Fi. You can unplug the cable",
+                        format!("{ip}:{TCPIP_PORT}"),
+                    ));
+                }
+                Ok(Reply::Failed(m)) => last = m,
+                Err(e) => last = e.to_string(),
+            }
+        }
+        log::warn!("android: Wi-Fi connect to {ip} failed: {last}");
+        Err((
+            "Gagal tersambung lewat Wi-Fi. PC dan HP harus di jaringan yang sama",
+            "Couldn't connect over Wi-Fi. The PC and the phone must be on the same network",
+            last,
+        ))
+    });
+}
+
+/// "Connect": `adb connect IP:port`.
+fn android_wifi_connect(ui: &AppWindow, addr: String) {
+    use zenlink_android::adb::AdbClient;
+    use zenlink_android::wireless::{parse_endpoint, Reply};
+    let Some((host, port)) = parse_endpoint(&addr) else {
+        show_toast(
+            ui,
+            tr_ui(
+                ui,
+                "Alamat tidak valid. Contoh: 192.168.1.20:37099",
+                "Invalid address. Example: 192.168.1.20:37099",
+            ),
+        );
+        return;
+    };
+    android_wifi_job(ui, move || {
+        match AdbClient::default().connect_device(&host, port) {
+            Ok(Reply::Ok(_)) => Ok((
+                "Tersambung lewat Wi-Fi",
+                "Connected over Wi-Fi",
+                format!("{host}:{port}"),
+            )),
+            Ok(Reply::Failed(m)) => Err(("Gagal tersambung", "Couldn't connect", m)),
+            Err(e) => Err(("Gagal tersambung", "Couldn't connect", e.to_string())),
+        }
+    });
+}
+
+/// "Pair": `adb pair IP:port CODE` (Android 11+ wireless debugging).
+fn android_wifi_pair(ui: &AppWindow, addr: String, code: String) {
+    use zenlink_android::adb::AdbClient;
+    use zenlink_android::wireless::{parse_endpoint, valid_pair_code, Reply};
+    let Some((host, port)) = parse_endpoint(&addr) else {
+        show_toast(
+            ui,
+            tr_ui(
+                ui,
+                "Isi alamat pairing (IP:port) yang tampil di HP.",
+                "Enter the pairing address (IP:port) shown on the phone.",
+            ),
+        );
+        return;
+    };
+    if !valid_pair_code(&code) {
+        show_toast(
+            ui,
+            tr_ui(
+                ui,
+                "Kode pairing harus 6 digit.",
+                "The pairing code has 6 digits.",
+            ),
+        );
+        return;
+    }
+    android_wifi_job(ui, move || {
+        match AdbClient::default().pair(&host, port, &code) {
+        Ok(Reply::Ok(_)) => Ok((
+            "Pairing berhasil. Sekarang isi alamat di layar Wireless debugging lalu tekan Sambung",
+            "Paired. Now enter the address on the Wireless debugging screen and press Connect",
+            String::new(),
+        )),
+        Ok(Reply::Failed(m)) => Err(("Pairing gagal", "Pairing failed", m)),
+        Err(e) => Err(("Pairing gagal", "Pairing failed", e.to_string())),
+    }
+    });
+}
+
 fn android_start(ui: &AppWindow, index: i32) {
     use zenlink_android::devices::Connection;
     use zenlink_android::discovery::Readiness;
@@ -1716,6 +2053,18 @@ fn run_shortcut(
             .into(),
         ),
         Shortcut::Lock => ui.invoke_action("lock".into()),
+        Shortcut::CopyText => copy_screen_text(ui),
+        Shortcut::ClearText => {
+            std::thread::spawn(|| Api::new().post("/api/ocr/clear", &json!({})));
+            show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    "Riwayat teks dihapus. Alt+C berikutnya mulai dari awal.",
+                    "Copy history cleared. The next Alt+C starts fresh.",
+                ),
+            );
+        }
         Shortcut::Android(a) => ui.invoke_action(a.into()),
         Shortcut::Apple(_) if !apple_live => need_apple(),
         Shortcut::Apple("paste-pc") => match pc_clipboard_text() {
@@ -1919,7 +2268,12 @@ fn main() -> Result<(), slint::PlatformError> {
             if !yes {
                 return;
             }
-            if let Some(action) = kind.strip_prefix("drv:") {
+            if kind == "mfp" {
+                // Windows' own Settings page (no download by ZenLink).
+                let _ = std::process::Command::new("explorer.exe")
+                    .arg("ms-settings:optionalfeatures")
+                    .spawn();
+            } else if let Some(action) = kind.strip_prefix("drv:") {
                 run_driver(&ui, &api, action.to_string());
             } else if kind == "restart" {
                 show_toast(
@@ -1961,7 +2315,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let t0 = Instant::now();
                 while t0.elapsed() < Duration::from_secs(15) {
                     match a.state() {
-                        Some(st) if st.get("capture").map_or(true, Value::is_null) => break,
+                        Some(st) if st.get("capture").is_none_or(Value::is_null) => break,
                         _ => std::thread::sleep(Duration::from_millis(250)),
                     }
                 }
@@ -2071,6 +2425,7 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.get_muted(),
         );
         ui.set_hevc_ok(hevc_ok());
+        check_media_foundation(&ui);
         let f = flow::Flow::launch(&p.platform, p.remember_platform, mode_remembered());
         apply_flow(&ui, &f);
         APP.with_borrow_mut(|a| a.flow = Some(f));
@@ -2135,6 +2490,26 @@ fn main() -> Result<(), slint::PlatformError> {
                 f.clone()
             });
             apply_flow(&ui, &f);
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_android_wifi_device(move |i| {
+            if let Some(ui) = weak.upgrade() {
+                android_wifi_device(&ui, i);
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_wifi_connect(move |addr| {
+            if let Some(ui) = weak.upgrade() {
+                android_wifi_connect(&ui, addr.to_string());
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_wifi_pair(move |addr, code| {
+            if let Some(ui) = weak.upgrade() {
+                android_wifi_pair(&ui, addr.to_string(), code.to_string());
+            }
         });
     }
     {
@@ -2671,7 +3046,6 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                         Err(e) => {
                             ui.set_message(format!("Video: {e}").into());
-                            return;
                         }
                     }
                 }

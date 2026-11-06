@@ -28,6 +28,12 @@ unsafe impl Sync for Gpu {}
 
 impl Gpu {
     pub fn create() -> Result<Self> {
+        if !crate::decoder::media_foundation_present() {
+            return Err(windows::core::Error::new(
+                windows::Win32::Foundation::E_NOTIMPL,
+                "Media Foundation is missing (Media Feature Pack)",
+            ));
+        }
         unsafe {
             let mut device = None;
             let mut context = None;
