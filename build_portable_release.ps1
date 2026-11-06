@@ -65,12 +65,6 @@ if ($LASTEXITCODE) { throw "pip failed" }
 
 Write-Host "[2/4] Building ZenLinkService.exe (PyInstaller) and ZenLink.exe (Rust)..." -ForegroundColor Magenta
 $sep = ";"
-# Sound needs only the x64 PortAudio (sounddevice picks libportaudio64bit.dll
-# on 64-bit Python; ASIO only with SD_ENABLE_ASIO, which ZenLink never sets).
-# The 32-bit, ARM64, ASIO and macOS copies are left out (docs/SIZE_AUDIT.md B7).
-$sdData = (& $py -c "import _sounddevice_data, os; print(os.path.dirname(_sounddevice_data.__file__))").Trim()
-$portaudio = Join-Path $sdData "portaudio-binaries\libportaudio64bit.dll"
-if (-not (Test-Path $portaudio)) { throw "Missing $portaudio" }
 $pyiArgs = @(
     "-m", "PyInstaller", "packaging\launch.py",
     "--name", "ZenLinkService", "--onedir", "--windowed", "--noconfirm", "--clean",
@@ -92,8 +86,9 @@ $pyiArgs = @(
     "--collect-all", "pmd_net_addr",
     "--collect-all", "pytun_pmd3",  # wintun.dll, loaded when the tunnel module is imported
     "--collect-all", "webview",
+    # Only the x64 PortAudio (packaging\pyi-hooks\hook-sounddevice.py).
+    "--additional-hooks-dir", "packaging\pyi-hooks",
     "--hidden-import", "_sounddevice_data",
-    "--add-binary", "${portaudio}${sep}_sounddevice_data\portaudio-binaries",
     "--collect-all", "zeroconf",
     "--add-binary", "zenlink\airplay\playfair.dll${sep}zenlink\airplay",
     # Sound: minimal FFmpeg AAC decoder (native\zlaac). PyAV (full FFmpeg,
