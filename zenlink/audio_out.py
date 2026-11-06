@@ -47,6 +47,9 @@ class NativeAudio:
         self._calm_since = time.monotonic()
         self.underruns = 0
         self.dropped_ms = 0.0
+        self._report_at = time.monotonic()
+        self._report_gaps = 0
+        self._report_dropped = 0.0
         self.available = self._probe()
 
     @staticmethod
@@ -158,6 +161,16 @@ class NativeAudio:
                 del self._buf[:drop]
                 self.dropped_ms += drop / BYTES_PER_FRAME / RATE * 1000
             self._buf += pcm
+            # Diagnostics (never from the audio callback): sound gaps and
+            # dropped sound since the last line, at most every 5 s.
+            now = time.monotonic()
+            if now - self._report_at >= 5.0:
+                gaps, dropped = self.underruns - self._report_gaps, self.dropped_ms - self._report_dropped
+                if gaps or dropped >= 1:
+                    log.info("sound: %d gaps, %.0f ms dropped in %.0f s; margin %.1f ms, queued %.0f ms",
+                             gaps, dropped, now - self._report_at, self.margin / RATE * 1000,
+                             len(self._buf) / BYTES_PER_FRAME / RATE * 1000)
+                self._report_at, self._report_gaps, self._report_dropped = now, self.underruns, self.dropped_ms
 
     def _callback(self, outdata, frames, _time, _status) -> None:
         need = frames * BYTES_PER_FRAME

@@ -118,7 +118,10 @@ foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-D
 }
 & cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app
 if ($LASTEXITCODE) { throw "cargo failed" }
-$rustExe = Join-Path $PSScriptRoot "rust\target\release\ZenLink.exe"
+# CARGO_TARGET_DIR lets the release build while a dev ZenLink.exe from
+# rust\target is open (Windows locks a running exe).
+$rustTarget = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $PSScriptRoot "rust\target" }
+$rustExe = Join-Path $rustTarget "release\ZenLink.exe"
 Copy-Item $rustExe $app
 
 Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta

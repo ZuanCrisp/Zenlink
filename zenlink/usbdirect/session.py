@@ -481,9 +481,11 @@ class UsbDirectSession:
                 if now - stats_at >= 5.0 and received:
                     secs = now - stats_at
                     frames = self.hub.stats["frames"] - stats["frames"]
-                    log.info("usb direct: %.1f fps, %.1f Mbps, %d reads/s, reader backlog max %d, keyframes %d, viewers backlog %d",
+                    log.info("usb direct: %.1f fps, %.1f Mbps, %d reads/s, reader backlog max %d, keyframes %d, "
+                             "viewers backlog %d, audio skew %.1f Hz",
                              frames / secs, (received - stats["bytes"]) * 8 / secs / 1e6,
-                             (stats["chunks"]) / secs, stats["maxq"], self.hub.stats["keyframes"], self.hub.max_backlog())
+                             (stats["chunks"]) / secs, stats["maxq"], self.hub.stats["keyframes"], self.hub.max_backlog(),
+                             self._skew())
                     stats = {"chunks": 0, "bytes": received, "frames": self.hub.stats["frames"], "maxq": 0}
                     stats_at = now
                 if isinstance(item, BaseException):
