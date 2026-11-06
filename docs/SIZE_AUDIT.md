@@ -1,8 +1,9 @@
 # Size audit of the beta package (2026-11-07)
 
-Analysis only: nothing listed here is removed yet. Every number is measured
-on the beta build in `dist\ZenLinkService` (built 2026-11-06 22:35) unless it
-says "estimate".
+Every number here is measured on beta builds made in this folder, unless it
+says "estimate". The audit was first run on the build in
+`dist\ZenLinkService` from 2026-11-06 22:35; the "Applied" and "Result"
+sections are from the final build of 2026-11-07.
 
 ## Method
 
@@ -70,13 +71,38 @@ CLI: `pygments`, `prompt_toolkit`, `rich`, `questionary`, `wcwidth`
 (about 4.5 MB). Removing them needs pymobiledevice3 patched, so they wait
 for M1–M5, which removes Python entirely.
 
-Also noted: `build_portable_release.ps1` does not pass `--noupx`. UPX is not
-installed on this PC, so nothing is packed now, but a UPX on PATH would pack
-the backend (AGENTS.md §3b and §3c forbid it).
+## Applied in v2.5 (2026-11-07)
 
-## Totals
+Only the low-risk sets, each guarded:
 
-| | Raw (installed) | Setup (LZMA) | Portable (zlib) |
+- **B1, B4, B5**: PyInstaller `--exclude-module` for `pydantic`,
+  `pydantic_core`, `setuptools`, `pkg_resources`, `_distutils_hack`,
+  `PyInstaller`, `pefile`, `sqlite3`, `_sqlite3`.
+- **B7**: project hook `packaging/pyi-hooks/hook-sounddevice.py` collects only
+  `libportaudio64bit.dll`.
+- **D1**: Portable.exe stores adb deflate-compressed (`build.rs`) and
+  `android.rs` unpacks it byte-for-byte.
+- **`--noupx`** is passed, so a UPX on PATH can never pack the backend.
+- Guard: the build fails if any removed file comes back or
+  `libportaudio64bit.dll` is missing. The frozen self-test (29 modules,
+  including `sounddevice`, `zenlink.audio_out`, `zeroconf`, `usb.core`,
+  `zenlink.ocr`) passes in the onedir and the onefile build.
+
+Not applied (needs device tests or touches the Apple path): B2, B3, B6, C1,
+C2, A. They wait for the Apple device test round or M1–M5.
+
+## Result (measured, final build 2026-11-07)
+
+| File | Before cleanup (with adb) | After | Change |
 | :--- | ---: | ---: | ---: |
-| Conservative: B1–B7 + C1 | 15.2 MB | 7.7 MB | 8.8 MB |
-| Optimistic: + A + C2 + D1 | 23.9 MB | 11.3 MB | 18.4 MB |
+| Setup.exe | 48,815,889 B | 43,897,801 B (41.9 MiB) | −10.1% |
+| Portable.exe | 70,203,392 B | 58,616,320 B (55.9 MiB) | −16.5% |
+| Installed folder | 114,925,748 B | 103,240,623 B | −10.2% |
+| Source zip | — | 14,340,730 B | |
+
+For reference, the earlier beta build without adb or the scrcpy server
+(B-28) was Setup 44,753,339 B and Portable 58,327,040 B. The final packages
+now carry Android's adb and scrcpy server and are about the same size.
+
+Device behaviour after the cleanup is unverified until the Apple and
+Android device test round.
