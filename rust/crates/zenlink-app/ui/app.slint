@@ -371,7 +371,7 @@ component Placeholder inherits Rectangle {
             [I18n.t("Cek kepercayaan", "Check trust"), I18n.t("Biarkan tidak terkunci sementara ZenLink membuktikan PC ini dipercaya", "Keep it unlocked while ZenLink proves this PC is trusted")],
             [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar lewat ZenLink Studio", "Receiving the screen over ZenLink Studio")]]
         : flow-kind == "airplay" ? [
-            [I18n.t("Perangkat tersambung", "Device connected"), I18n.t("iPhone/iPad memilih ZenLinkStudioBeta di Pencerminan Layar", "Your iPhone/iPad chose ZenLinkStudioBeta in Screen Mirroring")],
+            [I18n.t("Perangkat tersambung", "Device connected"), I18n.t("iPhone/iPad memilih ZenLinkStudioNext di Pencerminan Layar", "Your iPhone/iPad chose ZenLinkStudioNext in Screen Mirroring")],
             [I18n.t("Koneksi aman", "Secure connection"), I18n.t("Pairing AirPlay dan pertukaran kunci FairPlay", "AirPlay pairing and FairPlay key exchange")],
             [I18n.t("Terima video", "Receive video"), I18n.t("Mendekripsi stream AirPlay", "Decrypting the AirPlay stream")],
             [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar lewat Wi-Fi", "Receiving the screen over Wi-Fi")]]
@@ -972,7 +972,7 @@ component SettingsPanel inherits Glass {
                     }
                     Text {
                         text: root.mode == "usbdirect"
-                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pilih ZenLinkStudioBeta di Pencerminan Layar pada perangkat.", "Wi-Fi: pick ZenLinkStudioBeta in Screen Mirroring on the device.") : I18n.t("Kabel: lewat driver libusb0, bitrate tinggi.", "Cable: through the libusb0 driver, high bitrate."))
+                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pilih ZenLinkStudioNext di Pencerminan Layar pada perangkat.", "Wi-Fi: pick ZenLinkStudioNext in Screen Mirroring on the device.") : I18n.t("Kabel: lewat driver libusb0, bitrate tinggi.", "Cable: through the libusb0 driver, high bitrate."))
                             : (root.link == "wireless" ? I18n.t("Wi-Fi: tekan Atur Wi-Fi sekali dengan kabel tersambung. Perangkat yang dicolok tetap jalan lewat kabel.", "Wi-Fi: press Set up Wi-Fi once with the cable in. A plugged-in device still works over the cable.") : I18n.t("Kabel: lewat driver Apple.", "Cable: through Apple's driver."));
                         font-size: 11px;
                         color: Theme.text-3;
@@ -1061,7 +1061,7 @@ component SettingsPanel inherits Glass {
 }
 
 export component AppWindow inherits Window {
-    title: "ZenLink Beta";
+    title: "ZenLink Next";
     icon: @image-url("../../../../ui/logo-256.png");
     background: transparent;
     // Phone-shaped until the first frame tells the real size.

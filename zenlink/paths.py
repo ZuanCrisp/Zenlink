@@ -4,7 +4,7 @@ APP_ROOT holds the app's read-only files (ui/, assets/, tools/, drivers/).
 DATA_DIR holds what ZenLink writes (settings, logs, WebView2 profile, the
 encrypted passcode): the source folder when run from source, the exe folder
 for the portable build (a `portable.txt` next to ZenLink.exe), and
-%LOCALAPPDATA%\ZenLink-Beta for the installed build (Program Files is read-only).
+%LOCALAPPDATA%\ZenLink-Next for the installed build (Program Files is read-only).
 The stable v2.2.31 uses %LOCALAPPDATA%\ZenLink; the beta never touches it.
 """
 
@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 FROZEN = bool(getattr(sys, "frozen", False))
-# Beta data folder name (the stable build uses "ZenLink").
-DATA_DIR_NAME = "ZenLink-Beta"
+# ZenLink Next data folder name (the stable build uses "ZenLink").
+DATA_DIR_NAME = "ZenLink-Next"
 
 if FROZEN:
     EXE_DIR = Path(sys.executable).resolve().parent

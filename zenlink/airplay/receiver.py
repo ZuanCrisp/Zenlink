@@ -42,7 +42,7 @@ from .fairplay import FairPlay
 
 log = logging.getLogger(__name__)
 
-# Beta: 7100, so it can run next to the stable v2.2.31 (7000). The port is
+# ZenLink Next: 7100, so it can run next to the stable v2.2.31 (7000). The port is
 # advertised in the mDNS records, so iOS follows it.
 AIRPLAY_PORT = 7100
 MODEL = "AppleTV3,2"
@@ -692,7 +692,7 @@ class _AudioDecoder:
 
 
 def receiver_name() -> str:
-    return "ZenLinkStudioBeta"
+    return "ZenLinkStudioNext"
 
 
 __all__ = ["AirPlayReceiver", "receiver_name", "AIRPLAY_PORT"]

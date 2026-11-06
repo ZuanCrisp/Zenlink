@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-RULE = "ZenLink Beta (AirPlay)"
+RULE = "ZenLink Next (AirPlay)"
 _NO_WINDOW = 0x08000000
 
 

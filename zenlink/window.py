@@ -17,7 +17,7 @@ _WM_NCLBUTTONDOWN = 0x00A1
 _HT = {"left": 10, "right": 11, "top": 12, "topleft": 13, "topright": 14,
        "bottom": 15, "bottomleft": 16, "bottomright": 17}
 
-TITLE = "ZenLink Beta"
+TITLE = "ZenLink Next"
 
 
 class _MonitorInfo(ctypes.Structure):

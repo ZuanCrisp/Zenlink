@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
 cd /d "%~dp0"
-title ZenLink Beta
+title ZenLink Next
 
 rem Standalone build: ZenLink.exe and its backend ZenLinkService.exe sit next to this file.
 if exist "%~dp0ZenLinkService.exe" if exist "%~dp0ZenLink.exe" (
@@ -20,7 +20,7 @@ if exist "%PY%" if exist "%STAMP%" (
     fc /b "%~dp0requirements.txt" "%STAMP%" >nul 2>&1 && goto :launch
 )
 
-echo ZenLink Beta - first-time setup
+echo ZenLink Next - first-time setup
 echo.
 
 if not exist "%PY%" (
@@ -96,7 +96,7 @@ if errorlevel 1 (
 rem Windows Firewall: lets the iPhone/iPad reach ZenLink for AirPlay (ZenLink Studio over Wi-Fi).
 "%PY%" -c "from zenlink import firewall; raise SystemExit(0 if firewall.has_rule() else 1)" >nul 2>&1
 if errorlevel 1 (
-    choice /c YN /n /m " - Allow ZenLink Beta on the local network for AirPlay (asks for administrator permission)? [Y/N] "
+    choice /c YN /n /m " - Allow ZenLink Next on the local network for AirPlay (asks for administrator permission)? [Y/N] "
     if !errorlevel! equ 1 "%PY%" -c "from zenlink import firewall; firewall.request_rule()"
 ) else (
     echo  - Firewall for AirPlay: OK

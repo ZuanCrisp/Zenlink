@@ -11,13 +11,13 @@ if /i "%TARGET%"=="%~dp0ZenLink.exe" set "STYLE=1"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ws = New-Object -ComObject WScript.Shell;" ^
   "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {" ^
-  "  $s = $ws.CreateShortcut((Join-Path $dir 'ZenLink Beta.lnk'));" ^
+  "  $s = $ws.CreateShortcut((Join-Path $dir 'ZenLink Next.lnk'));" ^
   "  $s.TargetPath = '%TARGET%'; $s.WorkingDirectory = '%~dp0';" ^
   "  $s.IconLocation = '%~dp0assets\zenlink.ico'; $s.WindowStyle = %STYLE%;" ^
-  "  $s.Description = 'ZenLink Beta - mirror and control your iPhone, iPad or Android'; $s.Save() }"
+  "  $s.Description = 'ZenLink Next - mirror and control your iPhone, iPad or Android'; $s.Save() }"
 if errorlevel 1 (
     echo Could not create the shortcuts.
 ) else (
-    echo ZenLink Beta shortcuts created on the Desktop and in the Start Menu.
+    echo ZenLink Next shortcuts created on the Desktop and in the Start Menu.
 )
 timeout /t 3 >nul

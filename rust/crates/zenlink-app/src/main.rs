@@ -28,7 +28,7 @@ slint::include_modules!();
 
 static SIDECAR: OnceLock<Mutex<Option<Sidecar>>> = OnceLock::new();
 
-/// Minimal file logger: %TEMP%\zenlink-beta.log (truncated on start).
+/// Minimal file logger: %TEMP%\zenlink-next-v25.log (truncated on start).
 struct FileLog(Mutex<std::fs::File>);
 
 impl log::Log for FileLog {
@@ -619,7 +619,7 @@ fn open_chooser(ui: &AppWindow) {
 }
 
 /// True when the backend's settings.json remembers a connection mode
-/// (source checkout: next to zenlink/; installed: %LOCALAPPDATA%\ZenLink-Beta).
+/// (source checkout: next to zenlink/; installed: %LOCALAPPDATA%\ZenLink-Next).
 fn mode_remembered() -> bool {
     let mut files = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
@@ -632,7 +632,7 @@ fn mode_remembered() -> bool {
             }
         }
     }
-    // Installed and portable builds keep settings in %LOCALAPPDATA%\ZenLink-Beta;
+    // Installed and portable builds keep settings in %LOCALAPPDATA%\ZenLink-Next;
     // a source checkout or portable folder only uses its own file.
     if files.is_empty() {
         if let Some(d) = zenlink_core::local_data_dir() {

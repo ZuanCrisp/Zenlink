@@ -62,8 +62,8 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: one formatting-only commit (`cargo fmt`), no code change.
 - Verification: `cargo fmt --check` passes; `cargo test --release` and `cargo clippy --release` pass after it.
 
-### B-9: Beta and stable must not share ports, data, installer identity or process kills            Status: fixed (unverified)
+### B-9: ZenLink Next (beta) and stable must not share ports, data, installer identity or process kills            Status: fixed (unverified)
 - Reported: 2026-11-06, Phase 0 (AGENTS.md §3).
 - Cause: v2.2.31 hard-codes port 47321 (backend), 47322 (local Apple stream), 7000 (AirPlay), `%APPDATA%\ZenLink`, `%LOCALAPPDATA%\ZenLink`, the installer AppId, the "ZenLink (AirPlay)" firewall rule, `%TEMP%\zenlink-next.log`, and its uninstallers kill `ZenLink.exe`/`ZenLinkService.exe` by name (which would close the stable app).
-- Fix: Phase 0 isolation commit. Beta uses 47421 / 47422 / 7100, `ZenLink-Beta` data folders, `zenlink-beta.log`, AppId `{5AE777B3-F756-4FAC-B6E7-A2125D89D76D}`, `AppName=ZenLink Beta`, `{autopf}\ZenLink Beta`, firewall rule "ZenLink Beta (AirPlay)", AirPlay name "ZenLinkStudioBeta", window/tray/AppUserModelID "ZenLink Beta". Uninstallers stop only processes running from the beta's own folder.
-- Verification: `tests/test_beta_isolation.py` and `zenlink-core` `isolation_tests` pass. Side-by-side run: see `lanjutan.md`. unverified: AirPlay on port 7100 with a real iPhone/iPad; installer install/uninstall next to an installed stable v2.2.31.
+- Fix: Phase 0 isolation commit; renamed to "ZenLink Next" on 2026-11-06 at the user's request. It uses 47421 / 47422 / 7100, `ZenLink-Next` data folders, `zenlink-next-v25.log`, AppId `{5AE777B3-F756-4FAC-B6E7-A2125D89D76D}`, `AppName=ZenLink Next`, `{autopf}\ZenLink Next`, firewall rule "ZenLink Next (AirPlay)", AirPlay name "ZenLinkStudioNext", window/tray/AppUserModelID "ZenLink Next". Uninstallers stop only processes running from the beta's own folder.
+- Verification: `tests/test_next_isolation.py` and `zenlink-core` `isolation_tests` pass. Side-by-side run: see `lanjutan.md`. unverified: AirPlay on port 7100 with a real iPhone/iPad; installer install/uninstall next to an installed stable v2.2.31.

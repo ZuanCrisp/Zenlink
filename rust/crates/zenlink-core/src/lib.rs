@@ -17,14 +17,14 @@ pub const HOST: &str = "127.0.0.1";
 pub const PORT: u16 = 47421;
 
 /// Product name for window titles and messages.
-pub const APP_NAME: &str = "ZenLink Beta";
+pub const APP_NAME: &str = "ZenLink Next";
 
 /// Folder name under %APPDATA% and %LOCALAPPDATA% for prefs, settings and the
 /// unpacked backend. The stable build uses "ZenLink"; the beta never touches it.
-pub const DATA_DIR_NAME: &str = "ZenLink-Beta";
+pub const DATA_DIR_NAME: &str = "ZenLink-Next";
 
 /// Log file in %TEMP%. The stable build writes zenlink-next.log.
-pub const LOG_FILE_NAME: &str = "zenlink-beta.log";
+pub const LOG_FILE_NAME: &str = "zenlink-next-v25.log";
 
 /// Backend URL. `ZENLINK_PORT` overrides the port (tests, a second instance).
 pub fn base_url() -> String {
@@ -40,7 +40,7 @@ pub fn data_dir_in(base: &Path) -> PathBuf {
     base.join(DATA_DIR_NAME)
 }
 
-/// `%LOCALAPPDATA%\ZenLink-Beta`, when LOCALAPPDATA is set.
+/// `%LOCALAPPDATA%\ZenLink-Next`, when LOCALAPPDATA is set.
 pub fn local_data_dir() -> Option<PathBuf> {
     std::env::var_os("LOCALAPPDATA").map(|b| data_dir_in(Path::new(&b)))
 }
@@ -57,16 +57,16 @@ mod isolation_tests {
 
     #[test]
     fn beta_names_carry_beta() {
-        assert!(APP_NAME.contains("Beta"));
-        assert!(DATA_DIR_NAME.contains("Beta"));
-        assert!(LOG_FILE_NAME.contains("beta"));
+        assert!(APP_NAME.contains("Next"));
+        assert!(DATA_DIR_NAME.contains("Next"));
+        assert!(LOG_FILE_NAME.contains("next-v25"));
         assert_ne!(LOG_FILE_NAME, "zenlink-next.log");
     }
 
     #[test]
     fn data_dir_is_beta_folder() {
         let base = Path::new("base");
-        assert_eq!(data_dir_in(base), base.join("ZenLink-Beta"));
+        assert_eq!(data_dir_in(base), base.join("ZenLink-Next"));
         assert_ne!(data_dir_in(base), base.join("ZenLink"));
     }
 }
