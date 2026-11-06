@@ -14,10 +14,41 @@ pub struct Sidecar {
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// Portable build: the backend exe packed into this binary.
+#[cfg(feature = "embedded-backend")]
+static EMBEDDED: &[u8] = include_bytes!(env!("ZENLINK_BACKEND_EXE"));
+
+/// Unpack the packed backend to %LOCALAPPDATA%\ZenLink\service once per
+/// version, and return its path.
+#[cfg(feature = "embedded-backend")]
+fn unpack_embedded() -> Option<PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+    let dir = base.join("ZenLink").join("service");
+    let path = dir.join(format!("ZenLinkService-{}-{}.exe", env!("CARGO_PKG_VERSION"), EMBEDDED.len()));
+    if std::fs::metadata(&path).map(|m| m.len() == EMBEDDED.len() as u64).unwrap_or(false) {
+        return Some(path);
+    }
+    std::fs::create_dir_all(&dir).ok()?;
+    // Older versions are no longer needed; one in use stays until next time.
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for e in rd.flatten() {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+    let tmp = dir.join(format!("unpack-{}.tmp", std::process::id()));
+    std::fs::write(&tmp, EMBEDDED).ok()?;
+    std::fs::rename(&tmp, &path).ok()?;
+    Some(path)
+}
+
 fn command_for(dir: &Path) -> Option<Command> {
-    // Installed layout: the v2 backend (ZenLink.exe) next to this executable.
-    let exe = dir.join("ZenLink.exe");
+    // Installed layout: the backend (ZenLinkService.exe) next to this executable.
+    let exe = dir.join("ZenLinkService.exe");
     if exe.is_file() {
+        return Some(Command::new(exe));
+    }
+    #[cfg(feature = "embedded-backend")]
+    if let Some(exe) = unpack_embedded() {
         return Some(Command::new(exe));
     }
     // Source checkout: <repo>/.venv + `python -m zenlink`.

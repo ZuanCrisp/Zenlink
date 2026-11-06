@@ -4,10 +4,10 @@ chcp 65001 >nul
 cd /d "%~dp0"
 set "TARGET=%~dp0Start ZenLink.bat"
 set "STYLE=7"
-if exist "%~dp0ZenLink.exe" (
-    set "TARGET=%~dp0ZenLink.exe"
-    set "STYLE=1"
-)
+rem ZenLink.exe needs its backend: ZenLinkService.exe or the .venv.
+if exist "%~dp0ZenLink.exe" if exist "%~dp0ZenLinkService.exe" set "TARGET=%~dp0ZenLink.exe"
+if exist "%~dp0ZenLink.exe" if exist "%~dp0.venv\Scripts\python.exe" set "TARGET=%~dp0ZenLink.exe"
+if /i "%TARGET%"=="%~dp0ZenLink.exe" set "STYLE=1"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ws = New-Object -ComObject WScript.Shell;" ^
   "foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {" ^

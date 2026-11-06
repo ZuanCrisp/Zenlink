@@ -6,6 +6,9 @@
     ZenLink-v<ver>-Setup.exe              installer (Inno Setup 6, if installed)
     ZenLink-v<ver>-Portable-Source.zip    source + Start ZenLink.bat (sets up Python on first run)
 
+  ZenLink.exe is the Rust window (rust\). The Python backend is built as
+  ZenLinkService.exe; ZenLink.exe starts it headless. Needs cargo (rustup).
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\build_portable_release.ps1
 #>
@@ -29,11 +32,11 @@ Write-Host "[1/4] Installing build tools..." -ForegroundColor Magenta
 & $py -m pip install --disable-pip-version-check -q -r requirements.txt pyinstaller
 if ($LASTEXITCODE) { throw "pip failed" }
 
-Write-Host "[2/4] Building ZenLink.exe (PyInstaller)..." -ForegroundColor Magenta
+Write-Host "[2/4] Building ZenLinkService.exe (PyInstaller) and ZenLink.exe (Rust)..." -ForegroundColor Magenta
 $sep = ";"
 $pyiArgs = @(
     "-m", "PyInstaller", "packaging\launch.py",
-    "--name", "ZenLink", "--onedir", "--windowed", "--noconfirm", "--clean",
+    "--name", "ZenLinkService", "--onedir", "--windowed", "--noconfirm", "--clean",
     "--icon", "assets\zenlink.ico",
     "--contents-directory", ".",
     "--version-file", "packaging\version_info.txt",
@@ -80,11 +83,11 @@ VSVersionInfo(
   kids=[
     StringFileInfo([StringTable('040904B0', [
       StringStruct('CompanyName', 'Zenvy Zenshiro'),
-      StringStruct('FileDescription', 'ZenLink - iPhone and iPad mirroring for Windows'),
+      StringStruct('FileDescription', 'ZenLink service'),
       StringStruct('FileVersion', '$Version'),
-      StringStruct('InternalName', 'ZenLink'),
+      StringStruct('InternalName', 'ZenLinkService'),
       StringStruct('LegalCopyright', 'Copyright (C) 2026 Zenvy Zenshiro. GPL-3.0-or-later.'),
-      StringStruct('OriginalFilename', 'ZenLink.exe'),
+      StringStruct('OriginalFilename', 'ZenLinkService.exe'),
       StringStruct('ProductName', 'ZenLink'),
       StringStruct('ProductVersion', '$Version')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
@@ -94,7 +97,7 @@ VSVersionInfo(
 & $py @pyiArgs
 if ($LASTEXITCODE) { throw "PyInstaller failed" }
 
-$app = Join-Path $dist "ZenLink"
+$app = Join-Path $dist "ZenLinkService"
 
 # Import every device-path module inside the built exe (packaging\launch.py
 # --selftest). A missing module or package metadata fails the build here.
@@ -109,10 +112,14 @@ function Test-FrozenExe([string]$exe) {
     }
     Write-Host "    self-test OK: $exe ($(@($r.modules.PSObject.Properties).Count) modules)" -ForegroundColor Green
 }
-Test-FrozenExe (Join-Path $app "ZenLink.exe")
+Test-FrozenExe (Join-Path $app "ZenLinkService.exe")
 foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat") {
     Copy-Item $f $app
 }
+& cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app
+if ($LASTEXITCODE) { throw "cargo failed" }
+$rustExe = Join-Path $PSScriptRoot "rust\target\release\ZenLink.exe"
+Copy-Item $rustExe $app
 
 Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta
 # Same app as one .exe: it unpacks itself to a temporary folder on start and
@@ -126,8 +133,15 @@ for ($i = 0; $i -lt $pyiArgs.Count; $i++) {
 $oneArgs += @("--distpath", (Join-Path $build "onefile-dist"), "--workpath", (Join-Path $build "onefile-work"))
 & $py @oneArgs
 if ($LASTEXITCODE) { throw "PyInstaller (one file) failed" }
-Test-FrozenExe (Join-Path $build "onefile-dist\ZenLink.exe")
-Copy-Item (Join-Path $build "onefile-dist\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
+$service = Join-Path $build "onefile-dist\ZenLinkService.exe"
+Test-FrozenExe $service
+# The Rust ZenLink.exe with that backend packed inside (unpacked to
+# %LOCALAPPDATA%\ZenLink\service on start).
+$env:ZENLINK_BACKEND_EXE = $service
+& cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app --features embedded-backend --target-dir (Join-Path $build "rust-portable")
+Remove-Item Env:ZENLINK_BACKEND_EXE
+if ($LASTEXITCODE) { throw "cargo (portable) failed" }
+Copy-Item (Join-Path $build "rust-portable\release\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
 
 Write-Host "[4/4] Building the installer and the source zip..." -ForegroundColor Magenta
 $iscc = @(
@@ -141,7 +155,12 @@ if ($iscc) {
 } else {
     Write-Warning "Inno Setup 6 not found: skipping Setup.exe (winget install JRSoftware.InnoSetup)."
 }
-git archive --format=zip --prefix="ZenLink-v$Version/" -o (Join-Path $release "ZenLink-v$Version-Portable-Source.zip") HEAD
+$srcZip = Join-Path $release "ZenLink-v$Version-Portable-Source.zip"
+git archive --format=zip --prefix="ZenLink-v$Version/" -o $srcZip HEAD
+# Ready-built ZenLink.exe next to Start ZenLink.bat (no Rust toolchain needed).
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$zip = [IO.Compression.ZipFile]::Open($srcZip, "Update")
+try { [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $rustExe, "ZenLink-v$Version/ZenLink.exe") } finally { $zip.Dispose() }
 
 Get-ChildItem $release | ForEach-Object {
     "{0,-45} {1,8:N1} MB" -f $_.Name, ($_.Length / 1MB)

@@ -6,7 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "ZenLinkNext"
+name = "ZenLink"
 path = "src/main.rs"
 
 [dependencies]
@@ -19,3 +19,6 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_Graphics_Dw
 
 [build-dependencies]
 slint-build = "1.18"
+
+[features]
+embedded-backend = ["zenlink-core/embedded-backend"]

@@ -20,6 +20,7 @@ choice /c YN /m "Continue"
 if errorlevel 2 exit /b 0
 
 taskkill /im ZenLink.exe /f >nul 2>&1
+taskkill /im ZenLinkService.exe /f >nul 2>&1
 powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name like 'python%%.exe'\" | Where-Object { $_.CommandLine -match '-m zenlink' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }" >nul 2>&1
 timeout /t 1 >nul
 

@@ -4,8 +4,8 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title ZenLink
 
-rem Standalone build: ZenLink.exe sits next to this file.
-if exist "%~dp0ZenLink.exe" (
+rem Standalone build: ZenLink.exe and its backend ZenLinkService.exe sit next to this file.
+if exist "%~dp0ZenLinkService.exe" if exist "%~dp0ZenLink.exe" (
     start "" "%~dp0ZenLink.exe"
     exit /b 0
 )
@@ -62,10 +62,10 @@ call :check_env
 echo Setup complete. Run Create-Desktop-Shortcut.bat for a desktop shortcut.
 
 :launch
-rem ZenLink Next (Rust window, native GPU video). It starts the Python
-rem backend from .venv by itself. Set ZENLINK_UI=classic for the old window.
-set "NEXT=%~dp0ZenLinkNext.exe"
-if not exist "%NEXT%" set "NEXT=%~dp0rust\target\release\ZenLinkNext.exe"
+rem ZenLink window (Rust, native GPU video). It starts the Python backend
+rem from .venv by itself. Set ZENLINK_UI=classic for the old window.
+set "NEXT=%~dp0ZenLink.exe"
+if not exist "%NEXT%" set "NEXT=%~dp0rust\target\release\ZenLink.exe"
 if /i not "%ZENLINK_UI%"=="classic" if exist "%NEXT%" (
     start "" "%NEXT%"
     exit /b 0

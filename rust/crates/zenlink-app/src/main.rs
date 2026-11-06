@@ -328,8 +328,12 @@ fn mode_remembered() -> bool {
             }
         }
     }
-    if let Some(l) = std::env::var_os("LOCALAPPDATA") {
-        files.push(std::path::PathBuf::from(l).join("ZenLink").join("settings.json"));
+    // Installed and portable builds keep settings in %LOCALAPPDATA%\ZenLink;
+    // a source checkout or portable folder only uses its own file.
+    if files.is_empty() {
+        if let Some(l) = std::env::var_os("LOCALAPPDATA") {
+                files.push(std::path::PathBuf::from(l).join("ZenLink").join("settings.json"));
+        }
     }
     files.iter().filter_map(|f| std::fs::read(f).ok()).filter_map(|b| serde_json::from_slice::<Value>(&b).ok()).any(|v| {
         v.get("rememberConnectionMode").and_then(Value::as_bool).unwrap_or(false)

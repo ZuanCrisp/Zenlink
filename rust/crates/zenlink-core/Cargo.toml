@@ -12,3 +12,8 @@ serde_json = { workspace = true }
 base64 = { workspace = true }
 ureq = { workspace = true }
 log = { workspace = true }
+
+[features]
+# Portable build: the backend exe (ZENLINK_BACKEND_EXE at build time) is
+# packed into this binary and unpacked to %LOCALAPPDATA%\ZenLink on start.
+embedded-backend = []
