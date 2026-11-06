@@ -3,3 +3,6 @@
 *.sh text eol=lf
 *.zlau binary
 *.dll binary
+
+# Upstream files kept byte-exact (signatures and checksums).
+third_party/** -text
