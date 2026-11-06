@@ -40,11 +40,11 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: planned: static CRT via `rust/.cargo/config.toml` (`-C target-feature=+crt-static` for `x86_64-pc-windows-msvc`). Measure the exe size before and after.
 - Verification: unverified: needs an import check (`dumpbin /imports` or `pefile`: no `VCRUNTIME140*.dll`, no `api-ms-win-crt-*`) and a run on a clean PC / Windows Sandbox.
 
-### B-6: Stale WebView2 warning in the installer and Start ZenLink.bat            Status: open
+### B-6: Stale WebView2 warning in the installer and Start ZenLink.bat            Status: fixed (unverified)
 - Reported: carried over (item 6).
 - Cause: `packaging/ZenLink.iss` `InitializeSetup` and the WebView2 check in `Start ZenLink.bat` are left from the classic pywebview window. The Rust window does not use WebView2.
-- Fix: planned: drop the warning from the default path; keep it only for `ZENLINK_UI=classic`.
-- Verification: unverified: needs the installer run on Windows 10 without WebView2.
+- Fix: installer check removed; `Start ZenLink.bat` checks WebView2 only before the classic window (`ZENLINK_UI=classic`, label `:check_webview2`).
+- Verification: `tests/test_prereqs.py` (installer has no WebView2 check; the default setup path does not install it). Unverified: the installer run on Windows 10 without WebView2.
 
 ### B-7: Every prerequisite is bundled or explained by ZenLink itself            Status: open
 - Reported: carried over (item 7, general rule).
@@ -80,11 +80,11 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: `rust/crates/zenlink-android` (adb host-protocol client, `devices -l` parser, getprop parser, naming, identity, discovery); notes in `docs/android/`.
 - Verification: 43 Rust tests pass (`cargo test --release -p zenlink-android`), including a fake in-process ADB server; `tests/test_scrcpy_pin.py` passes. Unverified on hardware: needs real Android phones over USB and Wi-Fi (with the user's consent) to confirm names and identity.
 
-### B-12: Icons show as empty boxes (v2.2.31)            Status: open
-- Reported: 2026-11-06 by the user, with a photo of v2.2.31 on another PC: every icon in the top bar, the settings cards and the window header is drawn as an empty rectangle (missing glyph); text renders fine.
-- Cause (suspected, not proven yet): all icons use the font "Segoe Fluent Icons" (`ui/theme.slint` `Theme.icons`, and `FlowStep` in `ui/app.slint`). That font ships with Windows 11 only. Windows 10 has "Segoe MDL2 Assets" instead, with mostly the same code points. Needs the Windows version of the affected PC to confirm.
-- Fix: planned: pick the icon font at startup (Segoe Fluent Icons if installed, else Segoe MDL2 Assets), use `Theme.icons` everywhere, and check that every code point used exists in MDL2. The fonts may not be bundled (Microsoft licence).
-- Verification: unverified: needs a Windows 10 PC (or the user's affected PC) showing the icons.
+### B-12: Icons show as empty boxes on Windows 10 (v2.2.31)            Status: fixed (unverified)
+- Reported: 2026-11-06 by the user, with a photo of v2.2.31 on a Windows 10 PC (confirmed by the user): every icon is drawn as an empty rectangle; text renders fine.
+- Cause: all icons use the font "Segoe Fluent Icons", which ships with Windows 11 only. Windows 10 has "Segoe MDL2 Assets".
+- Fix: `Theme.icons` is set at startup (`icon_font()` in `main.rs`): "Segoe Fluent Icons" when `%WINDIR%\Fonts\SegoeIcons.ttf` exists, else "Segoe MDL2 Assets". `FlowStep` now uses `Theme.icons` too. All 37 code points the UI uses exist in segmdl2.ttf 1.86 (checked with WPF `GlyphTypeface.CharacterToGlyphMap`). No font is bundled (Microsoft licence). Test hook `ZL_ICON_FONT=mdl2`.
+- Verification: `icon_tests` (Rust), `tests/test_prereqs.py`; screenshot with `ZL_ICON_FONT=mdl2` on Windows 11 shows every icon. Unverified: the user's Windows 10 PC (its segmdl2.ttf version may differ).
 
 ### B-13: Platform selection before the Apple chooser (phase A2)            Status: fixed (unverified)
 - Reported: 2026-11-06, phase A2 gate (master prompt section 2, startup flow acceptance tests).

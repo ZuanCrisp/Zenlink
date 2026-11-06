@@ -41,7 +41,9 @@ export global Theme {
     out property <color> warn: #f2a53a;
     out property <color> bad: #ef5466;
     out property <length> radius: 14px;
-    out property <string> icons: "Segoe Fluent Icons";
+    // Set from Rust: "Segoe Fluent Icons" (Windows 11) or "Segoe MDL2 Assets"
+    // (Windows 10, same code points). See B-12.
+    in-out property <string> icons: "Segoe Fluent Icons";
 }
 
 export global I18n {

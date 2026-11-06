@@ -101,13 +101,8 @@ begin
 end;
 
 function InitializeSetup(): Boolean;
-var
-  Version: String;
 begin
+  // No prerequisite check: the Rust window does not use Microsoft Edge
+  // WebView2 (only the old classic window did). See B-6.
   Result := True;
-  // ZenLink's window uses Microsoft Edge WebView2 (built into Windows 11).
-  if not RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Version) and
-     not RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Version) then
-    MsgBox('ZenLink needs the Microsoft Edge WebView2 Runtime (included in Windows 11). ' +
-           'If ZenLink does not open, install it from https://developer.microsoft.com/microsoft-edge/webview2/', mbInformation, MB_OK);
 end;

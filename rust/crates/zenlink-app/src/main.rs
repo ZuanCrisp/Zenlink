@@ -910,6 +910,39 @@ fn keep_on_screen(ui: &AppWindow, (wx, wy, ww, wh): (f32, f32, f32, f32), size: 
     }
 }
 
+/// Icon font: "Segoe Fluent Icons" ships with Windows 11 only; Windows 10
+/// has "Segoe MDL2 Assets" with the same code points for every icon ZenLink
+/// uses (checked against segmdl2.ttf 1.86). Without this, Windows 10 drew
+/// every icon as an empty box (B-12).
+fn icon_font() -> &'static str {
+    // Test hook: ZL_ICON_FONT=mdl2 shows the Windows 10 icons on Windows 11.
+    if std::env::var("ZL_ICON_FONT").as_deref() == Ok("mdl2") {
+        return pick_icon_font(false);
+    }
+    let fonts = std::env::var_os("WINDIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| r"C:\Windows".into())
+        .join("Fonts");
+    pick_icon_font(fonts.join("SegoeIcons.ttf").exists())
+}
+
+fn pick_icon_font(has_fluent: bool) -> &'static str {
+    if has_fluent {
+        "Segoe Fluent Icons"
+    } else {
+        "Segoe MDL2 Assets"
+    }
+}
+
+#[cfg(test)]
+mod icon_tests {
+    #[test]
+    fn windows_10_falls_back_to_mdl2() {
+        assert_eq!(super::pick_icon_font(false), "Segoe MDL2 Assets");
+        assert_eq!(super::pick_icon_font(true), "Segoe Fluent Icons");
+    }
+}
+
 /// Mirrors the startup navigation into the window.
 fn apply_flow(ui: &AppWindow, f: &flow::Flow) {
     ui.set_screen(f.screen.as_str().into());
@@ -1132,6 +1165,7 @@ fn main() -> Result<(), slint::PlatformError> {
         .select()?;
 
     let ui = AppWindow::new()?;
+    ui.global::<Theme>().set_icons(icon_font().into());
     ui.set_prefs(prefs::load());
     let api = Api::new();
     let input = Input::new(api.clone());

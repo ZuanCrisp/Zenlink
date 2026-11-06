@@ -303,7 +303,7 @@ component FlowStep inherits Rectangle {
             border-color: state == "active" ? c.with-alpha(0.35) : c.with-alpha(0.5);
             if state == "done" || state == "failed": Text {
                 text: state == "done" ? "\u{E73E}" : "\u{E711}";
-                font-family: "Segoe Fluent Icons";
+                font-family: Theme.icons;
                 font-size: 11px;
                 color: #101010;
                 horizontal-alignment: center;
