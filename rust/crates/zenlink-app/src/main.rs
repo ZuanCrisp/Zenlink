@@ -273,6 +273,8 @@ fn work_area(ui: &AppWindow) -> Option<(f32, f32, f32, f32)> {
 /// Size the window around the picture (portrait or landscape).
 /// Gap between the picture and the glass stage edge (logical px).
 const PIC_INSET: f32 = 6.0;
+/// Stage width (logical px) while there is no picture yet.
+const IDLE_STAGE_W: f32 = 440.0;
 
 fn fit_window(ui: &AppWindow, shown: (u32, u32)) {
     let Some((wx, wy, ww, wh)) = work_area(ui) else { return };
@@ -491,7 +493,10 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
     if ui.get_settings_open() {
-        ui.invoke_settings_toggled(true);
+        // Settings start open: the window is the usual idle stage plus the
+        // panel, not the panel squeezed into the default window (the window
+        // has no size yet here, so do not measure it).
+        APP.with_borrow_mut(|a| a.hold_stage = Some(IDLE_STAGE_W));
     }
     // Show the chooser at once unless a remembered mode exists; the
     // backend can take a while to start.
