@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **A5 (smart encoder + profiles) done in code; next: shortcuts and Settings layout (B-26), then A6**, see `docs/ROADMAP.md`.
+Current phase: **A5 (smart encoder + profiles) done in code; B-26 shortcuts in the Rust window done; next A6**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is
@@ -196,11 +196,11 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: `app.slint` preferred size 620 x 900 (was 480 x 820); on first show the window is kept inside the monitor's work area (95%) for small or high-DPI screens (`clamp_to_work_area`). With Settings open at start (the default) the width is the idle stage plus the panel, as before.
 - Verification: measured at 100% scaling on a 2560x1440 screen: the window opens at 824 x 900 (was 824 x 820) on the Android screen and the platform screen.
 
-### B-26: Settings and README list shortcuts the Rust window does not have            Status: open
+### B-26: Settings and README list shortcuts the Rust window does not have            Status: fixed (unverified)
 - Reported: 2026-11-07, by the user (screenshot of the README "Keyboard Shortcuts" table: "belum lengkap di setting").
 - Cause: the shortcuts (Space, Alt+H/C/R/V/D/U/L, Ctrl+K, Alt+Left, G/M) live in the classic web UI (`ui/app.js`, `ui/keys.js`). The Rust window handles only F11/Esc and, for Android, typed keys. The Settings card "Control & shortcuts" and the README still describe the classic set.
-- Fix: pending. Port the shortcuts to the Rust window (both platforms where the backend supports them) and list the real set in Settings, per platform.
-- Verification: unverified.
+- Fix: `src/shortcuts.rs` (routing + US-layout HID table, 5 tests) and `main.rs` `run_shortcut`. Both: Space, M, Ctrl+, , Alt+H, Alt+Left, Alt+L. Apple Driver mode: the PC keyboard as a hardware keyboard (`/cast/key`), Alt+U/D/V, Ctrl+K, Ctrl+C/X/V/A/Z (`/api/keyboard/action`). Android: Alt+N/S/R, Alt+Up/Down. A click on the picture gives the keys to the window on both platforms. Settings now show a "Keyboard shortcuts" card listing exactly this set per platform. Not ported yet: Alt+C / Alt+R (OCR needs the frame read back from the GPU); the README must drop them until then.
+- Verification: unverified: needs an iPhone in Apple Driver mode and an Android phone. Routing is unit-tested.
 
 ### B-27: Windows "N" editions have no Media Foundation decoder            Status: open
 - Reported: 2026-11-07, from the clean-PC review (user asked whether ZenLink runs on other PCs without extra installs).

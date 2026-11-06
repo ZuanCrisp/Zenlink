@@ -168,6 +168,16 @@ impl Api {
         let _ = self.post("/api/keyboard/action", &json!({ "action": action }));
     }
 
+    /// `paste-pc`: types `text` on the device. Returns the backend's reply
+    /// (`ok`, `message`), `None` when it did not answer.
+    pub fn keyboard_text(&self, action: &str, text: &str) -> Option<Value> {
+        self.post_slow(
+            "/api/keyboard/action",
+            &json!({ "action": action, "text": text }),
+            30,
+        )
+    }
+
     pub fn audio(&self, settings: &Value) {
         let _ = self.post("/api/audio", settings);
     }

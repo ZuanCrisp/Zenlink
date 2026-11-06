@@ -8,6 +8,7 @@ mod dots;
 mod flow;
 mod input;
 mod prefs;
+mod shortcuts;
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
@@ -1523,10 +1524,8 @@ fn android_start(ui: &AppWindow, index: i32) {
                 ui.set_android_message(
                     tr_ui(
                         ui,
-                        &format!("File server scrcpy tidak ada ({e}). Pasang ulang ZenLink Next."),
-                        &format!(
-                            "The scrcpy server file is missing ({e}). Reinstall ZenLink Next."
-                        ),
+                        &format!("File server scrcpy tidak ada ({e}). Pasang ulang ZenLink."),
+                        &format!("The scrcpy server file is missing ({e}). Reinstall ZenLink."),
                     )
                     .into(),
                 );
@@ -1650,6 +1649,99 @@ fn android_tick(ui: &AppWindow) {
         }
         a.android_shown = Some(st);
     });
+}
+
+/// Performs a window shortcut (B-26).
+fn run_shortcut(
+    ui: &AppWindow,
+    input: &Input,
+    s: shortcuts::Shortcut,
+    android_screen: bool,
+    apple_live: bool,
+) {
+    use shortcuts::Shortcut;
+    let need_apple = || {
+        show_toast(
+            ui,
+            tr_ui(
+                ui,
+                "Shortcut ini butuh mode Apple Driver saat mirroring.",
+                "This shortcut needs Apple Driver mode while mirroring.",
+            ),
+        );
+    };
+    match s {
+        Shortcut::StartStop => {
+            if android_screen {
+                if APP.with_borrow(|a| a.android.is_some()) {
+                    ui.invoke_android_stop();
+                } else {
+                    ui.invoke_android_start(-1);
+                }
+            } else if apple_live {
+                ui.invoke_stop_cast();
+            } else {
+                ui.invoke_start_cast();
+            }
+        }
+        Shortcut::Mute => ui.invoke_action("mute".into()),
+        Shortcut::Settings => {
+            let open = !ui.get_settings_open();
+            ui.set_settings_open(open);
+            ui.invoke_settings_toggled(open);
+        }
+        Shortcut::Rotate => {
+            ui.invoke_action("rotate".into());
+            let r = ui.get_prefs().rotation;
+            let label = if r.as_str() == "auto" {
+                "Auto".to_string()
+            } else {
+                format!("{r}°")
+            };
+            show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    &format!("Rotasi: {label}"),
+                    &format!("Rotation: {label}"),
+                ),
+            );
+        }
+        Shortcut::Back => ui.invoke_action(
+            if android_screen {
+                "back"
+            } else {
+                "swipe-right"
+            }
+            .into(),
+        ),
+        Shortcut::Lock => ui.invoke_action("lock".into()),
+        Shortcut::Android(a) => ui.invoke_action(a.into()),
+        Shortcut::Apple(_) if !apple_live => need_apple(),
+        Shortcut::Apple("paste-pc") => match pc_clipboard_text() {
+            Some(t) => {
+                let n = t.chars().count();
+                input.send(Cmd::TypeText(t));
+                show_toast(
+                    ui,
+                    tr_ui(
+                        ui,
+                        &format!("Mengetik {n} karakter di perangkat."),
+                        &format!("Typing {n} characters on the device."),
+                    ),
+                );
+            }
+            None => show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    "Clipboard PC tidak berisi teks.",
+                    "The PC clipboard has no text.",
+                ),
+            ),
+        },
+        Shortcut::Apple(a) => input.send(Cmd::Action(a)),
+    }
 }
 
 /// First frame of a session: remember the encoder list and the working
@@ -2459,12 +2551,48 @@ fn main() -> Result<(), slint::PlatformError> {
     // PC keyboard to Android (Settings › PC keyboard).
     {
         let weak = ui.as_weak();
+        let input_keys = input.clone();
         ui.on_key_input(move |text, ctrl, shift, alt| {
             let Some(ui) = weak.upgrade() else {
                 return false;
             };
-            if ui.get_screen().as_str() != "android" || !ui.get_prefs().keyboard {
+            let android_screen = ui.get_screen().as_str() == "android";
+            let keyboard = ui.get_prefs().keyboard;
+            let apple_live = !android_screen && APP.with_borrow(|a| a.streaming);
+            let typing = keyboard
+                && (if android_screen {
+                    android::active().is_some()
+                } else {
+                    apple_live
+                });
+            if let Some(s) =
+                shortcuts::route(android_screen, text.as_str(), ctrl, shift, alt, typing)
+            {
+                run_shortcut(&ui, &input_keys, s, android_screen, apple_live);
+                return true;
+            }
+            if !keyboard {
                 return false;
+            }
+            if !android_screen {
+                // Apple Driver mode: the PC keyboard as a hardware keyboard.
+                if !apple_live || ctrl || alt {
+                    return false;
+                }
+                let mut chars = text.chars();
+                let (Some(c), None) = (chars.next(), chars.next()) else {
+                    return false;
+                };
+                let Some((usage, shifted)) = shortcuts::hid_usage(c) else {
+                    return false;
+                };
+                let mut usages = Vec::with_capacity(2);
+                if shifted {
+                    usages.push(shortcuts::HID_SHIFT);
+                }
+                usages.push(usage);
+                input_keys.send(Cmd::Keys(usages));
+                return true;
             }
             let Some(sh) = android::active() else {
                 return false;
@@ -2504,19 +2632,20 @@ fn main() -> Result<(), slint::PlatformError> {
                             let (t, g) = (t.clone(), g.clone());
                             let weak = ui.as_weak();
                             v.on_pointer(move |e| {
+                                if matches!(e, PointerEvent::Down(..)) {
+                                    // Keys go to the device (and the window's
+                                    // shortcuts work) after a click on it.
+                                    let weak = weak.clone();
+                                    let _ = slint::invoke_from_event_loop(move || {
+                                        if let Some(ui) = weak.upgrade() {
+                                            ui.invoke_focus_keys();
+                                        }
+                                    });
+                                }
                                 // Android: the scrcpy control socket (touch,
                                 // scroll, right click = BACK, middle = HOME).
                                 if let Some(sh) = android::active() {
                                     if t.load(Relaxed) {
-                                        if matches!(e, PointerEvent::Down(..)) {
-                                            // Keys go to the phone after a click on it.
-                                            let weak = weak.clone();
-                                            let _ = slint::invoke_from_event_loop(move || {
-                                                if let Some(ui) = weak.upgrade() {
-                                                    ui.invoke_focus_keys();
-                                                }
-                                            });
-                                        }
                                         sh.pointer(e, input.rotation.load(Relaxed));
                                     }
                                     return;

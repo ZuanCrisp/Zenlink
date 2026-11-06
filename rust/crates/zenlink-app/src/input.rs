@@ -18,6 +18,10 @@ pub enum Cmd {
     Button(&'static str),
     Home(u32),
     Action(&'static str),
+    /// Apple hardware keyboard: one key tap (HID usages held, then none).
+    Keys(Vec<u8>),
+    /// Apple `paste-pc`: type this text on the device.
+    TypeText(String),
 }
 
 #[derive(Clone)]
@@ -100,6 +104,13 @@ fn worker(api: Api, rx: Receiver<Cmd>, rot: Arc<AtomicU32>) {
                 }
             }
             Cmd::Action(a) => api.keyboard_action(a),
+            Cmd::Keys(usages) => {
+                api.key(&serde_json::json!({ "usages": usages }));
+                api.key(&serde_json::json!({ "usages": [] }));
+            }
+            Cmd::TypeText(text) => {
+                let _ = api.keyboard_text("paste-pc", &text);
+            }
         }
     }
 }
