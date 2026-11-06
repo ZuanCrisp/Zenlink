@@ -214,6 +214,8 @@ pub struct VideoOptions {
     /// Device sound as raw PCM (Android 11+). Raw needs no decoder on the
     /// PC: 1.5 Mbps, small next to the video.
     pub audio: bool,
+    /// Control socket (touch, keys, clipboard from the PC).
+    pub control: bool,
 }
 
 impl Default for VideoOptions {
@@ -224,6 +226,7 @@ impl Default for VideoOptions {
             max_fps: 60,
             codec: "h264",
             audio: false,
+            control: false,
         }
     }
 }
@@ -232,12 +235,19 @@ impl Default for VideoOptions {
 pub fn server_command(scid: u32, tunnel_forward: bool, o: &VideoOptions) -> String {
     let mut cmd = format!(
         "CLASSPATH={DEVICE_SERVER_PATH} app_process / com.genymobile.scrcpy.Server {SCRCPY_VERSION} \
-         scid={scid:08x} log_level=info video_codec={} {} control=false",
+         scid={scid:08x} log_level=info video_codec={} {} {}",
         o.codec,
         if o.audio {
             "audio=true audio_codec=raw"
         } else {
             "audio=false"
+        },
+        // No automatic clipboard sync: the PC sends its clipboard only on
+        // Ctrl+V (the device's copies are drained, not used yet).
+        if o.control {
+            "control=true clipboard_autosync=false"
+        } else {
+            "control=false"
         }
     );
     if tunnel_forward {
@@ -267,6 +277,8 @@ pub struct Mirror {
     /// Raw PCM packets; `None` when audio was not asked for, or the device
     /// disabled it (video-only fallback).
     pub audio: Option<VideoReader<TcpStream>>,
+    /// Write end of the control socket (`None` without `control`).
+    pub control: Option<TcpStream>,
     pub session: Session,
 }
 
@@ -313,9 +325,9 @@ impl Mirror {
         let ended = Arc::new(AtomicBool::new(false));
         log_shell(shell.try_clone()?, ended.clone());
 
-        // The server opens its sockets in order: video, then audio. The
-        // tunnel stays until all are connected.
-        let count = 1 + usize::from(opts.audio);
+        // The server opens its sockets in order: video, audio, control.
+        // The tunnel stays until all are connected.
+        let count = 1 + usize::from(opts.audio) + usize::from(opts.control);
         let mut sockets = Vec::with_capacity(count);
         let mut failed = None;
         for n in 0..count {
@@ -359,8 +371,16 @@ impl Mirror {
         let mut video = it.next().expect("one socket");
         let device_name = read_device_meta(&mut video)?;
         let video = VideoReader::new(video)?;
-        let audio = match it.next() {
-            Some(a) => open_audio(a)?,
+        let audio = match opts.audio {
+            true => open_audio(it.next().expect("audio socket"))?,
+            false => None,
+        };
+        let control = match it.next() {
+            Some(c) => {
+                Self::drain_device_messages(c.try_clone()?);
+                c.set_write_timeout(Some(Duration::from_millis(500)))?;
+                Some(c)
+            }
             None => None,
         };
         log::info!(
@@ -372,8 +392,21 @@ impl Mirror {
             device_name,
             video,
             audio,
+            control,
             session,
         })
+    }
+
+    /// Reads and drops what the device writes on the control socket
+    /// (clipboard, acks, UHID output), so its buffer never fills and blocks the
+    /// server. Ends when the socket closes.
+    fn drain_device_messages(mut s: TcpStream) {
+        let _ = std::thread::Builder::new()
+            .name("android-control-rx".into())
+            .spawn(move || {
+                let mut buf = [0u8; 4096];
+                while matches!(s.read(&mut buf), Ok(n) if n > 0) {}
+            });
     }
 
     /// A handle that ends the session from another thread.
@@ -825,9 +858,13 @@ mod tests {
                 max_fps: 0,
                 codec: "h264",
                 audio: false,
+                control: true,
             },
         );
-        assert!(fwd.ends_with("control=false tunnel_forward=true"), "{fwd}");
+        assert!(
+            fwd.ends_with("control=true clipboard_autosync=false tunnel_forward=true"),
+            "{fwd}"
+        );
     }
 
     #[test]

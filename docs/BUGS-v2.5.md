@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **A4 part 1 (Android sound) done; next A4 part 2 (controls)**, see `docs/ROADMAP.md`.
+Current phase: **A4 part 2 (Android settings and controls) done; next: B-17 OBS audit, then A5**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is
@@ -121,9 +121,45 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix:
   - New crate `zenlink-audio`: `buffer.rs` is a line-by-line port of the v2.2.31 `NativeAudio` jitter buffer (start after one packet + margin, +5 ms per underrun capped at 50 ms, -1 ms after 30 s calm, 10 ms minimum, drop beyond twice the target, output block size counts); `wasapi.rs` is a WASAPI shared-mode, event-driven output on its own COM thread (48 kHz stereo s16 with AUTOCONVERTPCM, reopens when the device changes). No new third-party crate (cpal not needed; AGENTS.md section 3e latency rule).
   - `zenlink-android` `mirror.rs`: optional audio socket (`audio=true audio_codec=raw`: PCM s16le 48 kHz stereo, no decoder on the PC); codec id 0 (disabled) or 1 (error) means video only; the tunnel stays until all sockets are connected; `Stopper` closes every socket.
-  - `zenlink-app`: `android.rs` `play_audio` thread; sound only on Android 11+ (`audio_supported`) and when Settings › Audio is "On this PC" ("Device only" keeps the sound on the phone; it applies at the next Start); volume and mute follow the window at once; the stats line shows the sound latency.
+  - `zenlink-app`: `android.rs` `play_audio` thread; sound only on Android 11+ (`audio_supported`) and when Settings › Audio is "On this PC" ("Device only" keeps the sound on the phone; since B-18 a change restarts a running session at once); volume and mute follow the window at once; the stats line shows the sound latency.
   - Low-latency mode only (sound as it arrives, picture as it decodes), as on the Apple cable path. A/V sync modes are still to do.
 - Verification:
   - Tests: `zenlink-audio` 6 buffer tests (start rule, underrun growth and calm shrink, cap and floor, drop beyond twice the target, Bluetooth-size blocks, jitter floor); `zenlink-android` 55 (raw audio socket end to end, device without audio falls back to video only, server command); all workspace tests, fmt, clippy (no new warnings).
   - Measured on the developer's PC, default output, silence (muted): WASAPI output latency 23.4 ms (v2.2.31 measured ~22-23 ms), 0 underruns in 2 s; socket to output with 10 ms packets in real time: 53 ms total (queue + output).
   - Unverified: sound from a real phone (TECNO POVA 6, Android 15) on USB, Bluetooth headsets, Android 10 (video-only fallback) on a device.
+
+### B-17: OBS Game Capture is less smooth than the ZenLink window            Status: open
+- Reported: 2026-11-07 by the user, forwarding a ZenLink Studio (Apple) user's report: the mirror in the app is smooth, but OBS Game Capture shows frame drops ("tetep ga 1:1 sama yang di hasil mirror ... tetep ada frame drop kalau di obs, cuma ga se sering yang v sblmnya"). The capture itself works after a laptop restart. Applies to every mode (Apple Driver, ZenLink Studio, Android), since all render through `zenlink-video`.
+- Cause: not yet known. To be audited with evidence (renderer present pacing, OBS hook behaviour, swap chain settings); no guessing.
+- Fix: n/a.
+- Verification: unverified.
+
+### B-18: "Device only" sound did nothing during an Android session            Status: fixed (unverified)
+- Reported: 2026-11-07 by the user ("mode audio hanya perangkat belum"): switching Settings › Audio to "Device only" while mirroring kept the sound on the PC.
+- Cause: the audio choice is a scrcpy server start option (`audio=true|false`); `DeviceSource` read it only when a session started (code path `DeviceSource::new`), and nothing restarted the session.
+- Fix: `main.rs` `android_key()` (audio target + picture options); `on_prefs_changed` restarts a running Android session when the key changes ("Applying the Android settings…"). With "Device only" the server starts with `audio=false`, so Android keeps playing on the phone.
+- Verification: build and fixture smoke test (window starts, picture plays). Unverified on a phone: sound moves back to the phone after the switch.
+
+### B-19: Android picture settings before Start (resolution, FPS, bitrate, H.264/H.265)            Status: fixed (unverified)
+- Reported: 2026-11-07 by the user (AGENTS.md section 6, Android settings).
+- Fix:
+  - `AndroidVideoCard` (app.slint) on the Android start screen and in Settings when the Android screen is open: resolution 720p/1080p/1440p/native (`max_size`), FPS cap 30/60/90/120/144 (`max_fps`), bitrate 4/8/16/24/40 Mbps (`video_bit_rate`), codec H.264 / H.265. Saved in prefs (`androidMaxSize`, `androidFps`, `androidBitrate`, `androidCodec`); a change restarts a running session.
+  - H.265 is offered only when Windows has an HEVC decoder (`zenlink_video::decoder_available`, Media Foundation lookup); hvcC from the scrcpy config (`nal::hvcc_from_annexb`). Bounded fallback: a failed H.265 start (no encoder on the phone, bad stream) retries with H.264 (`DeviceSource::fail`).
+- Not done yet: per-device settings (master prompt section 7), hiding FPS values above the phone's refresh rate (the server caps to what the encoder delivers; the measured FPS is in the stats line), custom values, encoder choice by name.
+- Verification: tests `hvcc_from_scrcpy_config_round_trips`, `h265_config_becomes_an_hvcc_record`, `failed_h265_falls_back_to_h264`, prefs round trip. Unverified on a phone: each option, H.265 on a phone with an HEVC encoder.
+
+### B-20: Android control from the PC (touch, scroll, buttons, keyboard, paste)            Status: fixed (unverified)
+- Reported: 2026-11-07 by the user ("tombol belum bisa", "update buat control di pc nya ntuk android").
+- Cause: the server was started with `control=false`; the bottom bar sent Apple actions only.
+- Fix:
+  - `zenlink-android` `control.rs`: scrcpy v5.0.1 control messages (inject keycode, text, touch, scroll, back-or-screen-on, notification/settings panels, set clipboard, display power, rotate), byte layouts checked against `ControlMessageReader.java` v5.0.1.
+  - `mirror.rs`: `control=true clipboard_autosync=false`, third socket (video, audio, control); device messages on the control socket are drained so it never fills.
+  - Window: left button = touch (generic finger, frame pixels from the last session packet, the same rotation mapping as the Apple path), wheel = scroll, right click = BACK, middle click = HOME (as scrcpy). Android bottom bar: Back, Home, Recents, Quick settings, Notifications, volume down/up, Power. PC keyboard (Settings › PC keyboard): text as text, editing and arrow keys as key codes, Ctrl+letter with Ctrl, Ctrl+V pastes the PC clipboard. Touch toggle gates mouse input.
+- Not done yet: device clipboard to PC, UHID keyboard/mouse/gamepad, multi-touch gestures, key repeat counts.
+- Verification: tests `control.rs` (7 layout tests), `keys_map_like_scrcpy`, `control_goes_to_the_socket_in_frame_pixels`; all tests, fmt, clippy (no new warnings). Unverified on a phone.
+
+### B-21: Beta window crashed at start after the HEVC check was added            Status: fixed (verified)
+- Reported: 2026-11-07, found by the developer's own smoke test before release (never shipped).
+- Cause: `hevc_ok()` ran Media Foundation (multithreaded COM) on the UI thread before winit created the window; winit then panicked: `OleInitialize failed! Result was: RPC_E_CHANGED_MODE` (backtrace from `CreateWindowExW`).
+- Fix: the HEVC lookup runs on its own short-lived thread (`main.rs` `hevc_ok`).
+- Verification: the release exe starts and plays the Android fixture (`decoded=30.6 presented=157.2` in the stats log, no errors).

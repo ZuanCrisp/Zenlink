@@ -334,6 +334,37 @@ fn publish(
     }
 }
 
+/// Whether Windows has a decoder for `codec` (HEVC needs the "HEVC Video
+/// Extensions" or a GPU driver that ships one).
+pub fn decoder_available(codec: &Codec) -> bool {
+    startup();
+    unsafe {
+        let input = MFT_REGISTER_TYPE_INFO {
+            guidMajorType: MFMediaType_Video,
+            guidSubtype: subtype(codec),
+        };
+        let mut list: *mut Option<IMFActivate> = std::ptr::null_mut();
+        let mut count = 0u32;
+        if MFTEnumEx(
+            MFT_CATEGORY_VIDEO_DECODER,
+            MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_LOCALMFT | MFT_ENUM_FLAG_SORTANDFILTER,
+            Some(&input),
+            None,
+            &mut list,
+            &mut count,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        for a in std::slice::from_raw_parts_mut(list, count as usize) {
+            drop(a.take());
+        }
+        CoTaskMemFree(Some(list as _));
+        count > 0
+    }
+}
+
 pub fn startup() {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);

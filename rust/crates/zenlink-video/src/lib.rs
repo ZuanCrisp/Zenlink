@@ -15,5 +15,6 @@ pub mod glass;
 mod stats;
 mod view;
 
+pub use decoder::decoder_available;
 pub use stats::{Stats, StatsSnapshot};
 pub use view::{Fit, PointerEvent, VideoView};

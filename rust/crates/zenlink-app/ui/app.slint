@@ -32,6 +32,10 @@ export struct Prefs {
     dots: bool,             // animated dot background
     platform: string,       // "" | apple | android (first screen)
     remember-platform: bool,
+    android-max-size: string, // 1280 | 1920 | 2560 | 0 (native), longest side
+    android-fps: string,      // 30 | 60 | 90 | 120 | 144 (cap)
+    android-bitrate: string,  // Mbps: 4 | 8 | 16 | 24 | 40
+    android-codec: string,    // h264 | h265
 }
 
 // Window controls, Windows order (min, max, close) on the right, drawn as
@@ -253,6 +257,8 @@ component TopBar inherits Rectangle {
 component BottomBar inherits Rectangle {
     callback action(string);
     in property <bool> compact;
+    // Android: its own buttons (Back, Home, Recents, panels, volume, power).
+    in property <bool> android;
     height: 46px;
     dock := Glass {
         width: min(root.width, row.min-width);
@@ -270,14 +276,18 @@ component BottomBar inherits Rectangle {
                 padding-right: 9px;
                 spacing: 6px;
                 alignment: center;
-                Chip { icon: "\u{E76B}"; tip: I18n.t("Geser ke kiri (kembali)", "Swipe left (back)"); label: compact ? "" : I18n.t("Geser kiri", "Swipe left"); clicked => { root.action("swipe-left"); } }
+                if !root.android: Chip { icon: "\u{E76B}"; tip: I18n.t("Geser ke kiri (kembali)", "Swipe left (back)"); label: compact ? "" : I18n.t("Geser kiri", "Swipe left"); clicked => { root.action("swipe-left"); } }
+                if root.android: Chip { icon: "\u{E72B}"; tip: I18n.t("Kembali (klik kanan juga bisa)", "Back (right click works too)"); label: compact ? "" : I18n.t("Kembali", "Back"); clicked => { root.action("back"); } }
                 Chip { icon: "\u{E80F}"; tip: I18n.t("Layar Utama", "Home screen"); label: compact ? "" : "Home"; clicked => { root.action("home"); } }
                 Chip { icon: "\u{E8A9}"; tip: I18n.t("App terbaru", "Recent apps"); label: compact ? "" : I18n.t("Terbaru", "Recent"); clicked => { root.action("switcher"); } }
-                Chip { icon: "\u{E76C}"; tip: I18n.t("Geser ke kanan", "Swipe right"); label: compact ? "" : I18n.t("Geser kanan", "Swipe right"); clicked => { root.action("swipe-right"); } }
+                if !root.android: Chip { icon: "\u{E76C}"; tip: I18n.t("Geser ke kanan", "Swipe right"); label: compact ? "" : I18n.t("Geser kanan", "Swipe right"); clicked => { root.action("swipe-right"); } }
                 Rectangle { width: 1px; background: Theme.dark ? #ffffff1f : #0000001a; }
-                Chip { icon: "\u{E9E9}"; tip: I18n.t("Pusat Kontrol", "Control Center"); label: compact ? "" : I18n.t("Kontrol", "Control"); clicked => { root.action("control-center"); } }
+                if !root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Pusat Kontrol", "Control Center"); label: compact ? "" : I18n.t("Kontrol", "Control"); clicked => { root.action("control-center"); } }
+                if root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Pengaturan cepat", "Quick settings"); label: compact ? "" : I18n.t("Cepat", "Quick"); clicked => { root.action("quick-settings"); } }
                 Chip { icon: "\u{EA8F}"; tip: I18n.t("Notifikasi", "Notifications"); label: compact ? "" : I18n.t("Notifikasi", "Alerts"); clicked => { root.action("notifications"); } }
-                Chip { icon: "\u{E72E}"; tip: I18n.t("Kunci layar", "Lock screen"); label: compact ? "" : I18n.t("Kunci", "Lock"); clicked => { root.action("lock"); } }
+                if root.android: Chip { icon: "\u{E993}"; tip: I18n.t("Volume HP turun", "Phone volume down"); label: ""; clicked => { root.action("vol-down"); } }
+                if root.android: Chip { icon: "\u{E995}"; tip: I18n.t("Volume HP naik", "Phone volume up"); label: ""; clicked => { root.action("vol-up"); } }
+                Chip { icon: "\u{E72E}"; tip: root.android ? I18n.t("Tombol daya (kunci / nyalakan layar)", "Power button (lock / wake the screen)") : I18n.t("Kunci layar", "Lock screen"); label: compact ? "" : I18n.t("Kunci", "Lock"); clicked => { root.action("lock"); } }
             }
         }
     }
@@ -1044,12 +1054,58 @@ export struct AndroidRow {
 
 // Android workspace: setup steps, the devices ADB sees, and Start per
 // ready device (phase A3: video only).
+// Android picture settings (scrcpy server options). Shown before Start and
+// in Settings on the Android screen; a change restarts a running session.
+component AndroidVideoCard inherits Card {
+    in-out property <Prefs> prefs;
+    // Windows can decode H.265 (HEVC Video Extensions or a GPU driver decoder).
+    in property <bool> hevc-ok;
+    callback changed(Prefs);
+    title: I18n.t("Video Android", "Android video");
+    icon: "\u{E714}";
+    tint-a: #3ddc84;
+    tint-b: #1f9d55;
+    info: I18n.t("Resolusi = sisi terpanjang. FPS adalah batas atas; HP tidak melebihi refresh layarnya, angka nyata ada di statistik. H.265 lebih hemat bitrate, tapi hanya muncul kalau Windows punya decodernya; kalau HP tidak punya encodernya, ZenLink kembali ke H.264.",
+        "Resolution is the longest side. FPS is a cap: the phone never goes above its screen refresh rate, the real number is in the stats. H.265 needs less bitrate but only shows when Windows has a decoder; if the phone has no encoder, ZenLink falls back to H.264.");
+    Row { label: I18n.t("Resolusi", "Resolution"); }
+    Seg {
+        options: ["1280", "1920", "2560", "0"];
+        labels: ["720p", "1080p", "1440p", I18n.t("Asli", "Native")];
+        value: prefs.android-max-size;
+        changed(v) => { root.prefs.android-max-size = v; root.changed(root.prefs); }
+    }
+    Row { label: "FPS"; }
+    Seg {
+        options: ["30", "60", "90", "120", "144"];
+        labels: ["30", "60", "90", "120", "144"];
+        value: prefs.android-fps;
+        changed(v) => { root.prefs.android-fps = v; root.changed(root.prefs); }
+    }
+    Row { label: "Bitrate"; }
+    Seg {
+        options: ["4", "8", "16", "24", "40"];
+        labels: ["4", "8", "16", "24", "40 Mbps"];
+        value: prefs.android-bitrate;
+        changed(v) => { root.prefs.android-bitrate = v; root.changed(root.prefs); }
+    }
+    Row { label: "Codec"; hint: root.hevc-ok ? "" : I18n.t("H.265 butuh HEVC Video Extensions di Windows.", "H.265 needs HEVC Video Extensions on Windows."); }
+    Seg {
+        options: root.hevc-ok ? ["h264", "h265"] : ["h264"];
+        labels: root.hevc-ok ? ["H.264", "H.265 (HEVC)"] : ["H.264"];
+        value: prefs.android-codec;
+        changed(v) => { root.prefs.android-codec = v; root.changed(root.prefs); }
+    }
+}
+
 component AndroidHome inherits Rectangle {
     in property <string> status;
     in property <[AndroidRow]> devices;
     // "idle", "connecting", "error" (the workspace hides while streaming).
     in property <string> phase: "idle";
     in property <string> message;
+    in-out property <Prefs> prefs;
+    in property <bool> hevc-ok;
+    callback prefs-changed(Prefs);
     callback back();
     callback start-device(int);
     Glass {
@@ -1113,6 +1169,11 @@ component AndroidHome inherits Rectangle {
                     color: Theme.warn;
                     wrap: word-wrap;
                 }
+                AndroidVideoCard {
+                    prefs: root.prefs;
+                    hevc-ok: root.hevc-ok;
+                    changed(p) => { root.prefs-changed(p); }
+                }
                 FlowStep {
                     title: I18n.t("Aktifkan Debugging USB", "Turn on USB debugging");
                     sub: I18n.t("Pengaturan › Tentang ponsel › ketuk Nomor bentukan 7×, lalu Opsi pengembang › Debugging USB.", "Settings › About phone › tap Build number 7×, then Developer options › USB debugging.");
@@ -1130,7 +1191,7 @@ component AndroidHome inherits Rectangle {
                     last: true;
                 }
                 Text {
-                    text: I18n.t("Beta: video saja (suara dan kontrol menyusul). Tidak ada driver yang dipasang atau diubah.", "Beta: video only (sound and control come later). No driver is installed or changed.");
+                    text: I18n.t("Beta: gambar, suara (Android 11+) dan kontrol dari PC. Tidak ada driver yang dipasang atau diubah.", "Beta: picture, sound (Android 11+) and control from the PC. No driver is installed or changed.");
                     font-size: 11px;
                     color: Theme.text-3;
                     wrap: word-wrap;
@@ -1158,6 +1219,7 @@ component SettingsPanel inherits Glass {
     in property <bool> drv-filter;
     callback set-link(string);
     in property <string> stats-full;
+    in property <bool> hevc-ok;
     callback changed(Prefs);
     callback close();
     callback driver-action(string);
@@ -1329,6 +1391,12 @@ component SettingsPanel inherits Glass {
                     }
                 }
 
+                if root.screen == "android": AndroidVideoCard {
+                    prefs: root.prefs;
+                    hevc-ok: root.hevc-ok;
+                    changed(p) => { root.changed(p); }
+                }
+
                 if root.screen != "android": Card {
                     title: I18n.t("Koneksi & driver", "Connection & driver");
                     icon: "\u{E88E}";
@@ -1498,6 +1566,7 @@ export component AppWindow inherits Window {
     in property <string> android-device;
     in property <string> android-link;
     in property <string> android-message;
+    in property <bool> hevc-ok;
     callback android-start(int);
     callback android-stop();
     callback android-restart();
@@ -1535,6 +1604,9 @@ export component AppWindow inherits Window {
     callback driver-action(string);
     callback settings-toggled(bool);
     callback window-action(string);
+    // A key press for the device (Android); true = it was sent.
+    callback key-input(string, bool, bool, bool) -> bool;
+    public function focus-keys() { keys.focus(); }
     no-frame: true;
     forward-focus: keys;
 
@@ -1553,6 +1625,7 @@ export component AppWindow inherits Window {
         key-pressed(ev) => {
             if ev.text == Key.F11 { root.window-action("fullscreen"); return accept; }
             if ev.text == Key.Escape && root.fullscreen { root.window-action("fullscreen"); return accept; }
+            if root.key-input(ev.text, ev.modifiers.control, ev.modifiers.shift, ev.modifiers.alt) { return accept; }
             reject
         }
     }
@@ -1625,6 +1698,9 @@ export component AppWindow inherits Window {
                             devices: root.android-devices;
                             phase: root.android-phase;
                             message: root.android-message;
+                            prefs: root.prefs;
+                            hevc-ok: root.hevc-ok;
+                            prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
                             back => { root.change-platform(); }
                             start-device(i) => { root.android-start(i); }
                         }
@@ -1644,6 +1720,7 @@ export component AppWindow inherits Window {
                     }
                     BottomBar {
                         compact: root.compact-bar;
+                        android: root.on-android;
                         action(a) => { root.action(a); }
                     }
                 }
@@ -1667,6 +1744,7 @@ export component AppWindow inherits Window {
                     drv-filter: root.drv-filter;
                     set-link(l) => { root.set-link(l); }
                     stats-full: root.stats-full;
+                    hevc-ok: root.hevc-ok;
                     changed(p) => { root.prefs = p; root.prefs-changed(p); }
                     close => { root.settings-open = false; root.settings-toggled(false); }
                     driver-action(a) => { root.driver-action(a); }

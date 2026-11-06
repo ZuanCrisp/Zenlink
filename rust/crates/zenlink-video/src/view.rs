@@ -40,6 +40,10 @@ pub enum PointerEvent {
     Up(f32, f32),
     /// Mouse back button.
     Back,
+    /// Right click (Android: BACK, like scrcpy).
+    Secondary,
+    /// Middle click (Android: HOME, like scrcpy).
+    Middle,
     /// Wheel notches (positive = away from the user).
     Wheel(f32, f32, f32),
 }
@@ -253,6 +257,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 let (u, v) = uv();
                 send(PointerEvent::Up(u.clamp(0.0, 1.0), v.clamp(0.0, 1.0)));
             }
+            LRESULT(0)
+        }
+        WM_RBUTTONUP => {
+            send(PointerEvent::Secondary);
+            LRESULT(0)
+        }
+        WM_MBUTTONUP => {
+            send(PointerEvent::Middle);
             LRESULT(0)
         }
         WM_XBUTTONUP => {

@@ -67,3 +67,19 @@ See the comment in `rust/crates/zenlink-android/src/scrcpy.rs`.
   (`Streamer.writeDisableStream`). ZenLink then mirrors video only.
 - Audio packets use the same 12-byte header as video (no session packets).
 
+## Control (phase A4)
+
+- Server options: `control=true clipboard_autosync=false`. The control socket is the
+  third socket (video, audio, control); without audio it is the second.
+- Messages (`ControlMessageReader.java`, v5.0.1): type byte, then big-endian fields.
+  Touch = action u8, pointer id i64, position (x i32, y i32, width u16, height u16),
+  pressure u16 fixed point (1.0 = 0xffff), action button i32, buttons i32. Scroll =
+  position, h and v as i16 fixed point of `value / 16` (range -16..16), buttons i32.
+  Text = u32 length + UTF-8, at most 300 bytes. Set clipboard = sequence i64, paste u8,
+  u32 length + UTF-8.
+- The position's width/height must equal the current video size (from the session
+  packet), or the server ignores the event (for example just after a rotation).
+- ZenLink uses pointer id -2 (generic finger: a touchscreen event) for the mouse.
+- The device writes clipboard, ack and UHID messages on the same socket; ZenLink
+  drains them.
+

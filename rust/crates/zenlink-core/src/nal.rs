@@ -165,9 +165,74 @@ pub fn avcc_from_annexb(config: &[u8]) -> Option<Vec<u8>> {
     Some(r)
 }
 
+/// hvcC record (4-byte lengths) from an H.265 Annex B config packet with
+/// the VPS (type 32), SPS (33) and PPS (34). The decoder only reads the NAL
+/// arrays and the length size; profile, tier and level are copied from the
+/// SPS's profile_tier_level so the record stays truthful. `None` without
+/// all three.
+pub fn hvcc_from_annexb(config: &[u8]) -> Option<Vec<u8>> {
+    let nals = split_annexb(config);
+    let kind = |n: &[u8]| (n[0] >> 1) & 0x3f;
+    let of = |t: u8| -> Vec<&[u8]> {
+        nals.iter()
+            .copied()
+            .filter(|n| n.len() > 2 && kind(n) == t)
+            .collect()
+    };
+    let (vps, sps, pps) = (of(32), of(33), of(34));
+    if vps.is_empty() || sps.is_empty() || pps.is_empty() {
+        return None;
+    }
+    let mut r = vec![0u8; 23];
+    r[0] = 1; // configurationVersion
+              // SPS: 2-byte NAL header, 1 byte (vps id, max sub layers, nesting), then
+              // general profile_tier_level: 1 byte profile space/tier/idc, 4 bytes
+              // compatibility flags, 6 bytes constraint flags, 1 byte level.
+    if let Some(ptl) = sps[0].get(3..15) {
+        r[1..13].copy_from_slice(ptl);
+    }
+    r[13] = 0xf0; // reserved + min_spatial_segmentation_idc (0)
+    r[15] = 0xfc; // reserved + parallelismType (0)
+    r[16] = 0xfd; // reserved + chroma_format_idc 4:2:0
+    r[17] = 0xf8; // reserved + bit_depth_luma_minus8 0
+    r[18] = 0xf8; // reserved + bit_depth_chroma_minus8 0
+    r[21] = 0x0f; // constantFrameRate 0, numTemporalLayers 1, nesting 1, lengthSizeMinusOne 3
+    r[22] = 3; // numOfArrays
+    for (t, list) in [(32u8, &vps), (33, &sps), (34, &pps)] {
+        r.push(0x80 | t); // array_completeness = 1
+        r.extend_from_slice(&(list.len() as u16).to_be_bytes());
+        for n in list.iter() {
+            r.extend_from_slice(&(n.len() as u16).to_be_bytes());
+            r.extend_from_slice(n);
+        }
+    }
+    Some(r)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hvcc_from_scrcpy_config_round_trips() {
+        let mut config = vec![0, 0, 0, 1, 0x40, 0x01, 0x0c, 0x01];
+        let sps = [
+            0x42, 0x01, 0x01, 0x01, 0x60, 0, 0, 0, 0xb0, 0, 0, 0, 0, 0, 0x5d, 0xa0,
+        ];
+        config.extend_from_slice(&[0, 0, 0, 1]);
+        config.extend_from_slice(&sps);
+        config.extend_from_slice(&[0, 0, 0, 1, 0x44, 0x01, 0xc1, 0x72]);
+        let rec = hvcc_from_annexb(&config).unwrap();
+        assert_eq!(rec[1], 0x01, "general profile Main");
+        assert_eq!(rec[12], 0x5d, "level 3.1");
+        let ps = parse_config(&Codec::Hevc, &rec).unwrap();
+        assert_eq!(ps.length_size, 4);
+        assert_eq!(ps.annexb, config);
+        assert!(
+            hvcc_from_annexb(&[0, 0, 0, 1, 0x42, 0x01, 1]).is_none(),
+            "SPS only"
+        );
+    }
 
     #[test]
     fn annexb_split_and_lengths() {

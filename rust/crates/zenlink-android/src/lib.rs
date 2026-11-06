@@ -8,10 +8,12 @@
 //! - [`identity`]: a stable per-device identity that never depends on an IP address.
 //! - [`discovery`]: combines the above into the device list the UI shows.
 //! - [`mirror`]: starts the scrcpy server and reads its video stream (phase A3).
+//! - [`control`]: scrcpy control messages (touch, keys, text, clipboard; phase A4).
 //!
 //! Everything here is portable Rust; only [`adb::start_server`] touches the platform.
 
 pub mod adb;
+pub mod control;
 pub mod devices;
 pub mod discovery;
 pub mod identity;

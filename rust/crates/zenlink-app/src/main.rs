@@ -116,6 +116,9 @@ struct App {
     android_link: String,
     /// Which list entry was started (-1 = first ready), for Restart.
     android_index: i32,
+    /// Settings the running Android session started with (sound target,
+    /// picture options); a change restarts it.
+    android_key: Option<String>,
     /// A source waiting for the video view to exist.
     android_pending: Option<Box<dyn zenlink_core::source::VideoSource>>,
     /// Devices the Android workspace shows, in row order.
@@ -1209,6 +1212,73 @@ fn show_android(
 }
 
 /// The bundled scrcpy server, read once.
+/// Whether Windows can decode H.265 (checked once; Media Foundation lookup).
+fn hevc_ok() -> bool {
+    static OK: OnceLock<bool> = OnceLock::new();
+    // On its own thread: Media Foundation initialises COM as multithreaded,
+    // and the UI thread must stay single-threaded for winit (OleInitialize
+    // fails with RPC_E_CHANGED_MODE otherwise and the window panics).
+    *OK.get_or_init(|| {
+        std::thread::spawn(|| zenlink_video::decoder_available(&zenlink_core::api::Codec::Hevc))
+            .join()
+            .unwrap_or(false)
+    })
+}
+
+/// scrcpy server options from Settings › Android video and Settings › Audio.
+/// H.265 falls back to H.264 when Windows has no HEVC decoder.
+fn android_options(p: &Prefs, audio_supported: bool) -> zenlink_android::mirror::VideoOptions {
+    let num = |s: &str, d: u32| s.parse::<u32>().unwrap_or(d);
+    let codec = if p.android_codec.as_str() == "h265" && hevc_ok() {
+        "h265"
+    } else {
+        "h264"
+    };
+    zenlink_android::mirror::VideoOptions {
+        max_size: num(&p.android_max_size, 1920),
+        bit_rate: num(&p.android_bitrate, 8).saturating_mul(1_000_000),
+        max_fps: num(&p.android_fps, 60),
+        codec,
+        audio: audio_supported && p.audio_out.as_str() == "pc",
+        control: true,
+    }
+}
+
+/// Text on the Windows clipboard (Ctrl+V to Android), `None` without text.
+fn pc_clipboard_text() -> Option<String> {
+    use windows::Win32::Foundation::HGLOBAL;
+    use windows::Win32::System::DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard};
+    use windows::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    const CF_UNICODETEXT: u32 = 13;
+    unsafe {
+        OpenClipboard(None).ok()?;
+        let text = GetClipboardData(CF_UNICODETEXT).ok().and_then(|h| {
+            let g = HGLOBAL(h.0);
+            let p = GlobalLock(g) as *const u16;
+            if p.is_null() {
+                return None;
+            }
+            let mut n = 0;
+            while *p.add(n) != 0 {
+                n += 1;
+            }
+            let s = String::from_utf16_lossy(std::slice::from_raw_parts(p, n));
+            let _ = GlobalUnlock(g);
+            Some(s)
+        });
+        let _ = CloseClipboard();
+        text.filter(|s| !s.is_empty())
+    }
+}
+
+/// The settings a running Android session depends on.
+fn android_key(p: &Prefs) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        p.audio_out, p.android_max_size, p.android_fps, p.android_bitrate, p.android_codec
+    )
+}
+
 fn scrcpy_server() -> Result<Arc<Vec<u8>>, String> {
     static SERVER: OnceLock<Result<Arc<Vec<u8>>, String>> = OnceLock::new();
     SERVER
@@ -1281,15 +1351,17 @@ fn android_start(ui: &AppWindow, index: i32) {
                 d.name.display.clone(),
                 server,
                 shared.clone(),
-                d.audio_supported,
+                android_options(&ui.get_prefs(), d.audio_supported),
             )),
             link.to_string(),
         )
     };
     ui.set_android_message("".into());
     APP.with_borrow_mut(|a| {
+        android::set_active(Some(shared.clone()));
         a.android = Some(shared);
         a.android_index = index;
+        a.android_key = Some(android_key(&ui.get_prefs()));
         a.android_link = link;
         a.android_shown = None;
         a.fitted = None;
@@ -1308,6 +1380,7 @@ fn android_stop(ui: &AppWindow) {
         let Some(s) = a.android.take() else {
             return false;
         };
+        android::set_active(None);
         s.stop();
         if let Some(v) = a.view.as_mut() {
             v.stop();
@@ -1552,6 +1625,28 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() {
                 apply_look(&ui);
                 push_audio(&api, &p, ui.get_muted());
+                // "Device only" sound and the Android picture options are
+                // server start options: restart a running Android session.
+                let key = android_key(&p);
+                let restart = APP.with_borrow_mut(|a| {
+                    let changed = a.android_key.as_deref() != Some(key.as_str());
+                    if changed {
+                        a.android_key = Some(key);
+                    }
+                    changed && a.android.is_some()
+                });
+                if restart {
+                    let i = APP.with_borrow(|a| a.android_index);
+                    show_toast(
+                        &ui,
+                        tr_ui(
+                            &ui,
+                            "Menerapkan pengaturan Android…",
+                            "Applying the Android settings…",
+                        ),
+                    );
+                    android_start(&ui, i);
+                }
                 // Only picture settings refit the window. Any other setting
                 // (volume, lip sync, theme...) used to shrink a window the
                 // user had resized back to the default fit.
@@ -1597,6 +1692,7 @@ fn main() -> Result<(), slint::PlatformError> {
             p.volume / 100.0,
             ui.get_muted(),
         );
+        ui.set_hevc_ok(hevc_ok());
         let f = flow::Flow::launch(&p.platform, p.remember_platform, mode_remembered());
         apply_flow(&ui, &f);
         APP.with_borrow_mut(|a| a.flow = Some(f));
@@ -1716,6 +1812,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let input = input.clone();
         ui.on_action(move |a| {
             let Some(ui) = weak.upgrade() else { return };
+            if ui.get_screen().as_str() == "android" {
+                if let Some(sh) = android::active() {
+                    if sh.action(a.as_str()) {
+                        return;
+                    }
+                }
+            }
             // Control Center / Notification Center: press again to close,
             // press the other one to switch (close first, then open).
             if let Some(name) = match a.as_str() {
@@ -2067,6 +2170,32 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
 
+    // PC keyboard to Android (Settings › PC keyboard).
+    {
+        let weak = ui.as_weak();
+        ui.on_key_input(move |text, ctrl, shift, alt| {
+            let Some(ui) = weak.upgrade() else {
+                return false;
+            };
+            if ui.get_screen().as_str() != "android" || !ui.get_prefs().keyboard {
+                return false;
+            }
+            let Some(sh) = android::active() else {
+                return false;
+            };
+            match android::key_input(text.as_str(), ctrl, shift, alt) {
+                android::KeyInput::Send(m) => sh.send(&m),
+                android::KeyInput::Paste => {
+                    if let Some(t) = pc_clipboard_text() {
+                        sh.paste(t);
+                    }
+                }
+                android::KeyInput::Ignore => return false,
+            }
+            true
+        });
+    }
+
     // Frame timer: native view placement, window fitting, stats.
     let timer = slint::Timer::default();
     {
@@ -2083,7 +2212,26 @@ fn main() -> Result<(), slint::PlatformError> {
                         Ok(v) => {
                             let input = input.clone();
                             let (t, g) = (t.clone(), g.clone());
-                            v.on_pointer(move |e| match e {
+                            let weak = ui.as_weak();
+                            v.on_pointer(move |e| {
+                                // Android: the scrcpy control socket (touch,
+                                // scroll, right click = BACK, middle = HOME).
+                                if let Some(sh) = android::active() {
+                                    if t.load(Relaxed) {
+                                        if matches!(e, PointerEvent::Down(..)) {
+                                            // Keys go to the phone after a click on it.
+                                            let weak = weak.clone();
+                                            let _ = slint::invoke_from_event_loop(move || {
+                                                if let Some(ui) = weak.upgrade() {
+                                                    ui.invoke_focus_keys();
+                                                }
+                                            });
+                                        }
+                                        sh.pointer(e, input.rotation.load(Relaxed));
+                                    }
+                                    return;
+                                }
+                                match e {
                                 PointerEvent::Down(u, v) if t.load(Relaxed) => input.send(Cmd::Down(u, v)),
                                 PointerEvent::Move(u, v) if t.load(Relaxed) => input.send(Cmd::Move(u, v)),
                                 PointerEvent::Up(u, v) if t.load(Relaxed) => input.send(Cmd::Up(u, v)),
@@ -2093,6 +2241,7 @@ fn main() -> Result<(), slint::PlatformError> {
                                     input.send(Cmd::Stroke(u, v, u, end, 5, 10));
                                 }
                                 _ => {}
+                                }
                             });
                             a.view = Some(v);
                             if a.streaming {

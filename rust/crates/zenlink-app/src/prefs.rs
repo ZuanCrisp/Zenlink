@@ -44,6 +44,10 @@ pub fn defaults() -> Prefs {
         dots: true,
         platform: "".into(),
         remember_platform: false,
+        android_max_size: "1920".into(),
+        android_fps: "60".into(),
+        android_bitrate: "8".into(),
+        android_codec: "h264".into(),
     }
 }
 
@@ -117,6 +121,23 @@ pub fn from_value(v: &Value) -> Prefs {
     // "Remember my choice" (rememberConnectionMode in settings.json).
     s("platform", &mut p.platform, &["apple", "android"]);
     b("rememberPlatform", &mut p.remember_platform);
+    // Android picture (phase A4): scrcpy server options.
+    s(
+        "androidMaxSize",
+        &mut p.android_max_size,
+        &["1280", "1920", "2560", "0"],
+    );
+    s(
+        "androidFps",
+        &mut p.android_fps,
+        &["30", "60", "90", "120", "144"],
+    );
+    s(
+        "androidBitrate",
+        &mut p.android_bitrate,
+        &["4", "8", "16", "24", "40"],
+    );
+    s("androidCodec", &mut p.android_codec, &["h264", "h265"]);
     p
 }
 
@@ -139,6 +160,8 @@ pub fn to_value(p: &Prefs) -> Value {
         "gestures": p.gestures, "autoStart": p.auto_start, "closeToTray": p.close_to_tray,
         "onTop": p.on_top, "stats": p.stats, "dots": p.dots,
         "platform": p.platform.as_str(), "rememberPlatform": p.remember_platform,
+        "androidMaxSize": p.android_max_size.as_str(), "androidFps": p.android_fps.as_str(),
+        "androidBitrate": p.android_bitrate.as_str(), "androidCodec": p.android_codec.as_str(),
     })
 }
 

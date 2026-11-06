@@ -6,27 +6,36 @@
 //! - [`FixtureSource`]: a recorded scrcpy stream (`ZL_ANDROID_FIXTURE`), for
 //!   tests without a device. It is paced by the recorded timestamps.
 //!
+//! Control (phase A4): the scrcpy control socket carries touch, scroll,
+//! keys, text and the PC clipboard (Ctrl+V); see [`Shared::pointer`],
+//! [`Shared::action`] and [`key_input`].
+//!
 //! Sound (phase A4): raw PCM from the scrcpy audio socket goes through the
 //! v2.2.31 jitter buffer (`zenlink-audio`) to WASAPI. Low-latency mode:
 //! sound plays as it arrives, the picture as it decodes (the Apple cable
 //! path works the same way).
 
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use zenlink_android::adb::{AdbClient, Target};
+use zenlink_android::control::{
+    self, keycode, meta, Control, ACTION_DOWN, ACTION_MOVE, ACTION_UP, POINTER_ID_GENERIC_FINGER,
+};
 use zenlink_android::mirror::{
     codec_name, read_device_meta, Mirror, Packet, Session, Stopper, VideoOptions, VideoReader,
-    CODEC_H264,
+    CODEC_H264, CODEC_H265,
 };
 use zenlink_android::scrcpy::{SERVER_FILE, SERVER_SIZE};
-use zenlink_core::api::{Codec, CodecInfo};
-use zenlink_core::nal::{annexb_to_lengths, avcc_from_annexb};
+use zenlink_core::api::{device_point, Codec, CodecInfo};
+use zenlink_core::nal::{annexb_to_lengths, avcc_from_annexb, hvcc_from_annexb};
 use zenlink_core::source::{RecordStream, VideoSource};
 use zenlink_core::stream::Record;
+use zenlink_video::PointerEvent;
 
 /// After this many failed starts in a row the session gives up and shows the error.
 const MAX_FAILURES: u32 = 3;
@@ -69,6 +78,27 @@ pub struct Shared {
     stopper: Mutex<Option<Stopper>>,
     /// Sound latency (queue + output) in ms; 0 = no sound.
     audio_ms: AtomicU32,
+    /// Write end of the control socket while a session streams.
+    control: Mutex<Option<TcpStream>>,
+    /// Video frame size from the last session packet (touch coordinates).
+    frame_w: AtomicU32,
+    frame_h: AtomicU32,
+}
+
+/// The session the window's mouse and keyboard go to.
+static ACTIVE: Mutex<Option<Arc<Shared>>> = Mutex::new(None);
+
+pub fn set_active(s: Option<Arc<Shared>>) {
+    *ACTIVE.lock().unwrap() = s;
+}
+
+/// The Android session that takes input, if one streams with control.
+pub fn active() -> Option<Arc<Shared>> {
+    ACTIVE
+        .lock()
+        .unwrap()
+        .clone()
+        .filter(|s| s.control.lock().unwrap().is_some())
 }
 
 /// Sound settings from the window (Settings › Audio, the mute button).
@@ -78,8 +108,8 @@ static AUDIO_MUTED: AtomicBool = AtomicBool::new(false);
 static AUDIO_VOLUME: AtomicU32 = AtomicU32::new(0x3f80_0000);
 
 /// Called whenever the window pushes its sound settings. "Device only"
-/// (`to_pc == false`) takes effect at the next Start: the server then does
-/// not capture, so the phone keeps its own sound.
+/// (`to_pc == false`) restarts a running session without audio capture (the
+/// window does that), so the phone keeps its own sound.
 pub fn set_audio(to_pc: bool, volume: f32, muted: bool) {
     AUDIO_TO_PC.store(to_pc, Relaxed);
     AUDIO_VOLUME.store(volume.clamp(0.0, 1.0).to_bits(), Relaxed);
@@ -100,9 +130,103 @@ impl Shared {
         f(&mut self.status.lock().unwrap());
     }
 
+    /// Sends control messages; a broken socket disables control until the
+    /// next session. Never blocks longer than the socket's write timeout.
+    pub fn send(&self, msgs: &[Control]) {
+        let mut c = self.control.lock().unwrap();
+        let Some(s) = c.as_mut() else { return };
+        let mut buf = Vec::with_capacity(32 * msgs.len());
+        for m in msgs {
+            buf.extend_from_slice(&m.encode());
+        }
+        if let Err(e) = s.write_all(&buf) {
+            log::info!("android: control socket closed: {e}");
+            *c = None;
+        }
+    }
+
+    fn frame(&self) -> Option<(u16, u16)> {
+        let (w, h) = (self.frame_w.load(Relaxed), self.frame_h.load(Relaxed));
+        (w > 0 && h > 0).then(|| (w.min(0xffff) as u16, h.min(0xffff) as u16))
+    }
+
+    fn set_frame(&self, w: u32, h: u32) {
+        self.frame_w.store(w, Relaxed);
+        self.frame_h.store(h, Relaxed);
+    }
+
+    /// Mouse on the picture. `u, v` are as the user sees the picture;
+    /// `rotation` is the rotation the window shows it with.
+    pub fn pointer(&self, e: PointerEvent, rotation: u32) {
+        let Some((w, h)) = self.frame() else { return };
+        let at = |u: f32, v: f32| {
+            let (x, y) = device_point(u, v, rotation);
+            control::position(x as f32 / 65535.0, y as f32 / 65535.0, w, h)
+        };
+        let touch = |action, pos, pressure| Control::Touch {
+            action,
+            pointer: POINTER_ID_GENERIC_FINGER,
+            pos,
+            pressure,
+            action_button: 0,
+            buttons: 0,
+        };
+        match e {
+            PointerEvent::Down(u, v) => self.send(&[touch(ACTION_DOWN, at(u, v), 1.0)]),
+            PointerEvent::Move(u, v) => self.send(&[touch(ACTION_MOVE, at(u, v), 1.0)]),
+            PointerEvent::Up(u, v) => self.send(&[touch(ACTION_UP, at(u, v), 0.0)]),
+            PointerEvent::Back | PointerEvent::Secondary => self.back(),
+            PointerEvent::Middle => self.send(&Control::key_tap(keycode::HOME, 0)),
+            PointerEvent::Wheel(u, v, notches) => self.send(&[Control::Scroll {
+                pos: at(u, v),
+                h: 0.0,
+                v: notches,
+                buttons: 0,
+            }]),
+        }
+    }
+
+    /// BACK (or screen on), press and release.
+    fn back(&self) {
+        self.send(&[
+            Control::BackOrScreenOn {
+                action: ACTION_DOWN,
+            },
+            Control::BackOrScreenOn { action: ACTION_UP },
+        ]);
+    }
+
+    /// A shortcut-bar button. `false` when it is not an Android action
+    /// (the window handles it, e.g. mute).
+    pub fn action(&self, name: &str) -> bool {
+        match name {
+            "back" => self.back(),
+            "home" => self.send(&Control::key_tap(keycode::HOME, 0)),
+            "switcher" => self.send(&Control::key_tap(keycode::APP_SWITCH, 0)),
+            "notifications" => self.send(&[Control::ExpandNotifications]),
+            "quick-settings" => self.send(&[Control::ExpandSettings]),
+            "vol-down" => self.send(&Control::key_tap(keycode::VOLUME_DOWN, 0)),
+            "vol-up" => self.send(&Control::key_tap(keycode::VOLUME_UP, 0)),
+            "lock" => self.send(&Control::key_tap(keycode::POWER, 0)),
+            "rotate-device" => self.send(&[Control::RotateDevice]),
+            _ => return false,
+        }
+        true
+    }
+
+    /// Pastes the PC clipboard on the device (sets its clipboard, then pastes).
+    pub fn paste(&self, text: String) {
+        self.send(&[Control::SetClipboard {
+            sequence: 0, // SEQUENCE_INVALID: no ack wanted
+            paste: true,
+            text,
+        }]);
+    }
+
     /// Ends the session: the decoder's blocked read returns at once.
     pub fn stop(&self) {
         self.stop.store(true, Relaxed);
+        *self.control.lock().unwrap() = None;
         if let Some(s) = self.stopper.lock().unwrap().take() {
             s.stop();
         }
@@ -111,12 +235,13 @@ impl Shared {
 }
 
 /// Converts scrcpy packets to decoder records. Packets are Annex B; the
-/// decoder takes 4-byte-length samples and an avcC record.
-fn to_record(p: Packet) -> Option<Record> {
+/// decoder takes 4-byte-length samples and an avcC (H.264) or hvcC (H.265)
+/// record.
+fn to_record(codec: u32, p: Packet) -> Option<Record> {
     match p {
         // The size comes from the decoder; a rotation is followed by a new config.
         Packet::Session { .. } => None,
-        Packet::Config(c) => Some(Record::Config(codec_info(&c)?)),
+        Packet::Config(c) => Some(Record::Config(codec_info(codec, &c)?)),
         Packet::Media { key, data, .. } => Some(Record::Frame {
             key,
             rebuild: false,
@@ -125,10 +250,15 @@ fn to_record(p: Packet) -> Option<Record> {
     }
 }
 
-fn codec_info(config: &[u8]) -> Option<CodecInfo> {
+fn codec_info(codec: u32, config: &[u8]) -> Option<CodecInfo> {
+    let (codec, description) = match codec {
+        CODEC_H264 => (Codec::H264, avcc_from_annexb(config)?),
+        CODEC_H265 => (Codec::Hevc, hvcc_from_annexb(config)?),
+        _ => return None,
+    };
     Some(CodecInfo {
-        codec: Codec::H264,
-        description: avcc_from_annexb(config)?,
+        codec,
+        description,
         // scrcpy has no keyframe request in this phase; MediaCodec sends one every 10 s.
         keyframes_on_request: false,
     })
@@ -136,7 +266,7 @@ fn codec_info(config: &[u8]) -> Option<CodecInfo> {
 
 /// Reads up to the first config packet; media before it cannot be decoded.
 fn first_config<R: Read>(v: &mut VideoReader<R>) -> io::Result<CodecInfo> {
-    if v.codec != CODEC_H264 {
+    if v.codec != CODEC_H264 && v.codec != CODEC_H265 {
         return Err(io::Error::other(format!(
             "codec {} is not supported yet",
             codec_name(v.codec)
@@ -144,8 +274,8 @@ fn first_config<R: Read>(v: &mut VideoReader<R>) -> io::Result<CodecInfo> {
     }
     for _ in 0..64 {
         if let Packet::Config(c) = v.next_packet()? {
-            return codec_info(&c)
-                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no SPS/PPS"));
+            return codec_info(v.codec, &c)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "no parameter sets"));
         }
     }
     Err(io::Error::new(
@@ -200,7 +330,10 @@ impl<R: Read + Send> RecordStream for Records<R> {
             if let (Some(pacer), Packet::Media { pts, .. }) = (self.pacer.as_mut(), &p) {
                 pacer.wait(*pts, &self.shared.stop);
             }
-            if let Some(r) = to_record(p) {
+            if let Packet::Session { width, height, .. } = p {
+                self.shared.set_frame(width, height);
+            }
+            if let Some(r) = to_record(self.video.codec, p) {
                 return Some(r);
             }
         }
@@ -219,14 +352,15 @@ pub struct DeviceSource {
 }
 
 impl DeviceSource {
-    /// `audio_supported`: Android 11+ (scrcpy captures sound from API 30).
+    /// `options` come from the window (Settings › Android); `audio` must
+    /// already be false on Android 10 and older and in "Device only" mode.
     pub fn new(
         serial: String,
         transport_id: Option<u64>,
         name: String,
         server: Arc<Vec<u8>>,
         shared: Arc<Shared>,
-        audio_supported: bool,
+        options: VideoOptions,
     ) -> Self {
         shared.set(|s| {
             *s = Status {
@@ -240,10 +374,7 @@ impl DeviceSource {
             serial,
             transport_id,
             server,
-            options: VideoOptions {
-                audio: audio_supported && AUDIO_TO_PC.load(Relaxed),
-                ..VideoOptions::default()
-            },
+            options,
             shared,
             failures: 0,
         }
@@ -251,6 +382,16 @@ impl DeviceSource {
 
     fn fail(&mut self, e: String) {
         log::warn!("android: {e}");
+        // Bounded fallback: a phone without an H.265 encoder (the server
+        // stops with an error) or a stream that does not decode goes back to
+        // H.264, the codec every Android device has.
+        if self.options.codec != "h264" {
+            log::warn!(
+                "android: {} failed; falling back to h264",
+                self.options.codec
+            );
+            self.options.codec = "h264";
+        }
         self.failures += 1;
         let gave_up = self.failures >= MAX_FAILURES;
         self.shared.set(|s| {
@@ -304,9 +445,11 @@ impl VideoSource for DeviceSource {
         let Mirror {
             video,
             audio,
+            control,
             session,
             ..
         } = m;
+        *self.shared.control.lock().unwrap() = control;
         if let Some(a) = audio {
             play_audio(a, self.shared.clone());
         }
@@ -324,6 +467,75 @@ impl VideoSource for DeviceSource {
     fn finished(&self) -> bool {
         self.shared.stop.load(Relaxed) || self.failures >= MAX_FAILURES
     }
+}
+
+/// What a key press in the window does on the device.
+#[derive(Debug, PartialEq)]
+pub enum KeyInput {
+    Send(Vec<Control>),
+    /// Ctrl+V: paste the PC clipboard.
+    Paste,
+    /// Not for the device (the window keeps it).
+    Ignore,
+}
+
+/// Maps a Slint key press (its `text` and modifiers) like scrcpy's default
+/// keyboard: printable text is injected as text, editing and navigation
+/// keys as Android key codes, Ctrl+letter as a key with Ctrl (copy, cut,
+/// select all, undo), Ctrl+V pastes the PC clipboard.
+pub fn key_input(text: &str, ctrl: bool, shift: bool, alt: bool) -> KeyInput {
+    let mut chars = text.chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        return KeyInput::Ignore;
+    };
+    let mut m = 0;
+    if ctrl {
+        m |= meta::CTRL_ON;
+    }
+    if shift {
+        m |= meta::SHIFT_ON;
+    }
+    if alt {
+        m |= meta::ALT_ON;
+    }
+    // Slint's key codes: control characters and private-use code points.
+    let code = match c {
+        '\u{8}' => Some(keycode::DEL),
+        '\u{7f}' => Some(keycode::FORWARD_DEL),
+        '\t' => Some(keycode::TAB),
+        '\n' | '\r' => Some(keycode::ENTER),
+        '\u{1b}' => Some(keycode::ESCAPE),
+        '\u{F700}' => Some(keycode::DPAD_UP),
+        '\u{F701}' => Some(keycode::DPAD_DOWN),
+        '\u{F702}' => Some(keycode::DPAD_LEFT),
+        '\u{F703}' => Some(keycode::DPAD_RIGHT),
+        '\u{F729}' => Some(keycode::MOVE_HOME),
+        '\u{F72B}' => Some(keycode::MOVE_END),
+        '\u{F72C}' => Some(keycode::PAGE_UP),
+        '\u{F72D}' => Some(keycode::PAGE_DOWN),
+        _ => None,
+    };
+    if let Some(k) = code {
+        return KeyInput::Send(Control::key_tap(k, m).to_vec());
+    }
+    if c.is_control() || ('\u{F700}'..='\u{F8FF}').contains(&c) {
+        return KeyInput::Ignore; // modifiers alone, F-keys, ...
+    }
+    if ctrl {
+        let l = c.to_ascii_lowercase();
+        if l == 'v' {
+            return KeyInput::Paste;
+        }
+        if l.is_ascii_lowercase() {
+            let k = keycode::A + (l as i32 - 'a' as i32);
+            return KeyInput::Send(Control::key_tap(k, m).to_vec());
+        }
+        return KeyInput::Ignore;
+    }
+    if alt {
+        return KeyInput::Ignore;
+    }
+    KeyInput::Send(vec![Control::Text(c.to_string())])
 }
 
 /// Plays the audio socket until it closes (stop, unplug). Without a working
@@ -554,13 +766,16 @@ mod tests {
 
     #[test]
     fn packets_become_decoder_records() {
-        assert!(to_record(Packet::Session {
-            width: 1,
-            height: 2,
-            client_resized: false
-        })
+        assert!(to_record(
+            CODEC_H264,
+            Packet::Session {
+                width: 1,
+                height: 2,
+                client_resized: false
+            }
+        )
         .is_none());
-        match to_record(Packet::Config(CONFIG.to_vec())) {
+        match to_record(CODEC_H264, Packet::Config(CONFIG.to_vec())) {
             Some(Record::Config(c)) => {
                 assert_eq!(c.codec, Codec::H264);
                 assert_eq!(&c.description[..4], &[1, 0x42, 0xc0, 0x1f]);
@@ -568,11 +783,14 @@ mod tests {
             }
             r => panic!("{r:?}"),
         }
-        match to_record(Packet::Media {
-            pts: 0,
-            key: true,
-            data: vec![0, 0, 0, 1, 0x65, 1, 2],
-        }) {
+        match to_record(
+            CODEC_H264,
+            Packet::Media {
+                pts: 0,
+                key: true,
+                data: vec![0, 0, 0, 1, 0x65, 1, 2],
+            },
+        ) {
             Some(Record::Frame { key, rebuild, data }) => {
                 assert!(key && !rebuild);
                 assert_eq!(data, [0, 0, 0, 3, 0x65, 1, 2]);
@@ -703,11 +921,116 @@ mod tests {
     }
 
     #[test]
-    fn other_codecs_are_refused_for_now() {
+    fn keys_map_like_scrcpy() {
+        assert_eq!(
+            key_input("a", false, false, false),
+            KeyInput::Send(vec![Control::Text("a".into())])
+        );
+        assert_eq!(
+            key_input("A", false, true, false),
+            KeyInput::Send(vec![Control::Text("A".into())])
+        );
+        assert_eq!(
+            key_input("\u{8}", false, false, false),
+            KeyInput::Send(Control::key_tap(keycode::DEL, 0).to_vec())
+        );
+        assert_eq!(
+            key_input("\n", false, false, false),
+            KeyInput::Send(Control::key_tap(keycode::ENTER, 0).to_vec())
+        );
+        assert_eq!(
+            key_input("\u{F702}", false, true, false),
+            KeyInput::Send(Control::key_tap(keycode::DPAD_LEFT, meta::SHIFT_ON).to_vec())
+        );
+        assert_eq!(
+            key_input("c", true, false, false),
+            KeyInput::Send(Control::key_tap(keycode::A + 2, meta::CTRL_ON).to_vec())
+        );
+        assert_eq!(key_input("v", true, false, false), KeyInput::Paste);
+        assert_eq!(
+            key_input("\u{10}", false, true, false),
+            KeyInput::Ignore,
+            "Shift alone"
+        );
+        assert_eq!(
+            key_input("\u{F704}", false, false, false),
+            KeyInput::Ignore,
+            "F1"
+        );
+        assert_eq!(key_input("", false, false, false), KeyInput::Ignore);
+    }
+
+    #[test]
+    fn control_goes_to_the_socket_in_frame_pixels() {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let tx = TcpStream::connect(l.local_addr().unwrap()).unwrap();
+        let (mut rx, _) = l.accept().unwrap();
+        let shared = Shared::default();
+        *shared.control.lock().unwrap() = Some(tx);
+        shared.pointer(PointerEvent::Down(0.5, 0.5), 0);
+        // No frame size yet: nothing is sent.
+        shared.set_frame(1080, 1920);
+        shared.pointer(PointerEvent::Down(0.5, 0.25), 0);
+        assert!(shared.action("home"));
+        assert!(!shared.action("mute"));
+        let mut b = vec![0u8; 32 + 2 * 14];
+        rx.read_exact(&mut b).unwrap();
+        assert_eq!(&b[..2], &[2, 0], "touch down");
+        assert_eq!(&b[10..14], &540i32.to_be_bytes());
+        assert_eq!(&b[14..18], &480i32.to_be_bytes());
+        assert_eq!(&b[32..34], &[0, 0], "HOME key down");
+        assert_eq!(&b[36..38], &[0, 3]);
+        // 90 degrees: the same mapping as the Apple touch path (device_point).
+        let mut b = vec![0u8; 32];
+        shared.pointer(PointerEvent::Up(1.0, 0.5), 90);
+        rx.read_exact(&mut b).unwrap();
+        assert_eq!(&b[10..14], &540i32.to_be_bytes());
+        assert_eq!(&b[14..18], &0i32.to_be_bytes());
+        shared.stop();
+        shared.pointer(PointerEvent::Down(0.1, 0.1), 0);
+        assert!(shared.control.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn av1_is_refused_for_now() {
         let mut w = Vec::new();
-        w.extend_from_slice(&zenlink_android::mirror::CODEC_H265.to_be_bytes());
+        w.extend_from_slice(&zenlink_android::mirror::CODEC_AV1.to_be_bytes());
         let mut v = VideoReader::new(&w[..]).unwrap();
         assert!(first_config(&mut v).is_err());
+    }
+
+    #[test]
+    fn h265_config_becomes_an_hvcc_record() {
+        let mut config = vec![0, 0, 0, 1, 0x40, 0x01, 0x0c, 0x01];
+        config.extend_from_slice(&[
+            0, 0, 0, 1, 0x42, 0x01, 0x01, 0x01, 0x60, 0, 0, 0, 0xb0, 0, 0, 0, 0, 0, 0x5d, 0xa0,
+        ]);
+        config.extend_from_slice(&[0, 0, 0, 1, 0x44, 0x01, 0xc1, 0x72]);
+        let mut w = Vec::new();
+        w.extend_from_slice(&CODEC_H265.to_be_bytes());
+        write_packet(&mut w, &Packet::Config(config)).unwrap();
+        let mut v = VideoReader::new(&w[..]).unwrap();
+        let info = first_config(&mut v).unwrap();
+        assert_eq!(info.codec, Codec::Hevc);
+        assert_eq!(info.description[22], 3, "VPS, SPS, PPS arrays");
+    }
+
+    #[test]
+    fn failed_h265_falls_back_to_h264() {
+        let shared = Arc::new(Shared::default());
+        let mut src = DeviceSource::new(
+            "x".into(),
+            None,
+            "x".into(),
+            Arc::new(Vec::new()),
+            shared,
+            VideoOptions {
+                codec: "h265",
+                ..VideoOptions::default()
+            },
+        );
+        src.fail("encoder".into());
+        assert_eq!(src.options.codec, "h264");
     }
 
     #[test]
