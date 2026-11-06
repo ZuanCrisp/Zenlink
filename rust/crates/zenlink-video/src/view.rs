@@ -68,6 +68,9 @@ struct Inner {
     /// (see `set_bounds`).
     resized: Mutex<(u64, u64)>,
     resized_cv: Condvar,
+    /// Latest resize request (a copy of `resized.0`), read by the render
+    /// thread while it holds the ring lock (no lock-order inversion).
+    resize_asked: std::sync::atomic::AtomicU64,
 }
 
 impl Inner {
@@ -349,6 +352,7 @@ impl VideoView {
             crop: Default::default(),
             resized: Mutex::new((0, 0)),
             resized_cv: Condvar::new(),
+            resize_asked: std::sync::atomic::AtomicU64::new(0),
         });
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, Arc::as_ptr(&inner) as isize) };
         let meter = Mutex::new(RateMeter::new(&inner.stats));
@@ -426,13 +430,30 @@ impl VideoView {
         let mut g = self.inner.resized.lock().unwrap();
         g.0 += 1;
         let want = g.0;
+        drop(g);
+        self.inner.resize_asked.store(want, Relaxed);
+        // Wake a render thread that waits for a frame (take the ring lock so
+        // the wake-up cannot fall between its check and its wait).
+        {
+            let r = self.inner.ring.lock().unwrap();
+            r.arrived.notify_all();
+        }
+        let mut g = self.inner.resized.lock().unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(120);
+        let asked_at = std::time::Instant::now();
         while g.1 < want {
             let left = deadline.saturating_duration_since(std::time::Instant::now());
             if left.is_zero() {
+                log::warn!("view: resize not presented within 120 ms (OBS may lose the capture)");
                 break;
             }
             g = self.inner.resized_cv.wait_timeout(g, left).unwrap().0;
+        }
+        if std::env::var_os("ZL_STATS_LOG").is_some() {
+            log::info!(
+                "view: resize handshake {:.1} ms",
+                asked_at.elapsed().as_secs_f32() * 1000.0
+            );
         }
     }
 
@@ -585,6 +606,193 @@ fn make_processor(gpu: &Gpu, iw: u32, ih: u32, ow: u32, oh: u32) -> Result<Proce
     }
 }
 
+/// Present pacing probe (ZL_STATS_LOG): what an OBS Game Capture hook sees,
+/// since the hook copies the back buffer only inside `Present`.
+#[derive(Default)]
+struct PacingProbe {
+    on: bool,
+    since: Option<std::time::Instant>,
+    last_present: Option<std::time::Instant>,
+    last_new: Option<std::time::Instant>,
+    /// µs between Present calls returning.
+    gaps: Vec<u32>,
+    /// µs between presents that showed a new picture.
+    new_gaps: Vec<u32>,
+    wait_max: u32,
+    work_max: u32,
+    present_max: u32,
+    /// Every present: (time, frame number shown).
+    shown: Vec<(std::time::Instant, u64)>,
+    /// Every frame: (frame number, decode-ready time), first time shown.
+    ready: Vec<(u64, std::time::Instant)>,
+    /// µs from decode-ready to its first present.
+    delay: Vec<u32>,
+}
+
+/// OBS Game Capture model, from obs-studio `graphics-hook.h`: the hook
+/// copies the back buffer inside a Present when `frame_ready(interval)`
+/// allows it (default interval = half the OBS frame time), and OBS renders
+/// the latest copy on its own clock. Returns (repeated, skipped) frames for
+/// an OBS output at `obs_fps`, given presents `(time, frame)`, and the same
+/// for a capture that saw every frame the moment it was decoded. OBS's clock
+/// has no fixed phase to the video, so the counts are averaged over 32
+/// phases (x10, to keep one decimal).
+fn obs_model(
+    shown: &[(std::time::Instant, u64)],
+    ready: &[(u64, std::time::Instant)],
+    obs_fps: f64,
+) -> ((u32, u32), (u32, u32)) {
+    let Some(&(t0, _)) = shown.first() else {
+        return ((0, 0), (0, 0));
+    };
+    let tick = 1.0 / obs_fps;
+    let interval = tick / 2.0;
+    let secs = |t: std::time::Instant| t.saturating_duration_since(t0).as_secs_f64();
+    // Copies the hook makes: (time, frame).
+    let mut copies = Vec::new();
+    let mut last = f64::NEG_INFINITY;
+    for &(t, f) in shown {
+        let t = secs(t);
+        let elapsed = t - last;
+        if elapsed >= interval {
+            last = if elapsed > interval * 2.0 {
+                t
+            } else {
+                last + interval
+            };
+            copies.push((t, f));
+        }
+    }
+    let ideal: Vec<(f64, u64)> = ready.iter().map(|&(f, t)| (secs(t), f)).collect();
+    let count_at = |events: &[(f64, u64)], phase: f64| -> (u32, u32) {
+        let end = events.last().map_or(0.0, |e| e.0);
+        let (mut rep, mut skip) = (0, 0);
+        let mut prev: Option<u64> = None;
+        let mut i = 0;
+        let mut cur = None;
+        let mut k = 1.0;
+        while k * tick + phase <= end {
+            let at = k * tick + phase;
+            while i < events.len() && events[i].0 <= at {
+                cur = Some(events[i].1);
+                i += 1;
+            }
+            if let (Some(p), Some(c)) = (prev, cur) {
+                if c == p {
+                    rep += 1;
+                } else if c > p + 1 {
+                    skip += (c - p - 1) as u32;
+                }
+            }
+            prev = cur;
+            k += 1.0;
+        }
+        (rep, skip)
+    };
+    let count = |events: &[(f64, u64)]| -> (u32, u32) {
+        let (mut r, mut s) = (0, 0);
+        for n in 0..32 {
+            let (a, b) = count_at(events, tick * n as f64 / 32.0);
+            r += a;
+            s += b;
+        }
+        (r * 10 / 32, s * 10 / 32)
+    };
+    (count(&copies), count(&ideal))
+}
+
+impl PacingProbe {
+    fn new() -> Self {
+        Self {
+            on: std::env::var_os("ZL_STATS_LOG").is_some(),
+            ..Default::default()
+        }
+    }
+
+    fn record(
+        &mut self,
+        wait_us: u32,
+        work_us: u32,
+        present_us: u32,
+        new_frame: bool,
+        frame: (u64, Option<std::time::Instant>),
+    ) {
+        if !self.on {
+            return;
+        }
+        let now = std::time::Instant::now();
+        if frame.0 > 0 {
+            self.shown.push((now, frame.0));
+            if new_frame {
+                if let Some(r) = frame.1 {
+                    self.ready.push((frame.0, r));
+                    self.delay.push((now - r).as_micros() as u32);
+                }
+            }
+        }
+        if let Some(l) = self.last_present.replace(now) {
+            self.gaps.push((now - l).as_micros() as u32);
+        }
+        if new_frame {
+            if let Some(l) = self.last_new.replace(now) {
+                self.new_gaps.push((now - l).as_micros() as u32);
+            }
+        }
+        self.wait_max = self.wait_max.max(wait_us);
+        self.work_max = self.work_max.max(work_us);
+        self.present_max = self.present_max.max(present_us);
+        let since = *self.since.get_or_insert(now);
+        if now - since < std::time::Duration::from_secs(1) || self.gaps.is_empty() {
+            return;
+        }
+        let pct = |v: &mut Vec<u32>, q: f32| -> u32 {
+            if v.is_empty() {
+                return 0;
+            }
+            v.sort_unstable();
+            v[((v.len() - 1) as f32 * q) as usize]
+        };
+        let p50 = pct(&mut self.gaps, 0.5);
+        let long = self.gaps.iter().filter(|&&g| g * 2 > p50 * 3).count();
+        let n50 = pct(&mut self.new_gaps, 0.5);
+        let nlong = self.new_gaps.iter().filter(|&&g| g * 2 > n50 * 3).count();
+        let ((rep, skip), (irep, iskip)) = obs_model(&self.shown, &self.ready, 60.0);
+        log::info!(
+            "obs-model 60fps (avg of 32 phases): capture repeated={:.1} skipped={:.1} | frames at decode time repeated={:.1} skipped={:.1} | decode-to-present p50={:.2}ms max={:.2}ms",
+            rep as f32 / 10.0,
+            skip as f32 / 10.0,
+            irep as f32 / 10.0,
+            iskip as f32 / 10.0,
+            pct(&mut self.delay, 0.5) as f32 / 1000.0,
+            pct(&mut self.delay, 1.0) as f32 / 1000.0,
+        );
+        self.shown.clear();
+        self.ready.clear();
+        self.delay.clear();
+        log::info!(
+            "pacing presents={} gap p50={:.2}ms p99={:.2}ms max={:.2}ms long={} | new frames={} gap p50={:.2}ms max={:.2}ms long={} | wait max={:.2}ms work max={:.2}ms present max={:.2}ms",
+            self.gaps.len(),
+            p50 as f32 / 1000.0,
+            pct(&mut self.gaps, 0.99) as f32 / 1000.0,
+            pct(&mut self.gaps, 1.0) as f32 / 1000.0,
+            long,
+            self.new_gaps.len(),
+            n50 as f32 / 1000.0,
+            pct(&mut self.new_gaps, 1.0) as f32 / 1000.0,
+            nlong,
+            self.wait_max as f32 / 1000.0,
+            self.work_max as f32 / 1000.0,
+            self.present_max as f32 / 1000.0,
+        );
+        self.since = Some(now);
+        self.gaps.clear();
+        self.new_gaps.clear();
+        self.wait_max = 0;
+        self.work_max = 0;
+        self.present_max = 0;
+    }
+}
+
 fn render_loop(inner: &Inner) -> Result<()> {
     // A failed swap chain / processor step used to end this thread, which
     // froze the picture (seen after changing fit or rotation). Start over
@@ -636,9 +844,41 @@ fn render_session(inner: &Inner) -> Result<()> {
         let waitable: HANDLE = sc.GetFrameLatencyWaitableObject();
         let mut proc_: Option<Processor> = None;
         let mut shown_seq = u64::MAX;
+        let mut probe = PacingProbe::new();
+        // ZL_PRESENT=vblank: the v2.2.31 behaviour (present every refresh,
+        // new frames only at a refresh), for A/B measurements.
+        let on_arrival = std::env::var("ZL_PRESENT").map_or(true, |v| v != "vblank");
+        let mut handled_resize = 0u64;
 
         while !inner.stop_render.load(Relaxed) {
+            let t_wait = std::time::Instant::now();
             WaitForSingleObjectEx(waitable, 100, true);
+            if on_arrival {
+                // The swap chain has room for one present. Present the next
+                // frame the moment it is decoded rather than at the next
+                // refresh: the screen still shows at most one new frame per
+                // refresh (the waitable above), but whatever copies the
+                // back buffer at Present (OBS Game Capture) gets each frame
+                // at its real time instead of rounded to the refresh. Idle:
+                // present at least every 50 ms (resize handshake, OBS hook).
+                let mut r = inner.ring.lock().unwrap();
+                let cv = r.arrived.clone();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
+                while r.queue.is_empty()
+                    && !inner.stop_render.load(Relaxed)
+                    && inner.resize_asked.load(Relaxed) == handled_resize
+                {
+                    let left = deadline.saturating_duration_since(std::time::Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    r = cv.wait_timeout(r, left).unwrap().0;
+                }
+                handled_resize = inner.resize_asked.load(Relaxed);
+            }
+            let t_work = std::time::Instant::now();
+            let mut new_frame = false;
+            let mut shown_frame: (u64, Option<std::time::Instant>) = (0, None);
             // Size changes asked for up to now (read before the size, so a
             // newer one is not reported as shown).
             let asked = inner.resized.lock().unwrap().0;
@@ -671,7 +911,11 @@ fn render_session(inner: &Inner) -> Result<()> {
                     inner.stats.replaced.fetch_add(skipped, Relaxed);
                 }
                 match slot.and_then(|i| r.slots[i].as_ref()) {
-                    Some(s) => Some((s.tex.clone(), s.w, s.h, s.src, r.seq)),
+                    Some(s) => {
+                        let (n, ready) = slot.map_or((0, None), |i| r.meta[i]);
+                        shown_frame = (n, ready);
+                        Some((s.tex.clone(), s.w, s.h, s.src, r.seq))
+                    }
                     None => None,
                 }
             };
@@ -796,6 +1040,7 @@ fn render_session(inner: &Inner) -> Result<()> {
                     }
                     if seq != shown_seq {
                         shown_seq = seq;
+                        new_frame = true;
                     }
                 }
                 None => {
@@ -808,9 +1053,19 @@ fn render_session(inner: &Inner) -> Result<()> {
                 }
             }
             drop(back);
+            let t_present = std::time::Instant::now();
             if sc.Present(1, DXGI_PRESENT(0)).is_ok() {
                 inner.stats.presented.fetch_add(1, Relaxed);
             }
+            let us = |a: std::time::Instant, b: std::time::Instant| (b - a).as_micros() as u32;
+            let t_end = std::time::Instant::now();
+            probe.record(
+                us(t_wait, t_work),
+                us(t_work, t_present),
+                us(t_present, t_end),
+                new_frame,
+                shown_frame,
+            );
             let mut g = inner.resized.lock().unwrap();
             if g.1 < asked {
                 g.1 = asked;

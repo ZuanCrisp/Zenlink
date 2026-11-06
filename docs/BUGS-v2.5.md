@@ -1,6 +1,6 @@
 # ZenLink v2.5 Beta: bug tracker
 
-Current phase: **A4 part 2 (Android settings and controls) done; next: B-17 OBS audit, then A5**, see `docs/ROADMAP.md`.
+Current phase: **A4 part 2 (Android settings and controls) and the B-17 OBS pacing fix done; next A5**, see `docs/ROADMAP.md`.
 
 Rules: `AGENTS.md` §7. A bug is "verified" only with evidence (a passing test, a
 measurement, or the user's confirmation on a named device). Otherwise it is
@@ -128,11 +128,20 @@ measurement, or the user's confirmation on a named device). Otherwise it is
   - Measured on the developer's PC, default output, silence (muted): WASAPI output latency 23.4 ms (v2.2.31 measured ~22-23 ms), 0 underruns in 2 s; socket to output with 10 ms packets in real time: 53 ms total (queue + output).
   - Unverified: sound from a real phone (TECNO POVA 6, Android 15) on USB, Bluetooth headsets, Android 10 (video-only fallback) on a device.
 
-### B-17: OBS Game Capture is less smooth than the ZenLink window            Status: open
-- Reported: 2026-11-07 by the user, forwarding a ZenLink Studio (Apple) user's report: the mirror in the app is smooth, but OBS Game Capture shows frame drops ("tetep ga 1:1 sama yang di hasil mirror ... tetep ada frame drop kalau di obs, cuma ga se sering yang v sblmnya"). The capture itself works after a laptop restart. Applies to every mode (Apple Driver, ZenLink Studio, Android), since all render through `zenlink-video`.
-- Cause: not yet known. To be audited with evidence (renderer present pacing, OBS hook behaviour, swap chain settings); no guessing.
-- Fix: n/a.
-- Verification: unverified.
+### B-17: OBS Game Capture is less smooth than the ZenLink window            Status: fixed (unverified)
+- Reported: 2026-11-07 by the user, forwarding a ZenLink Studio (Apple) user's report: the mirror in the app is smooth, but OBS Game Capture shows frame drops ("tetep ga 1:1 sama yang di hasil mirror ... tetep ada frame drop kalau di obs, cuma ga se sering yang v sblmnya"). Applies to every mode (Apple Driver, ZenLink Studio, Android): all of them render through `zenlink-video` `VideoView`.
+- Cause (measured, developer PC: AMD RX 6700 XT, 2560x1440 at 170 Hz; Android fixtures at 15/30/60 fps through the real renderer, `ZL_STATS_LOG=1` pacing probe):
+  - OBS's graphics hook copies the back buffer only inside `Present`, at most once per `frame_interval` (obs-studio `graphics-hook.h` `frame_ready`/`capture_ready`; `game-capture.c`: interval = OBS frame time, halved unless "Limit capture framerate" is on). OBS then renders the latest copy on its own clock.
+  - The renderer presented once per refresh and took a new frame only at the next refresh. A decoded frame therefore reached `Present` 0 to 1 refresh late (decode-to-present p50 3.5 ms, max 11.7 ms at 170 Hz; up to 16.7 ms on a 60 Hz laptop). 60 fps content was presented at 2/3/4-refresh gaps (p50 17.64 ms, max 23.65 ms) instead of 16.7 ms. On screen the eye does not see it, but the hook samples that jittered timing and OBS samples it a second time at 60 fps, so frames repeat and drop in the recording.
+  - Also measured, not the cause: 15-20 presents per second wait one extra refresh on the swap chain's waitable object (work <= 0.3 ms, Present <= 0.5 ms). It does not change with 2 or 3 buffers, frame latency 1 or 2, the animated background on or off, or content at 15, 30 or 60 fps, so it is outside the renderer (DWM composition).
+- Fix (`zenlink-video` `view.rs`, `d3d.rs`): after the swap chain has room (frame-latency waitable, unchanged: still at most one new frame per refresh, FIFO order, no "newest wins"), the render thread waits for the next decoded frame (`Ring::arrived` condvar, signalled by `Ring::push`) and presents it at once. Idle, it presents at least every 50 ms; a resize request wakes it at once (OBS re-hook handshake, AGENTS section 5 item 1). `ZL_PRESENT=vblank` restores the old behaviour for A/B tests. The probe logs `pacing ...` and an `obs-model ...` line once a second with `ZL_STATS_LOG=1`.
+- Verification (measured, same PC, 20 s per run):
+  - Decode-to-present: p50 3.5 ms -> 0.3 ms; max 11.7 ms -> 0.5 ms (60 fps).
+  - New-frame present gaps at 60 fps: p50 17.64 / max 23.65 ms -> p50 16.70 / max 17.44 ms. Frames dropped by catch-up: 6 -> 0. Presents per second: ~150 -> content rate (60).
+  - OBS model at 60 fps output (the hook rules above, averaged over 32 clock phases): ZenLink-added repeats/skips per second 14.6/3.1 -> 1.3/0.2 (capture 16.9/5.3 -> 4.3/0.6; the floor for frames captured exactly at decode time is 2.3-3.0/0.4-2.2, the beat between two 60 Hz clocks).
+  - Resize handshake: 7.9-104 ms -> 1.5-3.8 ms, no 120 ms timeouts.
+  - Tests: `push_wakes_a_waiting_renderer_and_records_the_frame` plus the existing ring tests.
+  - Unverified: real OBS Game Capture on the user's or tester's PC (Apple and Android), a 60 Hz laptop, a laptop with two GPUs (OBS and ZenLink on different GPUs adds a cross-adapter copy; ask for the GPU names if it still stutters), the Apple path end to end (same renderer code, not run with the fake backend this time).
 
 ### B-18: "Device only" sound did nothing during an Android session            Status: fixed (unverified)
 - Reported: 2026-11-07 by the user ("mode audio hanya perangkat belum"): switching Settings › Audio to "Device only" while mirroring kept the sound on the PC.

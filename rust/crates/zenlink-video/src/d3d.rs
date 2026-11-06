@@ -127,6 +127,11 @@ pub struct Ring {
     pub showing: Option<usize>,
     pub seq: u64,
     behind_since: Option<std::time::Instant>,
+    /// Signalled on every push: the render thread presents a new frame as
+    /// soon as it is decoded instead of at the next refresh (B-17).
+    pub arrived: std::sync::Arc<std::sync::Condvar>,
+    /// Per slot: push number and decode-ready time (pacing measurements).
+    pub meta: [(u64, Option<std::time::Instant>); SLOTS],
 }
 
 unsafe impl Send for Ring {}
@@ -156,6 +161,10 @@ impl Ring {
         self.queue.retain(|&i| i != idx);
         self.queue.push_back(idx);
         self.seq += 1;
+        if let Some(m) = self.meta.get_mut(idx) {
+            *m = (self.seq, Some(std::time::Instant::now()));
+        }
+        self.arrived.notify_all();
         let mut dropped = 0;
         while self.queue.len() > MAX_QUEUE {
             self.queue.pop_front();
@@ -253,6 +262,32 @@ mod ring_tests {
         let (_, skipped) = r.next();
         assert_eq!(skipped, 1);
         assert_eq!(r.queue.len(), 1);
+    }
+
+    #[test]
+    fn push_wakes_a_waiting_renderer_and_records_the_frame() {
+        let ring = std::sync::Arc::new(Mutex::new(Ring::default()));
+        let r2 = ring.clone();
+        let waiter = std::thread::spawn(move || {
+            let mut g = r2.lock().unwrap();
+            let cv = g.arrived.clone();
+            let t = std::time::Instant::now();
+            while g.queue.is_empty() && t.elapsed() < std::time::Duration::from_secs(2) {
+                g = cv
+                    .wait_timeout(g, std::time::Duration::from_secs(2))
+                    .unwrap()
+                    .0;
+            }
+            t.elapsed()
+        });
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let mut g = ring.lock().unwrap();
+        let (i, _) = g.free_slot();
+        g.push(i);
+        assert_eq!(g.meta[i].0, 1);
+        assert!(g.meta[i].1.is_some());
+        drop(g);
+        assert!(waiter.join().unwrap() < std::time::Duration::from_millis(1000));
     }
 
     #[test]
