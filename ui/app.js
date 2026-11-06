@@ -362,7 +362,7 @@ const FLOW_TEXT = {
     ["Start stream", "Receiving the screen in HEVC"],
   ],
   airplay: [
-    ["Device connected", "Your iPhone/iPad chose ZenLinkStudio in Screen Mirroring"],
+    ["Device connected", "Your iPhone/iPad chose ZenLinkStudioBeta in Screen Mirroring"],
     ["Secure connection", "AirPlay pairing and FairPlay key exchange"],
     ["Receive video", "Decrypting the AirPlay stream"],
     ["Start stream", "Receiving the screen over Wi-Fi"],

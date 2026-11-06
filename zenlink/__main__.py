@@ -61,7 +61,7 @@ ICON = APP_ROOT / "assets" / "zenlink.ico"
 def _app_id() -> None:
     """Own taskbar group (and icon) instead of python's."""
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ZenLink")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ZenLink.Beta")
     except Exception:
         pass
 
@@ -129,7 +129,7 @@ def main() -> None:
         try:
             import ctypes
 
-            ctypes.windll.user32.MessageBoxW(None, msg, "ZenLink", 0x10)
+            ctypes.windll.user32.MessageBoxW(None, msg, "ZenLink Beta", 0x10)
         except Exception:  # noqa: BLE001
             pass
         sys.exit(msg)
@@ -147,7 +147,7 @@ def main() -> None:
 
     api = WindowApi()
     window = webview.create_window(
-        "ZenLink",
+        "ZenLink Beta",
         f"http://{HOST}:{PORT}/",
         js_api=api,
         width=1180,

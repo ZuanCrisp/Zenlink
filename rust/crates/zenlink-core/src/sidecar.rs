@@ -18,12 +18,11 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[cfg(feature = "embedded-backend")]
 static EMBEDDED: &[u8] = include_bytes!(env!("ZENLINK_BACKEND_EXE"));
 
-/// Unpack the packed backend to %LOCALAPPDATA%\ZenLink\service once per
+/// Unpack the packed backend to %LOCALAPPDATA%\ZenLink-Beta\service once per
 /// version, and return its path.
 #[cfg(feature = "embedded-backend")]
 fn unpack_embedded() -> Option<PathBuf> {
-    let base = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
-    let dir = base.join("ZenLink").join("service");
+    let dir = crate::local_data_dir()?.join("service");
     let path = dir.join(format!("ZenLinkService-{}-{}.exe", env!("CARGO_PKG_VERSION"), EMBEDDED.len()));
     if std::fs::metadata(&path).map(|m| m.len() == EMBEDDED.len() as u64).unwrap_or(false) {
         return Some(path);

@@ -45,7 +45,7 @@
 | Feature | Description |
 | :--- | :--- |
 | **🔌 Two connection modes** | Choose before anything connects: **Apple Driver** (Apple's own driver, full control) or **ZenLink Studio** (for live streaming, like TikTok LIVE Studio). Each offers **Kabel** or **Nirkabel (Wi-Fi)**. "Remember my choice" skips the question next time. |
-| **📡 ZenLink Studio over Wi-Fi (AirPlay)** | ZenLink is an AirPlay receiver: on the iPhone/iPad open **Control Center → Screen Mirroring → ZenLinkStudio**. No driver, no cable. The device's own stream is passed through untouched (HEVC or H.264, up to its native resolution); the how-to is shown on screen. |
+| **📡 ZenLink Studio over Wi-Fi (AirPlay)** | ZenLink is an AirPlay receiver: on the iPhone/iPad open **Control Center → Screen Mirroring → ZenLinkStudioBeta**. No driver, no cable. The device's own stream is passed through untouched (HEVC or H.264, up to its native resolution); the how-to is shown on screen. |
 | **🎥 ZenLink Studio over the cable** | QuickTime capture over USB in H.264 at the device's full native resolution and high bitrate (measured 2360×1640 on iPad 11th gen, 12–30 Mbps, up to ~56 fps). Picture and sound only. |
 | **📶 Apple Driver over Wi-Fi** | Plug the device in once in Apple mode and ZenLink sets up Wi-Fi by itself; afterwards choose **Nirkabel**. ZenLink finds the device on the network itself, even where Windows gets no Bonjour replies. |
 | **📊 Live stats** | FPS, video delay and audio delay next to the device name (switchable in Settings). |

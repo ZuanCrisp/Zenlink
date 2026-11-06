@@ -208,7 +208,7 @@ const ID = {
   "Device screen dimmed to 0%. The picture here stays full quality. Alt+D restores it.": "Layar perangkat diredupkan ke 0%. Gambar di sini tetap kualitas penuh. Alt+D untuk mengembalikan.",
   "Saved (hidden) — type to replace": "Tersimpan (tersembunyi) — ketik untuk mengganti",
   "Device connected": "Perangkat tersambung",
-  "Your iPhone/iPad chose ZenLinkStudio in Screen Mirroring": "iPhone/iPad kamu memilih ZenLinkStudio di Pencerminan Layar",
+  "Your iPhone/iPad chose ZenLinkStudioBeta in Screen Mirroring": "iPhone/iPad kamu memilih ZenLinkStudioBeta di Pencerminan Layar",
   "Receive video": "Terima video",
   "Decrypting the AirPlay stream": "Mendekripsi stream AirPlay",
   "Receiving the screen over Wi-Fi": "Menerima layar lewat Wi-Fi",

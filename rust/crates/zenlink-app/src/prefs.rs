@@ -1,4 +1,5 @@
-//! Settings, saved as JSON in %APPDATA%\ZenLink\next-prefs.json.
+//! Settings, saved as JSON in %APPDATA%\ZenLink-Beta\next-prefs.json.
+//! The stable v2.2.31 keeps %APPDATA%\ZenLink; the beta never touches it.
 
 use serde_json::{json, Value};
 
@@ -10,7 +11,7 @@ fn path() -> Option<std::path::PathBuf> {
         return Some(p.into());
     }
     let base = std::env::var_os("APPDATA")?;
-    let dir = std::path::Path::new(&base).join("ZenLink");
+    let dir = zenlink_core::data_dir_in(std::path::Path::new(&base));
     let _ = std::fs::create_dir_all(&dir);
     Some(dir.join("next-prefs.json"))
 }

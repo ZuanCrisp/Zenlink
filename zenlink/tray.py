@@ -45,13 +45,13 @@ class Tray:
         image.thumbnail((64, 64))
         casting = lambda: self.manager.state.get("phase") in ("connecting", "activating", "streaming")  # noqa: E731
         menu = pystray.Menu(
-            pystray.MenuItem(lambda _i: "Hide ZenLink" if self.window_api.visible else "Show ZenLink",
+            pystray.MenuItem(lambda _i: "Hide ZenLink Beta" if self.window_api.visible else "Show ZenLink Beta",
                              self._toggle, default=True),
             pystray.MenuItem(lambda _i: "Stop casting" if casting() else "Start casting", self._cast),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Quit ZenLink", self._quit),
+            pystray.MenuItem("Quit ZenLink Beta", self._quit),
         )
-        self.icon = pystray.Icon("ZenLink", image, "ZenLink", menu)
+        self.icon = pystray.Icon("ZenLinkBeta", image, "ZenLink Beta", menu)
 
         def run() -> None:
             try:

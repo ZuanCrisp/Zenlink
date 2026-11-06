@@ -75,7 +75,9 @@ $pyiArgs = @(
     "--exclude-module", "lib2to3"
 )
 # Version resource (Author: Zenvy Zenshiro)
-$parts = ($Version.Split(".") + @("0", "0", "0", "0"))[0..3] -join ", "
+# Numeric part only ("2.5.0-beta.1" -> "2.5.0"): Windows version fields are n.n.n.n.
+$VersionNum = ($Version -split "-")[0]
+$parts = ($VersionNum.Split(".") + @("0", "0", "0", "0"))[0..3] -join ", "
 @"
 VSVersionInfo(
   ffi=FixedFileInfo(filevers=($parts), prodvers=($parts), mask=0x3f, flags=0x0, OS=0x40004,
@@ -88,7 +90,7 @@ VSVersionInfo(
       StringStruct('InternalName', 'ZenLinkService'),
       StringStruct('LegalCopyright', 'Copyright (C) 2026 Zenvy Zenshiro. GPL-3.0-or-later.'),
       StringStruct('OriginalFilename', 'ZenLinkService.exe'),
-      StringStruct('ProductName', 'ZenLink'),
+      StringStruct('ProductName', 'ZenLink Beta'),
       StringStruct('ProductVersion', '$Version')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
@@ -126,7 +128,7 @@ Copy-Item $rustExe $app
 
 Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta
 # Same app as one .exe: it unpacks itself to a temporary folder on start and
-# keeps its settings in %LOCALAPPDATA%\ZenLink.
+# keeps its settings in %LOCALAPPDATA%\ZenLink-Beta.
 $oneArgs = @()
 for ($i = 0; $i -lt $pyiArgs.Count; $i++) {
     if ($pyiArgs[$i] -eq "--onedir") { $oneArgs += "--onefile"; continue }
@@ -139,7 +141,7 @@ if ($LASTEXITCODE) { throw "PyInstaller (one file) failed" }
 $service = Join-Path $build "onefile-dist\ZenLinkService.exe"
 Test-FrozenExe $service
 # The Rust ZenLink.exe with that backend packed inside (unpacked to
-# %LOCALAPPDATA%\ZenLink\service on start).
+# %LOCALAPPDATA%\ZenLink-Beta\service on start).
 $env:ZENLINK_BACKEND_EXE = $service
 & cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app --features embedded-backend --target-dir (Join-Path $build "rust-portable")
 Remove-Item Env:ZENLINK_BACKEND_EXE
@@ -153,7 +155,7 @@ $iscc = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($iscc) {
-    & $iscc "/DAppVersion=$Version" "/DSourceDir=$app" "/O$release" "packaging\ZenLink.iss"
+    & $iscc "/DAppVersion=$Version" "/DAppVersionNum=$VersionNum" "/DSourceDir=$app" "/O$release" "packaging\ZenLink.iss"
     if ($LASTEXITCODE) { throw "Inno Setup failed" }
 } else {
     Write-Warning "Inno Setup 6 not found: skipping Setup.exe (winget install JRSoftware.InnoSetup)."

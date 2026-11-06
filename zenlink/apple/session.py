@@ -20,7 +20,7 @@ from . import audio, offer
 log = logging.getLogger(__name__)
 
 STREAM_HOST = "127.0.0.1"
-STREAM_PORT = 47322
+STREAM_PORT = 47422  # beta (stable v2.2.31 uses 47322)
 DISPLAY_SERVICE = "com.apple.coredevice.displayservice"
 
 # SpringBoard interface orientation -> clockwise rotation (deg) the PC applies
