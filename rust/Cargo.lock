@@ -5566,6 +5566,7 @@ name = "zenlink-app"
 version = "2.5.0-beta.1"
 dependencies = [
  "log",
+ "miniz_oxide 0.9.1",
  "serde_json",
  "slint",
  "slint-build",
