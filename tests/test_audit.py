@@ -534,6 +534,64 @@ class NativeAudioTests(unittest.TestCase):
         n._stream = None
 
 
+    def test_large_output_blocks_raise_the_target(self):
+        # MME / Bluetooth pull ~20+ ms per block: the buffer must hold more than one block.
+        from zenlink.audio_out import BYTES_PER_FRAME, NativeAudio
+
+        n = NativeAudio()
+        n.set_jitter_ms(0)
+        n.packet = 480
+        n.block = 2048
+        self.assertGreaterEqual(n._target() // BYTES_PER_FRAME, 480 + 2048)
+        self.assertGreaterEqual(n._margin_cap(), 4096)
+
+
+class SkewMeterTests(unittest.TestCase):
+    """The SKEW answer paces the device's audio, and video players sync to it."""
+
+    def _feed(self, m, seconds, rate=1.0, jitter=0.0, start=(0.0, 0.0), seed=1):
+        import random
+
+        from zenlink.usbdirect.wire import CMTime
+
+        rnd = random.Random(seed)
+        dev0, loc0 = start
+        t = 0.0
+        while t < seconds:
+            dev = dev0 + t
+            loc = loc0 + t * rate + 0.02 + rnd.uniform(0, jitter)  # 20 ms base delay + jitter
+            m.add(CMTime(int(dev * 48000), 48000), CMTime(int(loc * 1e9)))
+            t += 0.02
+        return dev0 + t, loc0 + t * rate
+
+    def test_jittery_arrivals_give_nominal_rate(self):
+        from zenlink.usbdirect.session import SkewMeter
+
+        m = SkewMeter()
+        self.assertEqual(m.rate(), 48000.0)  # too early: nominal
+        self._feed(m, 30, jitter=0.03)
+        self.assertAlmostEqual(m.rate(), 48000.0, delta=48000 * 0.0005)
+
+    def test_measures_real_drift(self):
+        from zenlink.usbdirect.session import SkewMeter
+
+        m = SkewMeter()
+        self._feed(m, 60, rate=1.0005, jitter=0.01)  # host clock 0.05 % faster
+        self.assertAlmostEqual(m.rate(), 48024.0, delta=6)
+
+    def test_clock_jump_starts_over_instead_of_giving_nonsense(self):
+        # Seen on a device: 569543 Hz after the picture changed size.
+        from zenlink.usbdirect.session import SkewMeter
+
+        m = SkewMeter()
+        self._feed(m, 20)
+        self._feed(m, 20, start=(3.0, 25.0))  # device audio timeline restarted
+        r = m.rate()
+        self.assertGreaterEqual(r, 48000 * (1 - SkewMeter.LIMIT))
+        self.assertLessEqual(r, 48000 * (1 + SkewMeter.LIMIT))
+        self.assertAlmostEqual(r, 48000.0, delta=48000 * 0.0005)
+
+
 class DriverScanTests(unittest.TestCase):
     def test_package_scan_is_cached_until_the_inf_folder_changes(self):
         from zenlink.drivers import status

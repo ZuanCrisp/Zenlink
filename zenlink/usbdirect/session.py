@@ -108,6 +108,72 @@ def _is_timeout(error: usb.core.USBError) -> bool:
     return isinstance(error, usb.core.USBTimeoutError) or "timeout" in str(error).lower() or error.errno == 116
 
 
+class SkewMeter:
+    """Rate of the device's audio clock against the host clock, for SKEW.
+
+    The device uses the answer to pace audio, and a video player paces its
+    picture by the audio. The old estimate (first sample vs last sample, by
+    arrival time) took the first packet's delivery delay as drift (48245 Hz
+    after 10 s) and mixed two timelines when the device restarted its audio
+    clock on a picture change (569543 Hz): video playback on the device then
+    stalled and stuttered, while games (no A/V sync) stayed smooth.
+
+    Here each window of WINDOW seconds keeps its earliest arrival (the
+    packet least delayed by USB / the host), the rate is the slope between
+    the first such window and the newest one, a jump in either clock starts
+    over, and the result stays within LIMIT of nominal (real crystals differ
+    by ~0.01 %)."""
+
+    WINDOW = 2.0
+    MIN_SPAN = 6.0
+    LIMIT = 0.002
+    JUMP = 0.5
+
+    def __init__(self) -> None:
+        self.reset()
+
+    def reset(self) -> None:
+        self.scale = 48000
+        self._last: tuple[float, float] | None = None
+        self._first: tuple[float, float] | None = None   # (device s, min offset) of the first window
+        self._win: tuple[float, float, float] | None = None  # (window start, device s, min offset)
+        self._done: tuple[float, float] | None = None    # newest completed window
+
+    def add(self, pts: wire.CMTime, local: wire.CMTime) -> None:
+        if pts.scale:
+            self.scale = pts.scale
+        dev, loc = pts.seconds, local.seconds
+        if self._last is not None:
+            d_dev, d_loc = dev - self._last[0], loc - self._last[1]
+            if d_dev < 0 or d_loc < 0 or abs(d_dev - d_loc) > self.JUMP:
+                scale = self.scale
+                self.reset()
+                self.scale = scale
+        self._last = (dev, loc)
+        off = loc - dev
+        if self._win is None:
+            self._win = (dev, dev, off)
+        elif dev - self._win[0] >= self.WINDOW:
+            done = (self._win[1], self._win[2])
+            if self._first is None:
+                self._first = done
+            else:
+                self._done = done
+            self._win = (dev, dev, off)
+        elif off < self._win[2]:
+            self._win = (self._win[0], dev, off)
+
+    def rate(self) -> float:
+        nominal = float(self.scale or 48000)
+        if self._first is None or self._done is None:
+            return nominal
+        span = self._done[0] - self._first[0]
+        if span < self.MIN_SPAN:
+            return nominal
+        r = nominal * (span + self._done[1] - self._first[1]) / span
+        return min(max(r, nominal * (1 - self.LIMIT)), nominal * (1 + self.LIMIT))
+
+
 class HostClock:
     """A CMClock running on host time, in nanoseconds."""
 
@@ -140,8 +206,7 @@ class UsbDirectSession:
         self._clock: HostClock | None = None
         self._audio_clock: HostClock | None = None
         self._device_audio_clock = 0
-        self._audio_first: tuple[wire.CMTime, wire.CMTime] | None = None
-        self._audio_last: tuple[wire.CMTime, wire.CMTime] | None = None
+        self._skew_meter = SkewMeter()
         self._pinged = False
         self._streaming = False
         self._mux = None
@@ -569,6 +634,7 @@ class UsbDirectSession:
             device_clock = wire.u64(body)
             self._device_audio_clock = device_clock
             self._audio_clock = HostClock(device_clock + 1000)
+            self._skew_meter.reset()  # new host clock: a new timeline
             w, h = self.display_size
             self._write(wire.hpd1(w, h))
             self._write(wire.hpd1(w, h))
@@ -629,9 +695,8 @@ class UsbDirectSession:
             if fmt is not None:
                 self.info["audio"] = f"{int(fmt.sample_rate)} Hz {fmt.channels} ch {fmt.bits}-bit"
             local = self._audio_clock.now() if self._audio_clock else wire.CMTime()
-            if self._audio_first is None:
-                self._audio_first = (sample.pts, local)
-            self._audio_last = (sample.pts, local)
+            if self._audio_clock is not None:
+                self._skew_meter.add(sample.pts, local)
             if fmt is None or (fmt.channels == 2 and fmt.bits == 16):
                 self.hub.push_audio(sample.data)
         elif sub == wire.RELS:
@@ -639,12 +704,4 @@ class UsbDirectSession:
 
     def _skew(self) -> float:
         """Device audio clock rate measured against the host clock (Hz)."""
-        if not self._audio_first or not self._audio_last:
-            return 48000.0
-        (dev0, loc0), (dev1, loc1) = self._audio_first, self._audio_last
-        local_ns = loc1.value - loc0.value
-        ticks = dev1.value - dev0.value
-        scale = dev0.scale or 48000
-        if local_ns <= 0 or ticks <= 0:
-            return float(scale)
-        return scale * (local_ns / 1e9) / (ticks / scale)
+        return self._skew_meter.rate()

@@ -10,7 +10,11 @@ that the audio callback drains:
   off, never below 10 ms. It used to start at 2.7 ms and shrink every 5 s:
   the margin kept shrinking until the sound broke, then grew again, so the
   sound broke every so often on its own (more often with any backend hiccup);
-* anything queued beyond twice the target is dropped, so sound never trails.
+* anything queued beyond twice the target is dropped, so sound never trails;
+* the output's own block size counts too: MME / Bluetooth outputs pull
+  sound in large blocks, and a target smaller than one block ran dry on
+  every pull and dropped sound in between (measured: gaps every few
+  seconds and up to 286 ms dropped per 5 s at the 50 ms limit).
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ class NativeAudio:
         self._calm_since = time.monotonic()
         self.underruns = 0
         self.dropped_ms = 0.0
+        self.block = 0           # frames: largest block the output asked for
         self._report_at = time.monotonic()
         self._report_gaps = 0
         self._report_dropped = 0.0
@@ -129,6 +134,7 @@ class NativeAudio:
         with self._lock:
             self._buf.clear()
             self._started = False
+            self.block = 0
 
     @property
     def running(self) -> bool:
@@ -144,8 +150,11 @@ class NativeAudio:
             self.margin = max(self.margin, self.floor)
 
     def _target(self) -> int:
-        cap = max(4800, self.floor + 2400)
-        return min(cap, self.packet + max(self.margin, self.floor)) * BYTES_PER_FRAME
+        cap = max(4800, self.floor + 2400, 3 * self.block)
+        return min(cap, self.packet + max(self.margin, self.floor, self.block)) * BYTES_PER_FRAME
+
+    def _margin_cap(self) -> int:
+        return max(1440, self.floor + 2400, 2 * self.block)
 
     def feed(self, pcm: bytes) -> None:
         if self._stream is None or not pcm:
@@ -154,7 +163,7 @@ class NativeAudio:
         with self._lock:
             self.packet = max(frames, int(self.packet * 0.995))
             target = self._target()
-            ceiling = target * 2 + 128 * BYTES_PER_FRAME
+            ceiling = target * 2 + max(128, self.block) * BYTES_PER_FRAME
             if len(self._buf) + len(pcm) > ceiling:
                 drop = min(len(self._buf), len(self._buf) + len(pcm) - target)
                 drop -= drop % BYTES_PER_FRAME
@@ -167,8 +176,8 @@ class NativeAudio:
             if now - self._report_at >= 5.0:
                 gaps, dropped = self.underruns - self._report_gaps, self.dropped_ms - self._report_dropped
                 if gaps or dropped >= 1:
-                    log.info("sound: %d gaps, %.0f ms dropped in %.0f s; margin %.1f ms, queued %.0f ms",
-                             gaps, dropped, now - self._report_at, self.margin / RATE * 1000,
+                    log.info("sound: %d gaps, %.0f ms dropped in %.0f s; margin %.1f ms, output block %.1f ms, queued %.0f ms",
+                             gaps, dropped, now - self._report_at, self.margin / RATE * 1000, self.block / RATE * 1000,
                              len(self._buf) / BYTES_PER_FRAME / RATE * 1000)
                 self._report_at, self._report_gaps, self._report_dropped = now, self.underruns, self.dropped_ms
 
@@ -176,6 +185,8 @@ class NativeAudio:
         need = frames * BYTES_PER_FRAME
         now = time.monotonic()
         with self._lock:
+            if frames > self.block:
+                self.block = frames
             if not self._started and len(self._buf) >= self._target():
                 self._started = True
             if self._started and len(self._buf) >= need:
@@ -186,7 +197,7 @@ class NativeAudio:
                 if self._started:
                     self._started = False
                     self.underruns += 1
-                    self.margin = min(max(1440, self.floor + 2400), self.margin + (480 if self.floor else 240))
+                    self.margin = min(self._margin_cap(), self.margin + (480 if self.floor else 240))
                     self._calm_since = now
             if now - self._calm_since > CALM_S and self.margin > max(MIN_MARGIN, self.floor):
                 self.margin -= 48
