@@ -587,3 +587,13 @@ html.lite .btn-love .hrt { animation: none; filter: none; }
 .cmp tbody tr.grp + tr > * { border-top: 1px solid color-mix(in srgb, var(--text) 8%, transparent); }
 .cmp i.u { color: var(--text-3); background: color-mix(in srgb, var(--text) 6%, transparent); }
 .cmp i.u::before { content: "–"; }
+/* Three hero buttons, full labels, one row: the buttons get more compact
+   as the row gets narrower; on phones they stack. */
+.cta { container-type: inline-size; }
+@container (min-width: 600px) {
+  .cta .btn { padding: 0 18px; gap: 8px; font-size: 14.5px; }
+}
+@container (min-width: 560px) and (max-width: 639px) {
+  .cta .btn { padding: 0 14px; gap: 7px; font-size: 13.5px; }
+  .cta .btn-star .stars { padding: 2px 7px; }
+}
