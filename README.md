@@ -8,7 +8,7 @@
 
 <p align="center">
   <b>iPhone, iPad &amp; Android screen mirroring for Windows</b> — native Rust, hardware-decoded H.264 / H.265, smooth in OBS.<br>
-  Mirror, control and live-stream over the cable or Wi-Fi. No app on Android. Free and open source.
+  60 fps on iPhone &amp; iPad, up to 120 fps on Android. Cable or Wi-Fi. No app on Android. Free and open source.
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
 > ### 🛡️ Tested & Verified Environment
 > - 📱 **Device**: **iPad (11th generation)**, physical device running **iOS 27.0.1**
 > - 💻 **PC**: **Windows 11 Pro**, build 26200, 64-bit
-> - 🚀 **Measured**: ZenLink Studio cable 52–56 fps at 12–30 Mbps; ZenLink Studio AirPlay 3108×2160 at ~46 fps with ~16 ms picture delay; native sound output ~23 ms (WASAPI)
+> - 🚀 **Measured**: 60 fps on iPhone / iPad and up to 120 fps on Android (tested by the developer on real devices); ZenLink Studio cable 52–56 fps at 12–30 Mbps; ZenLink Studio AirPlay 3108×2160 at ~46 fps with ~16 ms picture delay; native sound output ~23 ms (WASAPI)
 
 ---
 
