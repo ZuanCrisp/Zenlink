@@ -1,23 +1,32 @@
-// ZenLink live demo: gestures on a mirrored iPhone 18 Pro Max / iPad Pro.
+// ZenLink live demo: gestures on a mirrored iPhone, iPad, Android phone or
+// Android tablet. A simulation of the app window, not a recording.
 (() => {
   const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
   const app = $("#demo-app"), device = $("#demo-device"), screen = $("#demo-screen");
   if (!app) return;
   const lang = () => (document.documentElement.lang === "en" ? "en" : "id");
   const T = {
-    home: { id: "Home — usap ke atas dari bawah", en: "Home — swipe up from the bottom" },
-    switcher: { id: "App Switcher — Home dua kali", en: "App Switcher — Home twice" },
-    notif: { id: "Notifikasi — usap dari kiri atas", en: "Notifications — swipe from the top left" },
-    cc: { id: "Pusat Kontrol — usap dari kanan atas", en: "Control Center — swipe from the top right" },
+    home: { id: "Home: usap ke atas dari bawah", en: "Home: swipe up from the bottom" },
+    switcher: { id: "App Switcher: Home dua kali", en: "App Switcher: Home twice" },
+    notif: { id: "Notifikasi · <kbd>Alt+N</kbd>", en: "Notifications · <kbd>Alt+N</kbd>" },
+    cc: { id: "Pusat Kontrol · <kbd>Alt+Q</kbd>", en: "Control Center · <kbd>Alt+Q</kbd>" },
     next: { id: "Usap ← halaman berikutnya", en: "Swipe ← next page" },
     prev: { id: "Usap → halaman sebelumnya", en: "Swipe → previous page" },
     volup: { id: "Volume +", en: "Volume +" },
     voldown: { id: "Volume −", en: "Volume −" },
-    lock: { id: "Kunci layar · Alt+L", en: "Lock screen · Alt+L" },
+    lock: { id: "Kunci layar · <kbd>Alt+L</kbd>", en: "Lock screen · <kbd>Alt+L</kbd>" },
     tap: { id: "Klik mouse = sentuhan di layar", en: "Mouse click = a tap on the screen" },
-    type: { id: "Ketik dengan keyboard PC", en: "Type with your PC keyboard" },
-    studio: { id: "Gambar & suara saja — kualitas untuk live", en: "Picture & sound only — quality for live" },
-    closed: { id: "Tekan lagi = tutup (Home)", en: "Press again = close (Home)" },
+    studio: { id: "Gambar & suara saja: kualitas untuk live", en: "Picture & sound only: quality for live" },
+    closed: { id: "Tekan lagi = tutup", en: "Press again = close" },
+    aback: { id: "Kembali · <kbd>Alt+←</kbd>", en: "Back · <kbd>Alt+←</kbd>" },
+    ahome: { id: "Home", en: "Home" },
+    arecents: { id: "Aplikasi terbaru · <kbd>Alt+S</kbd>", en: "Recent apps · <kbd>Alt+S</kbd>" },
+    anotif: { id: "Notifikasi · <kbd>Alt+N</kbd>", en: "Notifications · <kbd>Alt+N</kbd>" },
+    aqs: { id: "Setelan cepat · <kbd>Alt+Q</kbd>", en: "Quick settings · <kbd>Alt+Q</kbd>" },
+    avolup: { id: "Volume + · <kbd>Alt+↑</kbd>", en: "Volume + · <kbd>Alt+↑</kbd>" },
+    avoldown: { id: "Volume − · <kbd>Alt+↓</kbd>", en: "Volume − · <kbd>Alt+↓</kbd>" },
+    apower: { id: "Tombol power · <kbd>Alt+L</kbd>", en: "Power button · <kbd>Alt+L</kbd>" },
   };
 
   // --- app icons -------------------------------------------------------
@@ -32,6 +41,7 @@
     compass: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM15.5 8.5l-2 5-5 2 2-5z", cal: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
     photo: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4", live: "M2 12a10 10 0 0 1 20 0M6 12a6 6 0 0 1 12 0M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z",
     game: "M6 9h12a3 3 0 0 1 3 3v2a3 3 0 0 1-5 2l-1-1H9l-1 1a3 3 0 0 1-5-2v-2a3 3 0 0 1 3-3zM8 11v3M6.5 12.5h3",
+    files: "M3 6h7l2 2h9v11H3z", store: "M5 8h14l-1 12H6zM9 8a3 3 0 0 1 6 0",
   };
   const G = ["#ff4fa3,#c2185b", "#3ddc84,#1f9d57", "#5aa8ff,#2f6fd6", "#ffb020,#e07b00", "#b48cff,#6b3fd6", "#ff6b6b,#d63a3a", "#2fd6c8,#178f86", "#8e8e9a,#55555e"];
   const APPS = [
@@ -46,144 +56,235 @@
   $("#demo-page2").innerHTML = APPS.slice(10, 20).concat(APPS.slice(0, 6)).map((a) => icon(...a)).join("");
   $("#demo-dock").innerHTML = [["Telepon", "phone", 1], ["Safari", "compass", 2], ["Pesan", "msg", 1], ["Musik", "music", 5]].map((a) => icon(...a, false)).join("");
 
+  // Android: themed (tonal) round icons.
+  const TONE = [["#c8f5dc", "#0b3d24"], ["#cfe7ff", "#0b2d55"], ["#ffd9e8", "#5a0d30"], ["#e5dcff", "#2a1466"], ["#ffe6c2", "#4d2c00"], ["#d2f1f5", "#08393f"]];
+  const AAPPS = [
+    ["LIVE", "live", 2], ["Kamera", "cam", 1], ["Foto", "photo", 3], ["Musik", "music", 4], ["Peta", "map", 0], ["Kalender", "cal", 5], ["Game", "game", 3],
+    ["File", "files", 4], ["Jam", "clock", 5], ["Cuaca", "sun", 1], ["Catatan", "note", 0], ["Store", "store", 2], ["Video", "play", 2], ["Setelan", "gear", 5],
+  ];
+  const aicon = (name, glyph, t, label = true) =>
+    `<div class="a-icon"><i style="background:${TONE[t][0]}"><svg viewBox="0 0 24 24" style="stroke:${TONE[t][1]}"><path d="${P[glyph]}"/></svg></i>${label ? `<span>${name}</span>` : ""}</div>`;
+  const fillGrid = () => {
+    const n = device.classList.contains("atab") ? 14 : 8;
+    $("#da-grid").innerHTML = AAPPS.slice(0, n).map((a) => aicon(...a)).join("");
+  };
+  $("#da-dock").innerHTML = [["Telepon", "phone", 0], ["Pesan", "msg", 1], ["Browser", "compass", 1], ["Kamera", "cam", 3]].map((a) => aicon(...a, false)).join("");
+
   // --- clock -----------------------------------------------------------
   const tick = () => {
-    const d = new Date();
-    const t = d.toLocaleTimeString(lang() === "en" ? "en-US" : "id-ID", { hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":");
-    document.querySelectorAll("[data-clock]").forEach((el) => { el.textContent = t; });
-    $("#demo-date").textContent = d.toLocaleDateString(lang() === "en" ? "en-US" : "id-ID", { weekday: "long", day: "numeric", month: "long" });
+    const d = new Date(), loc = lang() === "en" ? "en-US" : "id-ID";
+    const t = d.toLocaleTimeString(loc, { hour: "2-digit", minute: "2-digit", hour12: false }).replace(".", ":");
+    $$("[data-clock]").forEach((el) => { el.textContent = t; });
+    const day = d.toLocaleDateString(loc, { weekday: "long", day: "numeric", month: "long" });
+    $$("[data-date]").forEach((el) => { el.textContent = day; });
   };
   tick(); setInterval(tick, 15000);
 
-  // --- live stats in the header ------------------------------------------
-  let link = "usb";
+  // --- live stats in the header (simulated) --------------------------------
+  let dev = "iphone", link = "usb";
+  const isAndroid = () => dev === "android" || dev === "atab";
   setInterval(() => {
-    const fps = Math.round(57 + Math.random() * 3);
-    const video = link === "airplay" ? Math.round(13 + Math.random() * 6) : Math.round(1 + Math.random() * 2);
-    const audio = link === "airplay" ? Math.round(140 + Math.random() * 25) : Math.round(22 + Math.random() * 3);
+    if (document.hidden) return;
+    const r = (a, b) => Math.round(a + Math.random() * (b - a));
+    const wifi = link === "airplay" || link === "wifi";
+    const fps = r(57, 60);
+    const video = isAndroid() ? (wifi ? r(24, 38) : r(9, 15)) : (wifi ? r(13, 19) : r(1, 3));
+    const audio = isAndroid() ? (wifi ? r(60, 74) : r(40, 48)) : (wifi ? r(140, 165) : r(22, 25));
     $("#st-fps").textContent = fps; $("#st-video").textContent = video; $("#st-audio").textContent = audio;
     $("#st-audio").parentElement.classList.toggle("warn", audio >= 150);
   }, 900);
 
-  // --- gestures --------------------------------------------------------
-  const ov = (id) => $("#demo-" + id);
+  // --- shared bits -----------------------------------------------------------
   const caption = $("#demo-caption");
   const say = (key) => { caption.innerHTML = T[key][lang()]; };
   const cursor = $("#demo-cursor"), trail = $("#demo-trail");
-  let page = 0, busy = false, timers = [];
+  let timers = [];
   const later = (fn, ms) => timers.push(setTimeout(fn, ms));
+  const show = (id, on = true) => $("#" + id).classList.toggle("show", on);
   const clearAll = () => {
     timers.forEach(clearTimeout); timers = [];
-    ["cc", "nc", "switcher", "vol", "lock", "dim"].forEach((k) => ov(k).classList.remove("show"));
-    $("#demo-appwin").classList.remove("open");
-    $("#demo-home").style.transform = ""; cursor.classList.remove("show", "tapping"); trail.classList.remove("go");
-    $("#demo-wall").style.transform = "";
-  };
-  const setPage = (p) => {
-    page = p; $("#demo-pages").style.transform = `translateX(${-50 * p}%)`;
-    document.querySelectorAll("#demo-dots i").forEach((d, i) => d.classList.toggle("on", i === p));
+    ["demo-cc", "demo-nc", "demo-switcher", "demo-vol", "demo-lock", "demo-dim", "da-dim", "da-shade", "da-recents", "da-vol", "da-off"].forEach((k) => show(k, false));
+    $("#da-shade").classList.remove("full");
+    $("#demo-appwin").classList.remove("open"); $("#da-app").classList.remove("open");
+    $("#demo-home").style.transform = ""; $("#da-home").style.transform = "";
+    cursor.classList.remove("show", "tapping"); trail.classList.remove("go"); $("#da-back").classList.remove("go");
   };
   const moveCursor = (xPct, yPct) => { cursor.style.left = xPct + "%"; cursor.style.top = yPct + "%"; };
   const swipeUp = () => { trail.classList.add("go"); later(() => trail.classList.remove("go"), 520); };
+  const tapOn = (target, win, home) => {
+    const sr = screen.getBoundingClientRect(), r = target.getBoundingClientRect();
+    const x = ((r.left + r.width / 2 - sr.left) / sr.width) * 100, y = ((r.top + r.height / 2 - sr.top) / sr.height) * 100;
+    moveCursor(60, 88); cursor.classList.add("show");
+    later(() => moveCursor(x, y), 80);
+    later(() => cursor.classList.add("tapping"), 820);
+    later(() => {
+      win.style.setProperty("--ox", x + "%"); win.style.setProperty("--oy", y + "%"); win.classList.add("open");
+      home.style.transform = "scale(.92)"; cursor.classList.remove("tapping");
+    }, 1000);
+    later(() => cursor.classList.remove("show"), 1900);
+  };
 
-  const run = {
+  // --- Apple gestures ----------------------------------------------------------
+  let page = 0;
+  const setPage = (p) => {
+    page = p; $("#demo-pages").style.transform = `translateX(${-50 * p}%)`;
+    $$("#demo-dots i").forEach((d, i) => d.classList.toggle("on", i === p));
+  };
+  const apple = {
     tap() {
-      clearAll(); say("tap");
-      const icons = document.querySelectorAll("#demo-page1 .icon i");
-      const target = icons[12] || icons[0];
-      const sr = screen.getBoundingClientRect(), r = target.getBoundingClientRect();
-      const x = ((r.left + r.width / 2 - sr.left) / sr.width) * 100, y = ((r.top + r.height / 2 - sr.top) / sr.height) * 100;
-      setPage(0); moveCursor(60, 85); cursor.classList.add("show");
-      later(() => moveCursor(x, y), 80);
-      later(() => { cursor.classList.add("tapping"); }, 820);
-      later(() => {
-        const w = $("#demo-appwin"); w.style.setProperty("--ox", x + "%"); w.style.setProperty("--oy", y + "%"); w.classList.add("open");
-        $("#demo-home").style.transform = "scale(.92)"; cursor.classList.remove("tapping");
-      }, 1000);
-      later(() => cursor.classList.remove("show"), 1900);
+      clearAll(); say("tap"); setPage(0);
+      const icons = $$("#demo-page1 .icon i");
+      tapOn(icons[12] || icons[0], $("#demo-appwin"), $("#demo-home"));
     },
     home() {
       const w = $("#demo-appwin");
-      if (!w.classList.contains("open")) { run.tap(); later(() => run.home(), 2300); return; }
+      if (!w.classList.contains("open")) { apple.tap(); later(() => apple.home(), 2300); return; }
       say("home"); swipeUp();
       later(() => { w.classList.remove("open"); $("#demo-home").style.transform = ""; }, 260);
     },
-    switcher() { clearAll(); say("switcher"); swipeUp(); later(() => ov("switcher").classList.add("show"), 220); },
-    notif() { clearAll(); say("notif"); ov("nc").classList.add("show"); },
-    cc() { clearAll(); say("cc"); ov("dim").classList.add("show"); ov("cc").classList.add("show"); },
+    switcher() { clearAll(); say("switcher"); swipeUp(); later(() => show("demo-switcher"), 220); },
+    notif() { clearAll(); say("notif"); show("demo-nc"); },
+    cc() { clearAll(); say("cc"); show("demo-dim"); show("demo-cc"); },
     next() { clearAll(); say("next"); setPage(1); },
     prev() { clearAll(); say("prev"); setPage(0); },
-    volume(up) {
-      clearAll(); say(up ? "volup" : "voldown");
-      const v = ov("vol"); const cur = parseInt(getComputedStyle(v).getPropertyValue("--v")) || 55;
-      v.style.setProperty("--v", Math.max(8, Math.min(100, cur + (up ? 18 : -18))) + "%"); v.classList.add("show");
-      later(() => v.classList.remove("show"), 1400);
-    },
-    lock() { clearAll(); say("lock"); ov("lock").classList.add("show"); },
+    volup() { volume("demo-vol", true, "volup"); },
+    voldown() { volume("demo-vol", false, "voldown"); },
+    lock() { clearAll(); say("lock"); show("demo-lock"); },
+  };
+  const volume = (id, up, key) => {
+    clearAll(); say(key);
+    const v = $("#" + id); const cur = parseInt(getComputedStyle(v).getPropertyValue("--v")) || 55;
+    v.style.setProperty("--v", Math.max(8, Math.min(100, cur + (up ? 18 : -18))) + "%"); show(id);
+    later(() => show(id, false), 1400);
   };
 
-  // panel buttons; App Switcher, Notifications and Control Center toggle like
-  // in the app: a second press closes what the first one opened.
-  const TOGGLES = { switcher: "switcher", notif: "nc", cc: "cc" };
-  document.querySelectorAll("[data-g]").forEach((b) => b.addEventListener("click", () => {
-    app.dataset.touched = "1";
-    stopAuto();
-    const g = b.dataset.g;
-    if (TOGGLES[g] && ov(TOGGLES[g]).classList.contains("show")) {
+  // --- Android gestures --------------------------------------------------------
+  const droid = {
+    tap() {
+      clearAll(); say("tap");
+      tapOn($$("#da-grid .a-icon i")[0], $("#da-app"), $("#da-home"));
+    },
+    back() {
+      const w = $("#da-app");
+      const open = w.classList.contains("open") || ["da-shade", "da-recents"].some((k) => $("#" + k).classList.contains("show"));
+      if (!open) { droid.tap(); later(() => droid.back(), 2300); return; }
+      say("aback"); $("#da-back").classList.add("go");
+      later(() => { clearAll(); say("aback"); }, 380);
+    },
+    home() {
+      const w = $("#da-app");
+      if (!w.classList.contains("open")) { droid.tap(); later(() => droid.home(), 2300); return; }
+      say("ahome"); swipeUp();
+      later(() => { w.classList.remove("open"); $("#da-home").style.transform = ""; }, 260);
+    },
+    recents() { clearAll(); say("arecents"); swipeUp(); later(() => show("da-recents"), 220); },
+    notif() { clearAll(); say("anotif"); show("da-dim"); show("da-shade"); },
+    qs() { clearAll(); say("aqs"); show("da-dim"); $("#da-shade").classList.add("full"); show("da-shade"); },
+    volup() { volume("da-vol", true, "avolup"); },
+    voldown() { volume("da-vol", false, "avoldown"); },
+    power() { clearAll(); say("apower"); show("da-off"); },
+  };
+
+  // Panel buttons. Notifications, Control Center, quick settings, the App
+  // Switcher and recents toggle like in the app: a second press closes.
+  const OPEN = { switcher: "demo-switcher", notif: "demo-nc", cc: "demo-cc", anotif: "da-shade", aqs: "da-shade", arecents: "da-recents" };
+  const isOpen = (g) => {
+    if (!OPEN[g] || !$("#" + OPEN[g]).classList.contains("show")) return false;
+    if (g === "aqs") return $("#da-shade").classList.contains("full");
+    if (g === "anotif") return !$("#da-shade").classList.contains("full");
+    return true;
+  };
+  const press = (os, g) => {
+    $$("[data-g]").forEach((x) => x.classList.toggle("on", x.dataset.g === g && x.closest(".gpanel").dataset.os === os));
+    (os === "android" ? droid : apple)[g]();
+  };
+  $$("[data-g]").forEach((b) => b.addEventListener("click", () => {
+    app.dataset.touched = "1"; stopAuto();
+    const os = b.closest(".gpanel").dataset.os, g = b.dataset.g;
+    if (isOpen((os === "android" ? "a" : "") + g)) {
       clearAll(); say("closed"); swipeUp();
-      document.querySelectorAll("[data-g]").forEach((x) => x.classList.remove("on"));
+      $$("[data-g]").forEach((x) => x.classList.remove("on"));
       return;
     }
-    document.querySelectorAll("[data-g]").forEach((x) => x.classList.toggle("on", x === b));
-    if (g === "volup") return run.volume(true);
-    if (g === "voldown") return run.volume(false);
-    run[g]();
+    press(os, g);
   }));
 
-  // autoplay until the visitor clicks
-  const SEQ = ["tap", "home", "cc", "notif", "next", "prev", "switcher", "volup", "lock"];
+  // --- autoplay: every gesture on one device, then the next device ----------
+  const SEQ = { apple: ["tap", "home", "cc", "notif", "next", "prev", "switcher", "volup", "lock"], android: ["tap", "back", "notif", "qs", "recents", "home", "volup", "power"] };
+  const TOUR = ["iphone", "android", "ipad", "atab"];
   let auto = null, step = 0;
   const playStep = () => {
     if (app.classList.contains("studio")) { clearAll(); say("studio"); return; }
-    // After every gesture on one device, the tour moves to the other one.
-    if (step > 0 && step % SEQ.length === 0) {
-      const next = device.classList.contains("tablet") ? "phone" : "tablet";
-      document.querySelector(`[data-dev="${next}"]`).click();
-    }
-    const g = SEQ[step++ % SEQ.length];
-    document.querySelectorAll("[data-g]").forEach((x) => x.classList.toggle("on", x.dataset.g === g));
-    if (g === "volup") run.volume(true); else run[g]();
+    const os = isAndroid() ? "android" : "apple", seq = SEQ[os];
+    if (step >= seq.length) { step = 0; selectDevice(TOUR[(TOUR.indexOf(dev) + 1) % TOUR.length], true); return; }
+    press(os, seq[step++]);
   };
   const startAuto = () => { stopAuto(); playStep(); auto = setInterval(playStep, 2800); };
   function stopAuto() { if (auto) clearInterval(auto); auto = null; }
   new IntersectionObserver((e) => { if (e[0].isIntersecting) { if (!auto && !app.dataset.touched) startAuto(); } else stopAuto(); }, { threshold: .3 }).observe(app);
-  app.addEventListener("pointerdown", () => { app.dataset.touched = "1"; });
+  app.addEventListener("pointerdown", () => { app.dataset.touched = "1"; stopAuto(); });
 
-  // --- device + mode switches -----------------------------------------
+  // --- device + mode switches -------------------------------------------------
   const DEV = {
-    phone: { id: "iPhone 18 Pro Max", res: "2868×1320" },
-    tablet: { id: "iPad Pro 13″", res: "2752×2064" },
+    iphone: { cls: "phone", name: { id: "iPhone 18 Pro Max", en: "iPhone 18 Pro Max" }, res: "2868×1320" },
+    ipad: { cls: "tablet", name: { id: "iPad Pro 13″", en: "iPad Pro 13″" }, res: "2752×2064" },
+    android: { cls: "aphone", name: { id: "Android Smartphone", en: "Android Smartphone" }, res: "2400×1080" },
+    atab: { cls: "atab", name: { id: "Android Tablet", en: "Android Tablet" }, res: "2560×1600" },
   };
+  const MODES = {
+    apple: [["apple", "Apple Driver", "Apple Driver"], ["usb", "Studio · Kabel", "Studio · Cable"], ["airplay", "Studio · Wi-Fi", "Studio · Wi-Fi"]],
+    android: [["usb", "USB", "USB"], ["wifi", "Wi-Fi", "Wi-Fi"]],
+  };
+  const modeSeg = $("#seg-mode");
   let mode = "apple";
   const renderTop = () => {
-    const d = device.classList.contains("tablet") ? DEV.tablet : DEV.phone;
-    $("#demo-devname").textContent = `${d.id} · ${d.res}`;
-    $("#demo-src").textContent = mode === "apple" ? (link === "airplay" ? "APPLE · WI-FI" : "APPLE · USB") : (link === "airplay" ? "STUDIO · AIRPLAY" : "STUDIO · USB");
+    const d = DEV[dev];
+    $("#demo-devname").textContent = `${d.name[lang()]} · ${d.res}`;
+    $("#demo-src").textContent = isAndroid() ? (link === "wifi" ? "ANDROID · WI-FI" : "ANDROID · USB")
+      : mode === "apple" ? (link === "airplay" ? "APPLE · WI-FI" : "APPLE · USB") : (link === "airplay" ? "STUDIO · AIRPLAY" : "STUDIO · USB");
   };
-  document.querySelectorAll("[data-dev]").forEach((b) => b.addEventListener("click", () => {
-    document.querySelectorAll("[data-dev]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-    device.classList.toggle("phone", b.dataset.dev === "phone");
-    device.classList.toggle("tablet", b.dataset.dev === "tablet");
-    clearAll(); renderTop();
-  }));
-  document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => {
-    document.querySelectorAll("[data-mode]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-    mode = b.dataset.mode === "apple" ? "apple" : "studio";
-    link = b.dataset.mode === "airplay" ? "airplay" : "usb";
+  const setMode = (m) => {
+    $$("button", modeSeg).forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.mode === m)));
+    if (isAndroid()) { mode = "android"; link = m; } else { mode = m === "apple" ? "apple" : "studio"; link = m === "airplay" ? "airplay" : "usb"; }
     app.classList.toggle("studio", mode === "studio");
-    clearAll(); renderTop();
-    if (mode === "studio") say("studio"); else if (!auto) startAuto();
+    renderTop();
+  };
+  const renderModes = () => {
+    const os = isAndroid() ? "android" : "apple";
+    modeSeg.classList.toggle("android", os === "android");
+    modeSeg.innerHTML = MODES[os].map(([m, id, en]) => `<button type="button" data-mode="${m}" aria-pressed="false">${lang() === "en" ? en : id}</button>`).join("");
+    $$("button", modeSeg).forEach((b) => b.addEventListener("click", () => {
+      setMode(b.dataset.mode); clearAll();
+      if (mode === "studio") say("studio"); else if (!auto && !app.dataset.touched) startAuto();
+    }));
+  };
+  function selectDevice(d, fromTour = false) {
+    if (!DEV[d]) return;
+    const was = isAndroid();
+    dev = d;
+    $$("#seg-dev button").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.dev === d)));
+    $("#seg-dev").classList.toggle("android", isAndroid());
+    device.className = "device " + DEV[d].cls;
+    app.classList.toggle("android", isAndroid());
+    clearAll(); fillGrid(); setPage(0);
+    caption.innerHTML = caption.dataset[lang()] || caption.dataset.id;
+    if (was !== isAndroid() || !modeSeg.children.length) { renderModes(); setMode(isAndroid() ? "usb" : "apple"); }
+    renderTop();
+    step = 0;
+    if (fromTour) playStep();
+  }
+  $$("#seg-dev button").forEach((b) => b.addEventListener("click", () => { app.dataset.touched = "1"; stopAuto(); selectDevice(b.dataset.dev); }));
+  // Hero chips jump to the demo with that device.
+  $$("[data-go]").forEach((b) => b.addEventListener("click", () => {
+    selectDevice(b.dataset.go);
+    $("#preview").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    app.dataset.touched = ""; stopAuto(); setTimeout(startAuto, 700);
   }));
-  renderTop();
-  document.addEventListener("zenlink:lang", () => { tick(); });
+  selectDevice("iphone");
+  document.addEventListener("zenlink:lang", () => {
+    tick();
+    const keep = $("button[aria-pressed='true']", modeSeg)?.dataset.mode;
+    renderModes(); if (keep) setMode(keep);
+    renderTop();
+  });
 })();
