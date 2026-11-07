@@ -6,6 +6,7 @@ mod appwin;
 mod backdrop;
 mod devprofiles;
 mod dots;
+mod filedrop;
 mod flow;
 mod input;
 mod prefs;
@@ -3061,6 +3062,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // Keeps the Run entry pointing at this exe (a moved Portable.exe).
             tray::set_start_with_windows(p.start_with_windows, false);
         }
+        filedrop::install(&ui);
         let weak = ui.as_weak();
         ui.window().on_close_requested(move || {
             if let Some(ui) = weak.upgrade() {
@@ -4250,7 +4252,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     let tw = ui.get_toast_w();
                     holes.push((px((ww - tw) / 2.0), px(wh - 104.0), px(tw), px(52.0)));
                 }
-                if ui.get_android_apps_open() && on_android {
+                if !ui.get_transfer().is_empty() {
+                    let (ww, wh) = (ui.window().size().to_logical(sf).width, ui.window().size().to_logical(sf).height);
+                    let tw = ui.get_transfer_w();
+                    holes.push((px((ww - tw) / 2.0), px(wh - 150.0), px(tw), px(40.0)));
+                }
+                if (ui.get_android_apps_open() && on_android) || ui.get_drop_hover() {
                     holes.push((
                         px(ui.get_launcher_x()),
                         px(ui.get_launcher_y()),

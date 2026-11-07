@@ -129,6 +129,26 @@ impl Target<'_> {
     }
 }
 
+/// `STAT` on an open sync socket: the remote file's mode, `None` when it
+/// does not exist (the reply's mode, size and mtime are all 0).
+pub fn sync_stat<S: Read + Write>(s: &mut S, remote: &str) -> Result<Option<u32>> {
+    if remote.len() > 1024 {
+        return Err(AdbError::Protocol("remote path too long".into()));
+    }
+    let mut req = Vec::with_capacity(8 + remote.len());
+    req.extend_from_slice(b"STAT");
+    req.extend_from_slice(&(remote.len() as u32).to_le_bytes());
+    req.extend_from_slice(remote.as_bytes());
+    s.write_all(&req)?;
+    let mut r = [0u8; 16];
+    s.read_exact(&mut r)?;
+    if &r[..4] != b"STAT" {
+        return Err(AdbError::Protocol("sync: expected STAT".into()));
+    }
+    let mode = u32::from_le_bytes([r[4], r[5], r[6], r[7]]);
+    Ok((mode != 0).then_some(mode))
+}
+
 /// Largest DATA chunk of the sync protocol (`SYNC_DATA_MAX`).
 const SYNC_DATA_MAX: usize = 64 * 1024;
 
@@ -142,6 +162,26 @@ pub fn sync_send<S: Read + Write>(
     data: &[u8],
     mtime: u32,
 ) -> Result<()> {
+    sync_send_from(
+        s,
+        remote,
+        mode,
+        &mut io::Cursor::new(data),
+        mtime,
+        &mut |_| {},
+    )
+}
+
+/// [`sync_send`] streaming from `src` (a large file never sits in memory),
+/// calling `progress(bytes sent)` after every chunk.
+pub fn sync_send_from<S: Read + Write>(
+    s: &mut S,
+    remote: &str,
+    mode: u32,
+    src: &mut dyn Read,
+    mtime: u32,
+    progress: &mut dyn FnMut(u64),
+) -> Result<()> {
     let spec = format!("{remote},{mode}");
     if spec.len() > 1024 {
         return Err(AdbError::Protocol("remote path too long".into()));
@@ -151,12 +191,28 @@ pub fn sync_send<S: Read + Write>(
     head.extend_from_slice(&(spec.len() as u32).to_le_bytes());
     head.extend_from_slice(spec.as_bytes());
     s.write_all(&head)?;
-    for chunk in data.chunks(SYNC_DATA_MAX) {
-        let mut d = Vec::with_capacity(8 + chunk.len());
-        d.extend_from_slice(b"DATA");
-        d.extend_from_slice(&(chunk.len() as u32).to_le_bytes());
-        d.extend_from_slice(chunk);
-        s.write_all(&d)?;
+    let mut d = vec![0u8; 8 + SYNC_DATA_MAX];
+    let mut sent = 0u64;
+    loop {
+        // Fill a whole chunk (a short read is not the end of the file).
+        let mut n = 0;
+        while n < SYNC_DATA_MAX {
+            match src.read(&mut d[8 + n..])? {
+                0 => break,
+                k => n += k,
+            }
+        }
+        if n == 0 {
+            break;
+        }
+        d[..4].copy_from_slice(b"DATA");
+        d[4..8].copy_from_slice(&(n as u32).to_le_bytes());
+        s.write_all(&d[..8 + n])?;
+        sent += n as u64;
+        progress(sent);
+        if n < SYNC_DATA_MAX {
+            break;
+        }
     }
     let mut done = Vec::with_capacity(8);
     done.extend_from_slice(b"DONE");
@@ -263,6 +319,16 @@ impl AdbClient {
         let mut out = Vec::new();
         s.take(limit as u64).read_to_end(&mut out)?;
         Ok(out)
+    }
+
+    /// An open `sync:` socket with read and write timeouts of at least 15 s,
+    /// for [`sync_stat`] and [`sync_send_from`].
+    pub fn open_sync(&self, target: &Target) -> Result<TcpStream> {
+        let s = self.open_service(target, "sync:")?;
+        let slow = self.timeout.max(Duration::from_secs(15));
+        s.set_read_timeout(Some(slow))?;
+        s.set_write_timeout(Some(slow))?;
+        Ok(s)
     }
 
     /// Copies `data` to `remote` on the device (`adb push`).

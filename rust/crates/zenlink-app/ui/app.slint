@@ -2247,6 +2247,12 @@ export component AppWindow inherits Window {
     callback android-apps-filter(string);
     callback android-apps-close();
     in property <bool> android-apps-window-ok;
+    // Files dragged over the window, and a running transfer (filedrop.rs).
+    in property <bool> drop-hover;
+    in property <bool> drop-ok;
+    in property <string> transfer;
+    in property <float> transfer-p: -1;
+    out property <length> transfer-w: min(self.width - 40px, 360px);
     callback android-app-launch(int, string);
     // Launcher rectangle (logical px), kept open in the picture by Rust.
     out property <length> launcher-x: root.stage-x + 10px;
@@ -2580,6 +2586,79 @@ export component AppWindow inherits Window {
             filter(v) => { root.android-apps-filter(v); }
             launch(i, where) => { root.android-app-launch(i, where); }
             close => { root.android-apps-close(); }
+        }
+        // Files dragged in from Explorer (v2.5.1, filedrop.rs).
+        Rectangle {
+            x: root.launcher-x;
+            y: root.launcher-y;
+            width: root.launcher-w;
+            height: root.launcher-h;
+            border-radius: 22px;
+            property <float> t: root.drop-hover ? 1 : 0;
+            animate t { duration: 160ms; easing: ease-out; }
+            opacity: self.t;
+            visible: self.t > 0.01;
+            background: Theme.dark ? #101014ee : #f4f4f8ee;
+            border-width: 2px;
+            border-color: root.drop-ok ? Theme.accent : Theme.warn;
+            VerticalLayout {
+                alignment: center;
+                spacing: 10px;
+                padding: 24px;
+                Text {
+                    text: root.drop-ok ? "\u{E898}" : "\u{E7BA}";
+                    font-family: Theme.icons;
+                    font-size: 40px;
+                    color: root.drop-ok ? Theme.accent : Theme.warn;
+                    horizontal-alignment: center;
+                }
+                Text {
+                    text: root.drop-ok ? I18n.t("Lepas untuk kirim ke HP", "Drop to send to the phone") : I18n.t("Belum ada HP Android yang di-mirror", "No Android phone is being mirrored");
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: root.drop-ok ? I18n.t("File .apk dipasang. File lain masuk ke folder Download di HP.", "An .apk file is installed. Other files go to the phone's Download folder.") : I18n.t("Mulai mirroring HP Android, lalu tarik file ke sini.", "Start mirroring an Android phone, then drop files here.");
+                    font-size: 12px;
+                    color: Theme.text-2;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        // File transfer progress, above the toast.
+        if root.transfer != "": Glass {
+            strong: true;
+            x: (parent.width - self.width) / 2;
+            y: parent.height - 150px;
+            width: root.transfer-w;
+            height: 40px;
+            border-radius: 13px;
+            VerticalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-top: 7px;
+                padding-bottom: 7px;
+                spacing: 5px;
+                Text { text: root.transfer; font-size: 12px; color: Theme.text; overflow: elide; horizontal-alignment: center; }
+                Rectangle {
+                    height: 4px;
+                    border-radius: 2px;
+                    background: Theme.fill;
+                    clip: true;
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * clamp(root.transfer-p, 0, 1);
+                        height: parent.height;
+                        border-radius: 2px;
+                        background: Theme.accent;
+                        animate width { duration: 120ms; }
+                    }
+                }
+            }
         }
         toast-measure := Text { text: root.toast; font-size: 12.5px; visible: false; }
         if root.toast != "": Glass {
