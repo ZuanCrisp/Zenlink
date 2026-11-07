@@ -610,4 +610,4 @@ h2, .hook { text-wrap: balance; }
   .cta .btn { padding: 0 12px; gap: 6px; font-size: 13px; }
   .cta .btn svg { width: 16px; height: 16px; }
 }
-@media (min-width: 1061px) and (max-width: 1180px) { .links a[href="#ringan"], .links a[href="#unduh"] { display: none; } }
+@media (min-width: 1061px) and (max-width: 1180px) { .links a[href="#ringan"] { display: none; } }
