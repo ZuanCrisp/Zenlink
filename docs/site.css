@@ -487,3 +487,13 @@ html[data-theme="light"] .aurora::before { opacity: .16; }
   mask-image: none;
 }
 @keyframes turn { to { transform: rotate(360deg); } }
+
+/* Hero: star the repo (live count from the GitHub API) */
+.btn-star .st { color: #fbbf24; filter: drop-shadow(0 0 6px #fbbf2466); transition: transform .35s cubic-bezier(.3,1.6,.5,1); }
+.btn-star:hover .st { transform: rotate(-18deg) scale(1.2); }
+.btn-star .stars {
+  margin-left: 2px; padding: 2px 9px; border-radius: 999px; font-size: .85em; font-weight: 700;
+  background: color-mix(in srgb, #fbbf24 18%, transparent); color: var(--text);
+  border: 1px solid color-mix(in srgb, #fbbf24 40%, transparent);
+}
+.nav .stars { margin-left: 4px; font-weight: 700; opacity: .8; }

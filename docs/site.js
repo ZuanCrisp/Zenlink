@@ -181,6 +181,16 @@
   let loadedAt = 0;
   function load() {
     loadedAt = Date.now();
+    // Star count for the GitHub buttons (hidden until it arrives).
+    fetch(`https://api.github.com/repos/${repo}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((info) => {
+        const n = info.stargazers_count;
+        if (typeof n !== "number") return;
+        const txt = n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
+        document.querySelectorAll(".stars").forEach((el) => { el.textContent = el.closest(".btn-star") ? txt : `★ ${txt}`; el.hidden = false; });
+      })
+      .catch(() => {});
     return fetch(`https://api.github.com/repos/${repo}/releases?per_page=100`)
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((releases) => {
