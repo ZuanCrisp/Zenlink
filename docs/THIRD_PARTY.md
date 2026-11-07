@@ -85,7 +85,7 @@ Design references for the Rust window are listed in `docs/rust/THIRD_PARTY.md`.
   `45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99`, checked;
   `adb.exe` must be Google-signed) and extracts the same four files there
   (`tools\get-adb.ps1`). Portable.exe
-  packs the same files and unpacks them to `%LOCALAPPDATA%\ZenLink-Beta\platform-tools`.
+  packs the same files and unpacks them to `%LOCALAPPDATA%\ZenLink-Next\platform-tools`.
 - Licence (audit for B-10, 2026-11-07; a reading of the texts, not legal advice):
   - The platform-tools package comes with the Android SDK License Agreement
     (`package.xml`, `android-sdk-license`). §3.4 forbids redistributing the

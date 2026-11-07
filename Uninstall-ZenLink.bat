@@ -26,7 +26,7 @@ timeout /t 1 >nul
 
 for %%F in (settings.json secrets.json devices.json zenlink.log) do if exist "%~dp0%%F" del /f /q "%~dp0%%F"
 if exist "%~dp0.webview" rmdir /s /q "%~dp0.webview"
-if exist "%LOCALAPPDATA%\ZenLink-Beta" rmdir /s /q "%LOCALAPPDATA%\ZenLink-Beta"
+if exist "%LOCALAPPDATA%\ZenLink-Next" rmdir /s /q "%LOCALAPPDATA%\ZenLink-Next"
 powershell -NoProfile -Command "foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) { Remove-Item -LiteralPath (Join-Path $d 'ZenLink.lnk') -ErrorAction SilentlyContinue }"
 echo Data and shortcuts removed.
 echo.

@@ -203,7 +203,7 @@ Copy-Item $rustExe $app
 
 Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta
 # Same app as one .exe: it unpacks itself to a temporary folder on start and
-# keeps its settings in %LOCALAPPDATA%\ZenLink-Beta.
+# keeps its settings in %LOCALAPPDATA%\ZenLink-Next.
 $oneArgs = @()
 for ($i = 0; $i -lt $pyiArgs.Count; $i++) {
     if ($pyiArgs[$i] -eq "--onedir") { $oneArgs += "--onefile"; continue }
@@ -216,7 +216,7 @@ if ($LASTEXITCODE) { throw "PyInstaller (one file) failed" }
 $service = Join-Path $build "onefile-dist\ZenLinkService.exe"
 Test-FrozenExe $service
 # The Rust ZenLink.exe with that backend packed inside (unpacked to
-# %LOCALAPPDATA%\ZenLink-Beta\service on start).
+# %LOCALAPPDATA%\ZenLink-Next\service on start).
 $env:ZENLINK_BACKEND_EXE = $service
 $env:ZENLINK_ADB_DIR = (Resolve-Path $PlatformTools).Path
 & cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app --features embedded-backend --target-dir (Join-Path $build "rust-portable")

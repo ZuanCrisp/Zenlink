@@ -170,7 +170,7 @@ class CastManagerTests(unittest.TestCase):
         m.refresh_devices()
         dev = m._presence["devices"][0]
         self.assertTrue(dev["airplay"] and dev["ready"])
-        self.assertEqual(dev["receiver"], "ZenLinkStudioBeta")
+        self.assertEqual(dev["receiver"], "ZenLinkStudio")
 
     def test_auto_airplay_and_pause(self):
         m = self.make("usbdirect", "wireless")

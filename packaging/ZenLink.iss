@@ -1,10 +1,11 @@
-; ZenLink v2.5.1 BETA installer (Inno Setup 6). Built by build_portable_release.ps1.
-; Beta identity: its own AppId, "ZenLink Beta" name, {autopf}\ZenLink Beta folder and
-; %LOCALAPPDATA%\ZenLink-Beta data, so it installs next to v2.5.0 and never
-; replaces it. For the final v2.5.1 release, restore the v2.2.x/v2.5.0 AppId,
-; AppName=ZenLink and {autopf}\ZenLink so Setup upgrades in place (AGENTS.md section 3).
+; ZenLink v2.5 installer (Inno Setup 6). Built by build_portable_release.ps1.
+; Same AppId, folder and firewall rule as ZenLink v2.2.x: v2.5 is its successor
+; and upgrades an installed v2.2.x in place (one "ZenLink" in Start, one entry
+; in Apps). v2.5 keeps its own data folder (%LOCALAPPDATA%\ZenLink-Next) and
+; ports, so a v2.2.31 Portable.exe still runs next to it. To roll back, run the
+; v2.2.31 Setup.exe from its GitHub release.
 #ifndef AppVersion
-  #define AppVersion "2.5.1-beta.1"
+  #define AppVersion "2.5.1"
 #endif
 #ifndef AppVersionNum
   ; Numeric part only: VersionInfoVersion must be n.n.n.n.
@@ -15,16 +16,16 @@
 #endif
 
 [Setup]
-AppId={{9C4F2B71-3E8A-4D16-B5C0-7A2E91F4D3B8}
-AppName=ZenLink Beta
+AppId={{6B0E8C1A-5D3F-4E0A-9C2B-2E7A1F5D9A10}
+AppName=ZenLink
 AppVersion={#AppVersion}
-AppVerName=ZenLink Beta {#AppVersion}
+AppVerName=ZenLink {#AppVersion}
 AppPublisher=Zenvy Zenshiro
 AppPublisherURL=https://github.com/zenvyzenshiro/zenlink
 AppSupportURL=https://github.com/zenvyzenshiro/zenlink/issues
 AppCopyright=Copyright (C) 2026 Zenvy Zenshiro
-DefaultDirName={autopf}\ZenLink Beta
-DefaultGroupName=ZenLink Beta
+DefaultDirName={autopf}\ZenLink
+DefaultGroupName=ZenLink
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 SetupIconFile=..\assets\zenlink.ico
@@ -81,14 +82,14 @@ Type: files; Name: "{app}\_sounddevice_data\__init__.py"
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "Start ZenLink.bat,run.bat,Create-Desktop-Shortcut.bat,Uninstall-ZenLink.bat,portable.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
-Name: "{localappdata}\ZenLink-Beta\logs"
+Name: "{localappdata}\ZenLink-Next\logs"
 
 [Icons]
-Name: "{group}\ZenLink Beta"; Filename: "{app}\ZenLink.exe"
-Name: "{group}\Uninstall ZenLink Beta"; Filename: "{uninstallexe}"
+Name: "{group}\ZenLink"; Filename: "{app}\ZenLink.exe"
+Name: "{group}\Uninstall ZenLink"; Filename: "{uninstallexe}"
 ; The log folder (window, backend, crash and setup logs) for bug reports.
-Name: "{group}\ZenLink Beta logs"; Filename: "{localappdata}\ZenLink-Beta\logs"
-Name: "{autodesktop}\ZenLink Beta"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
+Name: "{group}\ZenLink logs"; Filename: "{localappdata}\ZenLink-Next\logs"
+Name: "{autodesktop}\ZenLink"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
 
 [Run]
 ; AirPlay (ZenLink Studio over Wi-Fi): the iPhone/iPad must reach ZenLink. Inbound allow, local subnet only.
@@ -106,11 +107,11 @@ Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""ZenLink (AirPlay)"" program=""{app}\ZenLinkService.exe"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; RunOnceId: "DelFirewall"; Check: FirewallRuleExists
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\ZenLink-Beta"
+Type: filesandordirs; Name: "{localappdata}\ZenLink-Next"
 
 [Registry]
 ; "Start with Windows" (Settings) writes this value itself; remove it on uninstall.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "ZenLink Beta"; Flags: dontcreatekey uninsdeletevalue
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "ZenLink"; Flags: dontcreatekey uninsdeletevalue
 
 [Code]
 // Only ask for administrator rights on uninstall when the AirPlay rule exists.
@@ -177,7 +178,7 @@ begin
     RemovePreviousFiles();
   if CurStep = ssDone then
     // Keep the setup log next to the app's own logs (best effort).
-    FileCopy(ExpandConstant('{log}'), ExpandConstant('{localappdata}\ZenLink-Beta\logs\setup.log'), False);
+    FileCopy(ExpandConstant('{log}'), ExpandConstant('{localappdata}\ZenLink-Next\logs\setup.log'), False);
 end;
 
 function InitializeSetup(): Boolean;
