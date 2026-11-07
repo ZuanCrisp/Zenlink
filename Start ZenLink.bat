@@ -99,11 +99,10 @@ where cargo >nul 2>&1 || (
     if exist "%NEXT%" echo Starting the last build instead.
     exit /b 0
 )
-echo Building the ZenLink window from the current code. The first build takes a few minutes...
-pushd "%~dp0rust"
-cargo build --release -p zenlink-app
+echo Building the ZenLink window from the current code...
+rem Elapsed time and an estimate in the window title (rust\tools\build-window.ps1).
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0rust\tools\build-window.ps1" -Rust "%~dp0rust"
 set "RC=!errorlevel!"
-popd
 if not "!RC!"=="0" (
     echo.
     echo The build failed. If ZenLink is still open, close it and run Start ZenLink.bat again.
