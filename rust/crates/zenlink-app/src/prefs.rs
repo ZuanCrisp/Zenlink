@@ -51,6 +51,8 @@ pub fn defaults() -> Prefs {
         android_codec: "auto".into(),
         android_profile: "balanced".into(),
         android_encoder: "".into(),
+        update_check: true,
+        update_channel: "".into(),
     }
 }
 
@@ -133,6 +135,8 @@ pub fn from_value(v: &Value) -> Prefs {
     // "Remember my choice" (rememberConnectionMode in settings.json).
     s("platform", &mut p.platform, &["apple", "android"]);
     b("rememberPlatform", &mut p.remember_platform);
+    b("updateCheck", &mut p.update_check);
+    s("updateChannel", &mut p.update_channel, &["stable", "beta"]);
     // Android picture (phase A4): scrcpy server options.
     s(
         "androidMaxSize",
@@ -203,6 +207,7 @@ pub fn to_value(p: &Prefs) -> Value {
         "androidMaxSize": p.android_max_size.as_str(), "androidFps": p.android_fps.as_str(),
         "androidBitrate": p.android_bitrate.as_str(), "androidCodec": p.android_codec.as_str(),
         "androidProfile": p.android_profile.as_str(), "androidEncoder": p.android_encoder.as_str(),
+        "updateCheck": p.update_check, "updateChannel": p.update_channel.as_str(),
     })
 }
 

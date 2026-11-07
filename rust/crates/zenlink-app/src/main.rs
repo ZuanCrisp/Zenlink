@@ -11,6 +11,7 @@ mod input;
 mod prefs;
 mod shortcuts;
 mod tray;
+mod updater;
 mod usbphones;
 
 use std::cell::RefCell;
@@ -2727,6 +2728,211 @@ fn close_requested(ui: &AppWindow) {
     }
 }
 
+// ---- Updates (v2.5.1): see updater.rs and zenlink_core::update. ----
+
+thread_local! {
+    /// The last offer from "Check for updates" (`None` = nothing to install).
+    static UPDATE_OFFER: RefCell<Option<(zenlink_core::update::Release, bool)>> = const { RefCell::new(None) };
+}
+
+fn update_channel(p: &Prefs) -> zenlink_core::update::Channel {
+    use zenlink_core::update::Channel;
+    Channel::parse(p.update_channel.as_str())
+        .unwrap_or_else(|| Channel::of(&updater::current_version()))
+}
+
+fn update_clear(ui: &AppWindow) {
+    UPDATE_OFFER.with_borrow_mut(|o| *o = None);
+    ui.set_upd_version("".into());
+    ui.set_upd_notes("".into());
+    ui.set_upd_switch(false);
+    ui.set_upd_progress(-1.0);
+}
+
+/// Asks GitHub for the newest release on the chosen channel. `manual`: the
+/// user pressed the button (a startup check only shows a toast when there
+/// is something new).
+fn update_check(ui: &AppWindow, manual: bool) {
+    use zenlink_core::update::Offer;
+    if ui.get_upd_busy() {
+        return;
+    }
+    let channel = update_channel(&ui.get_prefs());
+    update_clear(ui);
+    ui.set_upd_busy(true);
+    ui.set_upd_status(tr_ui(ui, "Memeriksa pembaruan…", "Checking for updates…").into());
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let r = updater::check(channel);
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_upd_busy(false);
+            match r {
+                Ok(Offer::UpToDate) => {
+                    log::info!("update: up to date ({channel:?})");
+                    ui.set_upd_status(
+                        tr_ui(
+                            &ui,
+                            "ZenLink sudah versi terbaru.",
+                            "ZenLink is up to date.",
+                        )
+                        .into(),
+                    );
+                }
+                Ok(offer) => {
+                    let (rel, switch) = match offer {
+                        Offer::Update(r) => (r, false),
+                        Offer::Switch(r) => (r, true),
+                        Offer::UpToDate => unreachable!(),
+                    };
+                    log::info!("update: offer {} (switch {switch})", rel.tag);
+                    let v = rel.version.to_string();
+                    let status = if switch {
+                        tr_ui(
+                            &ui,
+                            &format!("Edisi lain: v{v}. Terpasang sebagai aplikasi terpisah, pengaturan tidak ikut pindah."),
+                            &format!("Other edition: v{v}. Installs as a separate app; settings do not move over."),
+                        )
+                    } else {
+                        tr_ui(
+                            &ui,
+                            &format!("Versi baru tersedia: v{v}"),
+                            &format!("New version available: v{v}"),
+                        )
+                    };
+                    ui.set_upd_status(status.into());
+                    ui.set_upd_notes(zenlink_core::update::short_notes(&rel.notes, 360).into());
+                    ui.set_upd_version(v.clone().into());
+                    ui.set_upd_switch(switch);
+                    if !manual && !switch {
+                        let t = tr_ui(
+                            &ui,
+                            &format!("ZenLink v{v} tersedia. Buka Pengaturan › Pembaruan."),
+                            &format!("ZenLink v{v} is available. Open Settings › Updates."),
+                        );
+                        show_toast(&ui, t);
+                    }
+                    UPDATE_OFFER.with_borrow_mut(|o| *o = Some((rel, switch)));
+                }
+                Err(e) => {
+                    log::warn!("update: check failed: {e}");
+                    if manual {
+                        ui.set_upd_status(
+                            tr_ui(
+                                &ui,
+                                &format!("Tidak bisa memeriksa: {e}"),
+                                &format!("Could not check: {e}"),
+                            )
+                            .into(),
+                        );
+                    } else {
+                        ui.set_upd_status("".into());
+                    }
+                }
+            }
+        });
+    });
+}
+
+/// Opens a page of this repository's releases in the default browser.
+fn open_release_page(url: &str) {
+    if url.starts_with("https://github.com/zenvyzenshiro/zenlink/") {
+        let _ = std::process::Command::new("explorer.exe").arg(url).spawn();
+    }
+}
+
+/// "Update to vX": download, verify, start, quit (an update of this
+/// edition) or keep running (the other edition installs next to it).
+fn update_install(ui: &AppWindow) {
+    let Some((rel, switch)) = UPDATE_OFFER.with_borrow(|o| o.clone()) else {
+        return;
+    };
+    if ui.get_upd_busy() {
+        return;
+    }
+    let kind = updater::kind();
+    let Some(asset) = updater::asset_for(kind, &rel).cloned() else {
+        // A source checkout (or a release without a verified file):
+        // the page, where the user downloads it.
+        open_release_page(&rel.page);
+        return;
+    };
+    let dest = match updater::download_path(kind, &asset) {
+        Ok(d) => d,
+        Err(e) => {
+            ui.set_upd_status(tr_ui(ui, &format!("Gagal: {e}"), &format!("Failed: {e}")).into());
+            return;
+        }
+    };
+    ui.set_upd_busy(true);
+    ui.set_upd_progress(0.0);
+    ui.set_upd_status(
+        tr_ui(
+            ui,
+            &format!("Mengunduh {}…", asset.name),
+            &format!("Downloading {}…", asset.name),
+        )
+        .into(),
+    );
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let w = weak.clone();
+        let progress = move |done: u64, total: u64| {
+            let w = w.clone();
+            let f = if total > 0 {
+                done as f32 / total as f32
+            } else {
+                0.0
+            };
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    ui.set_upd_progress(f);
+                }
+            });
+        };
+        let r = updater::download(&asset, &dest, &progress).and_then(|_| {
+            log::info!(
+                "update: {} verified (sha256 {})",
+                dest.display(),
+                asset.sha256
+            );
+            updater::launch(kind, &dest, !switch)
+        });
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_upd_busy(false);
+            ui.set_upd_progress(-1.0);
+            match r {
+                Ok(()) if switch => {
+                    ui.set_upd_status(
+                        tr_ui(
+                            &ui,
+                            "Penginstal edisi lain sudah dibuka.",
+                            "The other edition's installer is open.",
+                        )
+                        .into(),
+                    );
+                }
+                Ok(()) => {
+                    log::info!("update: started {}, quitting", rel.tag);
+                    quit_app(&ui);
+                }
+                Err(e) => {
+                    log::warn!("update: {e}");
+                    ui.set_upd_status(
+                        tr_ui(
+                            &ui,
+                            &format!("Pembaruan gagal: {e}"),
+                            &format!("Update failed: {e}"),
+                        )
+                        .into(),
+                    );
+                }
+            }
+        });
+    });
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     // v2.5.1: `ZenLink.exe --android-app …` is one Android app in its own
     // window (no backend, no tray, no single-instance check).
@@ -2743,6 +2949,9 @@ fn main() -> Result<(), slint::PlatformError> {
     // user's ZenLink; everyone else gets one ZenLink per user: a second start
     // shows the running one (also when it is hidden in the tray).
     let test_mode = std::env::var_os("ZL_PREFS").is_some();
+    // A portable update: the old exe quits; wait for it before the
+    // single-instance check, then delete it.
+    updater::finish_portable_update();
     if !test_mode && tray::show_running_instance() {
         return Ok(());
     }
@@ -3443,6 +3652,45 @@ fn main() -> Result<(), slint::PlatformError> {
                 passcode_query(&ui, &api, Some(code.to_string()));
             }
         });
+    }
+    {
+        ui.set_upd_channel_own(
+            match zenlink_core::update::Channel::of(&updater::current_version()) {
+                zenlink_core::update::Channel::Beta => "beta",
+                zenlink_core::update::Channel::Stable => "stable",
+            }
+            .into(),
+        );
+        let weak = ui.as_weak();
+        ui.on_update_action(move |a: slint::SharedString| {
+            let Some(ui) = weak.upgrade() else { return };
+            match a.as_str() {
+                "check" => update_check(&ui, true),
+                "install" => update_install(&ui),
+                "notes" => {
+                    let page =
+                        UPDATE_OFFER.with_borrow(|o| o.as_ref().map(|(r, _)| r.page.clone()));
+                    open_release_page(
+                        &page.unwrap_or_else(|| zenlink_core::update::RELEASES_PAGE.into()),
+                    );
+                }
+                _ => {}
+            }
+        });
+        // Startup check: a few seconds after start so it never slows the
+        // first screen; never in tests (ZL_PREFS) unless a test feed is set.
+        let feed_test = std::env::var_os("ZL_UPDATE_FEED").is_some();
+        if ui.get_prefs().update_check && (!test_mode || feed_test) {
+            let weak = ui.as_weak();
+            slint::Timer::single_shot(
+                Duration::from_secs(if feed_test { 1 } else { 8 }),
+                move || {
+                    if let Some(ui) = weak.upgrade() {
+                        update_check(&ui, false);
+                    }
+                },
+            );
+        }
     }
     {
         let api = api.clone();

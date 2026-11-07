@@ -231,6 +231,11 @@ $iscc = @(
     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($iscc) {
+    # Top-level entries of the install folder: the next Setup removes exactly
+    # these before copying (clean update, packaging/ZenLink.iss).
+    $skip = @("Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat", "portable.txt", "install-manifest.txt")
+    $names = @(Get-ChildItem -Force $app | Where-Object { $skip -notcontains $_.Name } | ForEach-Object { $_.Name }) + "install-manifest.txt"
+    [IO.File]::WriteAllLines((Join-Path $app "install-manifest.txt"), [string[]]$names)
     & $iscc "/DAppVersion=$Version" "/DAppVersionNum=$VersionNum" "/DSourceDir=$app" "/O$release" "packaging\ZenLink.iss"
     if ($LASTEXITCODE) { throw "Inno Setup failed" }
 } else {

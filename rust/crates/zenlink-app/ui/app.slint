@@ -55,6 +55,8 @@ export struct Prefs {
     android-codec: string,    // auto | h264 | h265
     android-profile: string,  // low-latency | balanced | high-quality | streaming | custom
     android-encoder: string,  // "" = automatic, else a MediaCodec name from the phone's list
+    update-check: bool,       // look for a new version at start (v2.5.1)
+    update-channel: string,   // "" = this build's own | stable | beta
 }
 
 // Window controls, Windows order (min, max, close) on the right, drawn as
@@ -1649,6 +1651,16 @@ component SettingsPanel inherits Glass {
     in property <bool> drv-restore;
     in property <bool> drv-bind;
     in property <bool> drv-filter;
+    // Updates (v2.5.1): status line, the offered version ("" = none),
+    // download progress 0..1 (-1 = not downloading).
+    in property <string> upd-status;
+    in property <string> upd-version;
+    in property <string> upd-notes;
+    in property <bool> upd-switch;
+    in property <bool> upd-busy;
+    in property <float> upd-progress: -1;
+    in property <string> upd-channel-own: "beta";
+    callback update-action(string);
     callback set-link(string);
     // ZenLink Studio (USB Direct / AirPlay): picture and sound only. Touch,
     // keyboard, buttons, device shortcuts and auto unlock need Apple Driver mode.
@@ -1953,6 +1965,55 @@ component SettingsPanel inherits Glass {
                 }
 
                 Card {
+                    title: I18n.t("Pembaruan", "Updates");
+                    icon: "\u{E895}";
+                    tint-a: #34d399;
+                    tint-b: #059669;
+                    info: I18n.t("ZenLink hanya mengunduh setelah Anda menekan Perbarui, langsung dari rilis GitHub resmi, dan memeriksa SHA-256 file sebelum menjalankannya. Pengaturan Anda tetap. Beta dan Stabil adalah dua aplikasi terpisah: pindah kanal memasang edisi lain di sebelahnya.",
+                        "ZenLink downloads only after you press Update, straight from the official GitHub release, and checks the file's SHA-256 before running it. Your settings stay. Beta and Stable are separate apps: switching channel installs the other edition next to this one.");
+                    Text { text: "ZenLink v" + AppInfo.version; font-size: 12.5px; font-weight: 700; color: Theme.text; }
+                    Row { label: I18n.t("Cek otomatis saat mulai", "Check at start"); Toggle { checked: prefs.update-check; toggled(v) => { root.prefs.update-check = v; root.changed(root.prefs); } } }
+                    Row {
+                        label: I18n.t("Kanal", "Channel");
+                        Seg {
+                            width: 150px;
+                            options: ["stable", "beta"];
+                            labels: [I18n.t("Stabil", "Stable"), "Beta"];
+                            value: prefs.update-channel == "" ? root.upd-channel-own : prefs.update-channel;
+                            changed(v) => { root.prefs.update-channel = v == root.upd-channel-own ? "" : v; root.changed(root.prefs); root.update-action("check"); }
+                        }
+                    }
+                    if root.upd-status != "": Text { text: root.upd-status; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                    if root.upd-busy && root.upd-progress < 0: BusyBar { }
+                    if root.upd-progress >= 0: Rectangle {
+                        height: 4px;
+                        border-radius: 2px;
+                        background: Theme.fill;
+                        clip: true;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * clamp(root.upd-progress, 0, 1);
+                            height: parent.height;
+                            border-radius: 2px;
+                            background: Theme.accent;
+                            animate width { duration: 120ms; }
+                        }
+                    }
+                    if root.upd-notes != "": Text { text: root.upd-notes; font-size: 11px; color: Theme.text-3; wrap: word-wrap; }
+                    if root.upd-version != "": GlassButton {
+                        primary: true;
+                        enabled: !root.upd-busy;
+                        label: (root.upd-switch ? I18n.t("Pasang v", "Install v") : I18n.t("Perbarui ke v", "Update to v")) + root.upd-version;
+                        clicked => { root.update-action("install"); }
+                    }
+                    HorizontalLayout {
+                        spacing: 6px;
+                        GlassButton { enabled: !root.upd-busy; label: I18n.t("Cek update", "Check for updates"); clicked => { root.update-action("check"); } }
+                        if root.upd-version != "": GlassButton { label: I18n.t("Catatan rilis", "Release notes"); clicked => { root.update-action("notes"); } }
+                    }
+                }
+
+                Card {
                     title: I18n.t("Lanjutan", "Advanced");
                     icon: "\u{E713}";
                     tint-a: #a1a1aa;
@@ -2188,6 +2249,14 @@ export component AppWindow inherits Window {
     callback prefs-changed(Prefs);
     callback action(string);
     callback driver-action(string);
+    in property <string> upd-status;
+    in property <string> upd-version;
+    in property <string> upd-notes;
+    in property <bool> upd-switch;
+    in property <bool> upd-busy;
+    in property <float> upd-progress: -1;
+    in property <string> upd-channel-own: "beta";
+    callback update-action(string);
     callback settings-toggled(bool);
     callback window-action(string);
     // A key press for the device (Android); true = it was sent.
@@ -2358,6 +2427,14 @@ export component AppWindow inherits Window {
                     changed(p) => { root.prefs = p; root.prefs-changed(p); }
                     close => { root.settings-open = false; root.settings-toggled(false); }
                     driver-action(a) => { root.driver-action(a); }
+                    upd-status: root.upd-status;
+                    upd-version: root.upd-version;
+                    upd-notes: root.upd-notes;
+                    upd-switch: root.upd-switch;
+                    upd-busy: root.upd-busy;
+                    upd-progress: root.upd-progress;
+                    upd-channel-own: root.upd-channel-own;
+                    update-action(a) => { root.update-action(a); }
                     passcode-set: root.passcode-set;
                     save-passcode(c) => { root.save-passcode(c); }
                     }

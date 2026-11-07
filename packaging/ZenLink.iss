@@ -89,6 +89,9 @@ Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rul
 ; Apple Driver mode needs Apple Mobile Device Service (Apple Devices or iTunes).
 Filename: "ms-windows-store://pdp/?ProductId=9NP83LWLPZ9K"; Description: "Install Apple Devices from the Microsoft Store (needed for Apple Driver mode)"; Flags: postinstall shellexec skipifsilent unchecked; Check: not AppleServiceInstalled
 Filename: "{app}\ZenLink.exe"; Description: "{cm:LaunchProgram,ZenLink}"; Flags: nowait postinstall skipifsilent
+; In-app update (v2.5.1): ZenLink runs this Setup with /SILENT /ZLRELAUNCH=1 and
+; quits; start the new version when the silent install is done.
+Filename: "{app}\ZenLink.exe"; Flags: nowait; Check: RelaunchAfterUpdate
 
 [UninstallRun]
 ; Stop only the processes started from this install folder: a portable ZenLink uses the same exe names.
@@ -126,6 +129,45 @@ var
   ImagePath: String;
 begin
   Result := RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\Apple Mobile Device Service', 'ImagePath', ImagePath);
+end;
+
+function RelaunchAfterUpdate(): Boolean;
+begin
+  Result := WizardSilent() and (ExpandConstant('{param:ZLRELAUNCH|0}') = '1');
+end;
+
+// Clean update (v2.5.1): install-manifest.txt lists the top-level files and
+// folders the previous ZenLink installed in {app}. Remove exactly those before
+// the new files are copied, so nothing a newer version no longer ships stays
+// behind. Nothing else in {app} is touched (a user may have picked a folder
+// with other files), and settings live in %APPDATA% / %LOCALAPPDATA%.
+procedure RemovePreviousFiles();
+var
+  Lines: TArrayOfString;
+  I: Integer;
+  Name, Path: String;
+begin
+  if not LoadStringsFromFile(ExpandConstant('{app}\install-manifest.txt'), Lines) then
+    Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    Name := Trim(Lines[I]);
+    if (Name = '') or (Name = '.') or (Pos('..', Name) > 0) or (Pos('', Name) > 0) or (Pos('/', Name) > 0) or (Pos(':', Name) > 0) then
+      Continue;
+    if CompareText(Copy(Name, 1, 5), 'unins') = 0 then
+      Continue;
+    Path := ExpandConstant('{app}') + Name;
+    if DirExists(Path) then
+      DelTree(Path, True, True, True)
+    else if FileExists(Path) then
+      DeleteFile(Path);
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    RemovePreviousFiles();
 end;
 
 function InitializeSetup(): Boolean;

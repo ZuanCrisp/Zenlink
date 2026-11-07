@@ -11,6 +11,7 @@ pub mod nal;
 pub mod sidecar;
 pub mod source;
 pub mod stream;
+pub mod update;
 
 pub const HOST: &str = "127.0.0.1";
 
