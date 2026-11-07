@@ -215,7 +215,7 @@ measurement, or the user's confirmation on a named device). Otherwise it is
   - Repeated on the v2.5.0 packages (round-2 cleanup): same result for both.
   - Still unverified: a PC without any Android SDK, and a real phone (USB and Wi-Fi), with the user's consent.
 
-### B-29: "Close to the tray" and "Start when plugged in" do nothing in the Rust window            Status: fixed (unverified)
+### B-29: "Close to the tray" and "Start when plugged in" do nothing in the Rust window            Status: fixed (verified)
 - Reported: 2026-11-07, found in the release audit (README claim check).
 - Cause: `prefs.rs` stored `closeToTray` and `autoStart` and Settings › Advanced showed both toggles, but nothing in `zenlink-app` read them; only the classic window implemented a tray. Same in v2.2.31.
 - Fix (owner's request 2026-11-07: tray and "start with Windows"): `zenlink-app/src/tray.rs`.
@@ -223,12 +223,12 @@ measurement, or the user's confirmation on a named device). Otherwise it is
   - The close button and Alt+F4 hide the window to the tray when the option is on (the session keeps running), else quit.
   - "Start when plugged in" (never implemented) is replaced by "Start with Windows": an `HKCU\...\Run` value `ZenLink` = `"<exe>" --background`, written only when the user turns it on, removed when off and by the uninstaller. `--background` starts in the tray (or minimised when the tray option is off).
   - One ZenLink per user: a second start shows the running window (also when it is hidden in the tray). Tests with `ZL_PREFS` are exempt.
-- Verification: test `run_command_quotes_the_path_and_starts_in_the_background`; smoke test (temp prefs, no device): `--background` with the tray option leaves the window hidden, and the helper's show request (the same one a second start sends) makes it visible. Unverified: the tray icon and its menu by eye, and the Run entry after a Windows restart (writing autostart in a test was avoided).
+- Verification: test `run_command_quotes_the_path_and_starts_in_the_background`; smoke test (temp prefs, no device): `--background` with the tray option leaves the window hidden, and the helper's show request (the same one a second start sends) makes it visible. 2026-11-07, installed v2.5.0 with the owner's settings (backed up and restored): turning on "Start with Windows" wrote `HKCU\...\Run\ZenLink = "%LOCALAPPDATA%\Programs\ZenLink\ZenLink.exe" --background`; launching exactly that command (what Windows runs at sign-in) kept the window hidden and `Shell_NotifyIconGetRect` found the tray icon. Still to see by eye: the tray menu, and a real sign-in after a restart.
 
-### B-30: The app was still called "ZenLink Next"            Status: fixed (unverified)
+### B-30: The app was still called "ZenLink Next"            Status: fixed (verified)
 - Reported: 2026-11-07 by the owner: "nama jadi ZenLink".
 - Fix: window, installer, shortcuts, AirPlay name (`ZenLinkStudio`), firewall rule and scripts say "ZenLink"; version 2.5.0. The installer now uses v2.2.x's AppId and folder, so Setup upgrades an installed v2.2.x in place and removes its old `_internal` first. v2.5 keeps its own data folder (`ZenLink-Next`) and ports (47421, AirPlay 7100), so a v2.2.31 Portable.exe still runs next to it; rollback = the v2.2.31 Setup from its release. The firewall helper now deletes only its own program's rule, so an installed and a portable copy do not remove each other's rule.
-- Verification: `tests/test_next_isolation.py` (AppId, name, `_internal` cleanup, no "Next" in the installer). Unverified: an installer run over an installed v2.2.31 (needs the user's approval; it replaces that install).
+- Verification: `tests/test_next_isolation.py` (AppId, name, `_internal` cleanup, no "Next" in the installer). 2026-11-07 (owner approved): v2.2.31 Setup installed silently per user, then v2.5.0 Setup over it: one uninstall entry `ZenLink 2.5.0` at the same folder, exit code 0, all v2.2.31-only folders gone (the first run left 3 small portaudio/`__init__.py` files; added to `[InstallDelete]`, re-run clean: installed files = build output + uninstaller). Not tested: a clean PC / Windows Sandbox (Sandbox is not enabled on this PC) and Windows N.
 
 ### B-31: Slint warning "'maximized' shadows the builtin property"            Status: fixed (verified)
 - Reported: 2026-11-07, build output (also in v2.2.31).
@@ -255,3 +255,9 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Reported: 2026-11-07 by the owner: "bisa sambungkan dengan QR, biar simple".
 - Fix: "Pair with QR" in the Wi-Fi card shows `WIFI:T:ADB;S:zenlink-<random>;P:<random>;;` (the Android Studio format). ZenLink polls the ADB server's mDNS list (`host:mdns:services`) for `_adb-tls-pairing` with that name, pairs with the password, then connects to the phone's `_adb-tls-connect` service at the same IP. Gives up after 2 minutes; Cancel stops it. The code pairing stays.
 - Verification: tests `mdns_list_and_qr_pairing_lookup`, `qr_text_and_tokens`; the QR shown in the app (`ZL_QR_TEST`) decodes with zxing-cpp to the expected text. Unverified: an Android 11+ phone scanning it on the same Wi-Fi.
+
+### B-36: Settings silently reset when the file has a UTF-8 byte order mark            Status: fixed (verified)
+- Reported: 2026-11-07, found in the autostart test: a settings file written by Windows PowerShell (`Set-Content -Encoding utf8`, also older Notepad) loaded as defaults.
+- Cause: `serde_json` rejects a leading BOM; `prefs::load` then fell back to the defaults.
+- Fix: `prefs::parse` strips a BOM before parsing.
+- Verification: test `a_file_with_a_byte_order_mark_still_loads`.

@@ -56,11 +56,18 @@ pub fn defaults() -> Prefs {
 pub fn load() -> Prefs {
     match path()
         .and_then(|f| std::fs::read(f).ok())
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|b| parse(&b))
     {
         Some(v) => from_value(&v),
         None => defaults(),
     }
+}
+
+/// Parses the file, also when an editor saved it with a UTF-8 byte order
+/// mark (serde_json rejects one, which would silently reset every setting).
+fn parse(bytes: &[u8]) -> Option<Value> {
+    let b = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    serde_json::from_slice(b).ok()
 }
 
 /// Reads a saved file; unknown or invalid values keep their defaults, so
@@ -200,6 +207,14 @@ pub fn to_value(p: &Prefs) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_file_with_a_byte_order_mark_still_loads() {
+        let v = parse(b"\xEF\xBB\xBF{\"startWithWindows\": true}").unwrap();
+        assert!(from_value(&v).start_with_windows);
+        assert!(parse(b"{}").is_some());
+        assert!(parse(b"not json").is_none());
+    }
 
     #[test]
     fn fresh_install_defaults() {

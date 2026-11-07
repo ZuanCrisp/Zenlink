@@ -73,6 +73,8 @@ Type: filesandordirs; Name: "{app}\sounddevice-*.dist-info"
 Type: files; Name: "{app}\sqlite3.dll"
 Type: files; Name: "{app}\_sqlite3.pyd"
 Type: files; Name: "{app}\_sounddevice_data\portaudio-binaries\*"
+Type: filesandordirs; Name: "{app}\_sounddevice_data\portaudio-binaries\.github"
+Type: files; Name: "{app}\_sounddevice_data\__init__.py"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "Start ZenLink.bat,run.bat,Create-Desktop-Shortcut.bat,Uninstall-ZenLink.bat,portable.txt"; Flags: ignoreversion recursesubdirs createallsubdirs

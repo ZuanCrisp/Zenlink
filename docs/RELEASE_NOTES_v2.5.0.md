@@ -22,6 +22,9 @@
 - Settings slide without jitter; icons show on Windows 10.
 - A phone plugged in without USB debugging now gets a hint instead of nothing.
 - Setup upgrades an installed ZenLink 2.2 in place (one ZenLink in Start and in Apps).
+- Notifications and tooltips are no longer hidden behind the picture.
+- The window opens larger (up to 85% of the screen height); a size you pick is remembered.
+- Shortcuts: `Alt+M` turns the sound on the PC on or off. Plain keys always go to the phone or iPad (Space no longer starts or stops mirroring).
 
 ### 📦 Downloads
 
@@ -37,6 +40,7 @@ Smaller than the beta even with `adb` inside: unused Python packages, the old We
 
 - Some phones (for example Samsung) need the maker's USB driver; Windows Update usually installs it.
 - Android sound needs Android 11+.
+- Android Wi-Fi QR pairing and the ZenLink Studio "Device only" sound were checked without a phone so far. Please report anything that does not work in [Issues](https://github.com/zenvyzenshiro/zenlink/issues).
 
 ### 🙏 Credits
 
