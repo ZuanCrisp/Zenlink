@@ -5556,14 +5556,14 @@ dependencies = [
 
 [[package]]
 name = "zenlink-android"
-version = "2.5.0-beta.1"
+version = "2.5.0"
 dependencies = [
  "log",
 ]
 
 [[package]]
 name = "zenlink-app"
-version = "2.5.0-beta.1"
+version = "2.5.0"
 dependencies = [
  "log",
  "miniz_oxide 0.9.1",
@@ -5579,7 +5579,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-audio"
-version = "2.5.0-beta.1"
+version = "2.5.0"
 dependencies = [
  "log",
  "windows",
@@ -5587,7 +5587,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-core"
-version = "2.5.0-beta.1"
+version = "2.5.0"
 dependencies = [
  "base64 0.22.1",
  "log",
@@ -5598,7 +5598,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-video"
-version = "2.5.0-beta.1"
+version = "2.5.0"
 dependencies = [
  "log",
  "windows",

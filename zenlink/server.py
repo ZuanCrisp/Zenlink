@@ -54,6 +54,9 @@ def build_app(manager: CastManager) -> web.Application:
     async def index(_request: web.Request) -> web.Response:
         # Version every UI file by its modification time so an updated app
         # never runs a cached old script (WebView2 keeps its cache on disk).
+        if not (UI_DIR / "index.html").is_file():
+            # Packaged builds have no classic window: ZenLink.exe is the UI.
+            return web.Response(text="ZenLink backend. Open ZenLink.exe.", content_type="text/plain")
         html = (UI_DIR / "index.html").read_text(encoding="utf-8")
         version = int(max((f.stat().st_mtime for f in UI_DIR.iterdir() if f.is_file()), default=0))
         html = re.sub(r'(/ui/[\w.-]+\.(?:js|css|png|svg))"', lambda m: f'{m.group(1)}?v={version}"', html)
@@ -354,7 +357,8 @@ def build_app(manager: CastManager) -> web.Application:
     app[OCR_KEY] = OcrSession()
     app.cleanup_ctx.append(client_ctx)
     app.add_routes(routes)
-    app.router.add_static("/ui/", UI_DIR, show_index=False)
+    if UI_DIR.is_dir():  # the classic window's files (source checkout only)
+        app.router.add_static("/ui/", UI_DIR, show_index=False)
     return app
 
 

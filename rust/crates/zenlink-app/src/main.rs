@@ -1,5 +1,5 @@
 #![windows_subsystem = "windows"]
-//! ZenLink Next: Rust shell (ADR-0001 Stage 1).
+//! ZenLink (v2.5, generation "Next"): Rust shell (ADR-0001 Stage 1).
 
 mod android;
 mod backdrop;
@@ -9,6 +9,8 @@ mod flow;
 mod input;
 mod prefs;
 mod shortcuts;
+mod tray;
+mod usbphones;
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
@@ -1105,7 +1107,7 @@ fn start_android_poll(ui: &AppWindow) {
                             let w = weak.clone();
                             let _ = slint::invoke_from_event_loop(move || {
                                 if let Some(ui) = w.upgrade() {
-                                    show_android(&ui, &AdbView::Starting, &[]);
+                                    show_android(&ui, &AdbView::Starting, &[], false);
                                 }
                             });
                             match zenlink_android::adb::start_server(&adb, port) {
@@ -1168,10 +1170,14 @@ fn start_android_poll(ui: &AppWindow) {
                     (AdbView::Running { version, other }, list)
                 }
             };
+            // B-15: nothing in ADB, but Windows sees a phone (MTP/PTP).
+            let phone_seen = list.is_empty()
+                && matches!(view, AdbView::Running { .. })
+                && usbphones::phone_without_adb();
             let w = weak.clone();
             if slint::invoke_from_event_loop(move || {
                 if let Some(ui) = w.upgrade() {
-                    show_android(&ui, &view, &list);
+                    show_android(&ui, &view, &list, phone_seen);
                 }
             })
             .is_err()
@@ -1187,6 +1193,7 @@ fn show_android(
     ui: &AppWindow,
     view: &AdbView,
     list: &[zenlink_android::discovery::AndroidDevice],
+    phone_seen: bool,
 ) {
     use zenlink_android::devices::Connection;
     use zenlink_android::discovery::Readiness;
@@ -1209,7 +1216,13 @@ fn show_android(
             "ADB port 5037 is used by another program. ZenLink does not change it.",
         ),
         AdbView::Running { version, other } => {
-            let base = if list.is_empty() {
+            let base = if list.is_empty() && phone_seen {
+                tr_ui(
+                    ui,
+                    "Windows melihat HP lewat USB, tapi ADB belum. Nyalakan Debugging USB (langkah di bawah), lalu cabut dan colok lagi kabelnya.",
+                    "Windows sees a phone on USB, but ADB does not yet. Turn on USB debugging (steps below), then unplug and plug the cable in again.",
+                )
+            } else if list.is_empty() {
                 tr_ui(ui, "Belum ada perangkat Android. Ikuti langkah di bawah.", "No Android device yet. Follow the steps below.")
             } else {
                 format!("{} {}", list.len(), tr_ui(ui, "perangkat terlihat lewat ADB.", "device(s) seen through ADB."))
@@ -2144,7 +2157,70 @@ fn tr_ui_static(ui: &AppWindow, id: &'static str, en: &'static str) -> &'static 
     }
 }
 
+/// Tray menu words in the UI language.
+fn tray_labels(p: &Prefs) -> (&'static str, &'static str) {
+    if p.lang.as_str() == "en" {
+        ("Open ZenLink", "Quit")
+    } else {
+        ("Buka ZenLink", "Keluar")
+    }
+}
+
+/// "Close to the tray": hide the window, keep the session (sound keeps
+/// playing; Stop or Quit from the tray ends it).
+fn hide_to_tray(ui: &AppWindow) {
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+    if let Some(h) = hwnd_of(ui.window()) {
+        let _ = unsafe { ShowWindow(h, SW_HIDE) };
+        tray::HIDDEN.store(true, Relaxed);
+    }
+}
+
+/// Brings the window back (from the tray, minimised or behind others).
+fn show_window(ui: &AppWindow) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE, SW_SHOW,
+    };
+    if let Some(h) = hwnd_of(ui.window()) {
+        unsafe {
+            let _ = ShowWindow(
+                h,
+                if IsIconic(h).as_bool() {
+                    SW_RESTORE
+                } else {
+                    SW_SHOW
+                },
+            );
+            let _ = SetForegroundWindow(h);
+        }
+        tray::HIDDEN.store(false, Relaxed);
+    }
+}
+
+fn quit_app(ui: &AppWindow) {
+    tray::set_icon(false, "", "");
+    let _ = ui.window().hide();
+    let _ = slint::quit_event_loop();
+}
+
+/// The window's close button and Alt+F4.
+fn close_requested(ui: &AppWindow) {
+    if ui.get_prefs().close_to_tray {
+        hide_to_tray(ui);
+    } else {
+        quit_app(ui);
+    }
+}
+
 fn main() -> Result<(), slint::PlatformError> {
+    // Tests run with their own prefs file (ZL_PREFS) and may run next to the
+    // user's ZenLink; everyone else gets one ZenLink per user: a second start
+    // shows the running one (also when it is hidden in the tray).
+    let test_mode = std::env::var_os("ZL_PREFS").is_some();
+    if !test_mode && tray::show_running_instance() {
+        return Ok(());
+    }
+    let background = std::env::args().any(|a| a == tray::BACKGROUND_ARG);
     init_log();
     slint::BackendSelector::new()
         .backend_name("winit".into())
@@ -2162,6 +2238,34 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.global::<AppInfo>()
         .set_version(env!("CARGO_PKG_VERSION").into());
     ui.set_prefs(prefs::load());
+    {
+        let weak = ui.as_weak();
+        tray::install(move |e| {
+            let w = weak.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = w.upgrade() else { return };
+                match e {
+                    tray::Event::Toggle if !tray::HIDDEN.load(Relaxed) => hide_to_tray(&ui),
+                    tray::Event::Toggle | tray::Event::Show => show_window(&ui),
+                    tray::Event::Quit => quit_app(&ui),
+                }
+            });
+        });
+        let p = ui.get_prefs();
+        let (open, quit) = tray_labels(&p);
+        tray::set_icon(p.close_to_tray, open, quit);
+        if !test_mode {
+            // Keeps the Run entry pointing at this exe (a moved Portable.exe).
+            tray::set_start_with_windows(p.start_with_windows, false);
+        }
+        let weak = ui.as_weak();
+        ui.window().on_close_requested(move || {
+            if let Some(ui) = weak.upgrade() {
+                close_requested(&ui);
+            }
+            slint::CloseRequestResponse::KeepWindowShown
+        });
+    }
     let api = Api::new();
     let input = Input::new(api.clone());
     let touch_on = Arc::new(AtomicBool::new(ui.get_prefs().touch));
@@ -2334,6 +2438,11 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_prefs_changed(move |mut p| {
             // Video profile logic (phase A5), then store for the device.
             devprofiles::normalize(&last.borrow(), &mut p);
+            if p.start_with_windows != last.borrow().start_with_windows && !test_mode {
+                tray::set_start_with_windows(p.start_with_windows, true);
+            }
+            let (open, quit) = tray_labels(&p);
+            tray::set_icon(p.close_to_tray, open, quit);
             let android_changed = devprofiles::picture_of(&p)
                 != devprofiles::picture_of(&last.borrow())
                 || p.android_profile != last.borrow().android_profile;
@@ -2844,10 +2953,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(ui) = weak.upgrade() else { return };
             let w = ui.window();
             match a.as_str() {
-                "close" => {
-                    let _ = w.hide();
-                    let _ = slint::quit_event_loop();
-                }
+                "close" => close_requested(&ui),
                 "min" => w.set_minimized(true),
                 "max" if is_full() => {}
                 "max" => w.set_maximized(!w.is_maximized()),
@@ -3062,11 +3168,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.set_compact(lw < 640.0);
             }
             let (maxed, full) = (ui.window().is_maximized(), is_full());
-            if maxed != ui.get_maximized() || full != ui.get_fullscreen() {
+            if maxed != ui.get_is_maximized() || full != ui.get_fullscreen() {
                 // Window style changed: corners and glass go again.
                 APP.with_borrow_mut(|a| a.backdrop = None);
             }
-            ui.set_maximized(maxed);
+            ui.set_is_maximized(maxed);
             ui.set_fullscreen(full);
             // Settings slide: window width follows the animated chrome so
             // the picture keeps its size; ends when the slide settles.
@@ -3208,7 +3314,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
                 // Dot field: ~30 fps, only while there is no picture.
-                if !streaming && p.dots {
+                if !streaming && p.dots && !tray::HIDDEN.load(Relaxed) {
                     let fresh = a.dots_at.map(|t| t.elapsed() >= Duration::from_millis(33)).unwrap_or(true);
                     if fresh {
                         a.dots_at = Some(Instant::now());
@@ -3282,7 +3388,38 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     apply_look(&ui);
-    let r = ui.run();
+    // "Start with Windows" (--background): into the tray when "Close to the
+    // tray" is on, else minimised. The window exists once the loop runs.
+    let start_timer = slint::Timer::default();
+    if background {
+        let weak = ui.as_weak();
+        let tries = std::cell::Cell::new(0);
+        start_timer.start(
+            slint::TimerMode::Repeated,
+            Duration::from_millis(15),
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                if tries.get() >= 1000 {
+                    return; // done
+                }
+                tries.set(tries.get() + 1);
+                if hwnd_of(ui.window()).is_none() && tries.get() < 200 {
+                    return;
+                }
+                if ui.get_prefs().close_to_tray {
+                    hide_to_tray(&ui);
+                } else {
+                    ui.window().set_minimized(true);
+                }
+                tries.set(1000);
+            },
+        );
+    }
+    // Until quit: the window may be hidden in the tray.
+    let r = ui.show().and_then(|_| slint::run_event_loop_until_quit());
+    drop(start_timer);
+    tray::set_icon(false, "", "");
+    let _ = ui.hide();
     APP.with_borrow_mut(|a| a.view = None);
     if let Some(m) = SIDECAR.get() {
         m.lock().unwrap().take();

@@ -73,7 +73,6 @@ $pyiArgs = @(
     "--icon", "assets\zenlink.ico",
     "--contents-directory", ".",
     "--version-file", "packaging\version_info.txt",
-    "--add-data", "ui${sep}ui",
     "--add-data", "assets${sep}assets",
     "--add-data", "tools${sep}tools",
     "--add-data", "drivers${sep}drivers",
@@ -85,7 +84,6 @@ $pyiArgs = @(
     "--collect-all", "pmd_pytcp",
     "--collect-all", "pmd_net_addr",
     "--collect-all", "pytun_pmd3",  # wintun.dll, loaded when the tunnel module is imported
-    "--collect-all", "webview",
     # Only the x64 PortAudio (packaging\pyi-hooks\hook-sounddevice.py).
     "--additional-hooks-dir", "packaging\pyi-hooks",
     "--hidden-import", "_sounddevice_data",
@@ -97,19 +95,23 @@ $pyiArgs = @(
     "--exclude-module", "av",
     "--hidden-import", "Crypto.Cipher.AES",
     "--collect-submodules", "zenlink",
-    "--hidden-import", "clr",
     "--exclude-module", "tkinter",
     "--exclude-module", "matplotlib",
     "--exclude-module", "IPython",
-    # Smaller build: Pillow is only used for the tray icon (PNG/ICO).
-    "--exclude-module", "PIL._avif",
-    "--exclude-module", "PIL.AvifImagePlugin",
-    "--exclude-module", "PIL._webp",
-    "--exclude-module", "PIL.WebPImagePlugin",
-    "--exclude-module", "PIL._imagingft",
-    "--exclude-module", "PIL.ImageFont",
-    "--exclude-module", "PIL.ImageQt",
-    "--exclude-module", "PIL.ImageTk",
+    # The classic WebView2 window (pywebview, pythonnet, pystray, Pillow,
+    # ui\) is not packaged: ZenLink.exe is the window and the backend runs
+    # --headless (docs/SIZE_AUDIT.md, set A). The source zip keeps it
+    # (ZENLINK_UI=classic with Start ZenLink.bat).
+    "--exclude-module", "webview",
+    "--exclude-module", "clr",
+    "--exclude-module", "clr_loader",
+    "--exclude-module", "pythonnet",
+    "--exclude-module", "bottle",
+    "--exclude-module", "proxy_tools",
+    "--exclude-module", "pystray",
+    "--exclude-module", "PIL",
+    # requests falls back to charset_normalizer (set C2).
+    "--exclude-module", "chardet",
     "--exclude-module", "pydoc",
     # Never imported by the headless backend (trace + lazy-import scan in
     # docs/SIZE_AUDIT.md, B1/B4/B5): pydantic comes with pymobiledevice3's
@@ -142,7 +144,7 @@ VSVersionInfo(
       StringStruct('InternalName', 'ZenLinkService'),
       StringStruct('LegalCopyright', 'Copyright (C) 2026 Zenvy Zenshiro. GPL-3.0-or-later.'),
       StringStruct('OriginalFilename', 'ZenLinkService.exe'),
-      StringStruct('ProductName', 'ZenLink Next'),
+      StringStruct('ProductName', 'ZenLink'),
       StringStruct('ProductVersion', '$Version')])]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
@@ -170,7 +172,7 @@ Test-FrozenExe (Join-Path $app "ZenLinkService.exe")
 # The full FFmpeg from PyAV must not come back (Phase 1 size win).
 if (Get-ChildItem $app -Recurse -Filter "avcodec-*.dll") { throw "PyAV/FFmpeg DLLs found in $app" }
 # Size audit: removed parts must stay out, the one PortAudio must be in.
-foreach ($gone in "pydantic_core", "sqlite3.dll", "_sqlite3.pyd", "libportaudio32bit.dll", "libportaudioarm64.dll", "libportaudio64bit-asio.dll") {
+foreach ($gone in "pydantic_core", "sqlite3.dll", "_sqlite3.pyd", "libportaudio32bit.dll", "libportaudioarm64.dll", "libportaudio64bit-asio.dll", "webview", "pythonnet", "PIL", "chardet", "Python.Runtime.dll") {
     if (Get-ChildItem $app -Recurse -Filter $gone) { throw "$gone found in $app (see docs/SIZE_AUDIT.md)" }
 }
 if (-not (Test-Path (Join-Path $app "_sounddevice_data\portaudio-binaries\libportaudio64bit.dll"))) { throw "PortAudio x64 missing in $app" }

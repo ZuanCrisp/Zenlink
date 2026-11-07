@@ -88,10 +88,34 @@ Only the low-risk sets, each guarded:
   including `sounddevice`, `zenlink.audio_out`, `zeroconf`, `usb.core`,
   `zenlink.ocr`) passes in the onedir and the onefile build.
 
-Not applied (needs device tests or touches the Apple path): B2, B3, B6, C1,
-C2, A. They wait for the Apple device test round or M1–M5.
+Round 2 (2026-11-07, owner: "clean kan semua"):
 
-## Result (measured, final build 2026-11-07)
+- **A**: the classic WebView2 window is not packaged (`webview`, `pythonnet`,
+  `clr_loader`, `bottle`, `proxy_tools`, `pystray`, `PIL`, `ui\`). Started
+  alone, `ZenLinkService.exe` now opens `ZenLink.exe`; the server serves `/ui/`
+  only when the folder exists. The source zip keeps the classic window.
+- **C2**: `chardet` left out; `requests` uses `charset_normalizer` (both in
+  the frozen self-test, now 32 modules).
+- The build guard also fails on `webview`, `pythonnet`, `PIL`, `chardet`,
+  `Python.Runtime.dll`.
+
+Not applied: B2, B3, B6 (pymobiledevice3 may import them on device paths
+that the start-up trace does not reach, e.g. `construct`), C1 (0.46 MB). They
+wait for M1–M5.
+
+## Result after round 2 (measured, 2026-11-07, v2.5.0)
+
+| File | Round 1 | Round 2 | Change |
+| :--- | ---: | ---: | ---: |
+| Setup.exe | 43,897,801 B | 40,425,424 B (38.6 MiB) | −7.9% |
+| Portable.exe | 58,616,320 B | 54,302,720 B (51.8 MiB) | −7.4% |
+| Installed folder | 103,240,623 B | 94,431,410 B | −8.5% |
+| Source zip | 14,340,730 B | 14,345,090 B | |
+
+From the first beta build with adb (48,815,889 / 70,203,392 B): Setup −17.2%,
+Portable −22.6%.
+
+## Result of round 1 (measured, 2026-11-07)
 
 | File | Before cleanup (with adb) | After | Change |
 | :--- | ---: | ---: | ---: |

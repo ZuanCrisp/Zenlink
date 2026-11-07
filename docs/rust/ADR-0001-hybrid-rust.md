@@ -45,3 +45,22 @@ Each step deletes the matching Python module and endpoint proxy. The HTTP contra
 - During Stage 1 the installer still carries Python. It is smaller than v2.2.3 because WebView2 UI assets and the `av` decode path are not needed by the Rust shell.
 - No numbers (latency, size, OBS frame drops) are claimed until they are measured on the user's machine.
 - `main` keeps the v2.2.3 Python app until the Rust build is tested on a real device.
+
+## Addendum 2026-11-07: Apple sound stays in the Python backend for v2.5
+
+Decision (the owner delegated it): Apple sound output stays on the Python
+`sounddevice` path (`zenlink/audio_out.py`) for v2.5. Android sound is
+already Rust (`zenlink-audio`, WASAPI).
+
+Why:
+- It is the path the owner confirmed on an iPhone in v2.2.31 (B-3), with the
+  Bluetooth / MME margins and the 10 ms minimum margin.
+- ZenLink Studio over the cable reports the audio clock skew that the iPhone's
+  players sync to (`SkewMeter`, USB Direct). Moving the output to Rust moves
+  that measurement across a process boundary; a mistake there shows as drift
+  or stutter that only a device test catches.
+- Size gain would be small (`sounddevice` + one PortAudio DLL, about 0.4 MB
+  compressed) while Python stays for the Apple protocols anyway.
+
+When: with M1–M5 (the Apple backend in Rust), measured A/B against this path
+on the same devices (wired and Bluetooth), as AGENTS.md §3e requires.

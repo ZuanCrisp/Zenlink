@@ -11,6 +11,7 @@
 - **🪟 Native Rust window.** Media Foundation hardware decoding into Direct3D 11, one frame per refresh, Liquid Glass UI. No WebView2, no Visual C++ runtime.
 - **🎬 OBS.** Game Capture of the ZenLink window is smoother and keeps working through rotation.
 - **📋 OCR copy.** `Alt+C` copies the text on the screen to the PC, on Apple and Android.
+- **📥 Tray & start with Windows.** Close to the notification area (the session keeps running) and start with Windows straight into the tray, both in Settings › Advanced.
 - **🧭 First screen.** Choose iPhone / iPad or Android; the Apple Driver / ZenLink Studio choice stays as the Apple step.
 
 ### 🛠️ Fixes
@@ -19,20 +20,21 @@
 - Windows N editions: ZenLink explains the missing Media Feature Pack and opens Windows' own settings page instead of failing silently.
 - The installer no longer warns about WebView2.
 - Settings slide without jitter; icons show on Windows 10.
+- A phone plugged in without USB debugging now gets a hint instead of nothing.
+- Setup upgrades an installed ZenLink 2.2 in place (one ZenLink in Start and in Apps).
 
 ### 📦 Downloads
 
 | File | Size |
 | :--- | ---: |
-| `ZenLink-v2.5.0-Setup.exe` | 41.9 MB |
-| `ZenLink-v2.5.0-Portable.exe` | 55.9 MB |
+| `ZenLink-v2.5.0-Setup.exe` | 38.6 MB |
+| `ZenLink-v2.5.0-Portable.exe` | 51.8 MB |
 | `ZenLink-v2.5.0-Portable-Source.zip` | 13.7 MB |
 
-Smaller than the beta even with `adb` inside: unused Python packages and extra PortAudio builds are left out, and Portable.exe stores `adb` compressed.
+Smaller than the beta even with `adb` inside: unused Python packages, the old WebView2 window and extra PortAudio builds are left out, and Portable.exe stores `adb` compressed.
 
 ### ⚠️ Known limits
 
-- "Close to the tray" and "Start when plugged in" in Settings › Advanced do nothing yet.
 - Some phones (for example Samsung) need the maker's USB driver; Windows Update usually installs it.
 - Android sound needs Android 11+.
 
@@ -44,8 +46,5 @@ Android is a trademark of Google LLC. iPhone, iPad and AirPlay are trademarks of
 
 <!-- Before publishing (remove this block):
 - Device test round passed: Android USB + Wi-Fi, iPhone Apple Driver, Studio cable + AirPlay, audio, OBS, driver switching, OCR.
-- Owner decision on B-10 (adb redistribution).
-- B-29: implement or hide the two toggles, then drop that known-limit line.
-- Rebuild with the final version string and installer identity; re-measure the sizes above.
 - Prerelease or stable flag decided by the owner; never touch v2.2.31.
 -->

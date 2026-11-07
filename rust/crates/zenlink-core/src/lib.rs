@@ -18,7 +18,7 @@ pub const HOST: &str = "127.0.0.1";
 pub const PORT: u16 = 47421;
 
 /// Product name for window titles and messages.
-pub const APP_NAME: &str = "ZenLink Next";
+pub const APP_NAME: &str = "ZenLink";
 
 /// Folder name under %APPDATA% and %LOCALAPPDATA% for prefs, settings and the
 /// unpacked backend. The stable build uses "ZenLink"; the beta never touches it.
@@ -58,7 +58,7 @@ mod isolation_tests {
 
     #[test]
     fn beta_names_carry_beta() {
-        assert!(APP_NAME.contains("Next"));
+        assert_eq!(APP_NAME, "ZenLink");
         assert!(DATA_DIR_NAME.contains("Next"));
         assert!(LOG_FILE_NAME.contains("next-v25"));
         assert_ne!(LOG_FILE_NAME, "zenlink-next.log");

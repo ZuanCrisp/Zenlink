@@ -170,7 +170,7 @@ class CastManagerTests(unittest.TestCase):
         m.refresh_devices()
         dev = m._presence["devices"][0]
         self.assertTrue(dev["airplay"] and dev["ready"])
-        self.assertEqual(dev["receiver"], "ZenLinkStudioNext")
+        self.assertEqual(dev["receiver"], "ZenLinkStudio")
 
     def test_auto_airplay_and_pause(self):
         m = self.make("usbdirect", "wireless")
@@ -255,7 +255,7 @@ class AirPlayProtocolTests(unittest.IsolatedAsyncioTestCase):
                         mock.patch.object(receiver.AirPlayReceiver, "_unadvertise")]
         for p in self.patches:
             p.start()
-        self.rx = receiver.AirPlayReceiver("ZenLinkStudioNext", self.hub, lambda e, d: self.events.append((e, d)))
+        self.rx = receiver.AirPlayReceiver("ZenLinkStudio", self.hub, lambda e, d: self.events.append((e, d)))
         server = await asyncio.start_server(self.rx._handle_rtsp, "127.0.0.1", 0)
         self.rx._servers.append(server)
         self.port = server.sockets[0].getsockname()[1]
@@ -305,7 +305,7 @@ class AirPlayProtocolTests(unittest.IsolatedAsyncioTestCase):
         status, data = await self.rtsp("GET", "/info")
         info = plistlib.loads(data)
         self.assertIn("200", status)
-        self.assertEqual(info["name"], "ZenLinkStudioNext")
+        self.assertEqual(info["name"], "ZenLinkStudio")
         self.assertEqual((info["displays"][0]["width"], info["displays"][0]["height"]), (3840, 2160))
         self.assertTrue(info["features"] >> 42 & 1, "HEVC passthrough (SupportsScreenMultiCodec) is advertised")
         status, data = await self.rtsp("GET", "/info", plistlib.dumps({"qualifier": ["txtAirPlay"]}, fmt=plistlib.FMT_BINARY),

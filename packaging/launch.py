@@ -40,6 +40,10 @@ SELFTEST_MODULES = (
     "zenlink.firewall",
     "zenlink.drivers.status",
     "zenlink.drivers.manager",
+    # chardet is left out: requests must use charset_normalizer.
+    "requests",
+    "charset_normalizer",
+    "zenlink.__main__",
 )
 
 

@@ -101,6 +101,20 @@ def _already_running() -> bool:
     return True
 
 
+def _open_rust_window() -> None:
+    """ZenLinkService.exe was started on its own: start ZenLink.exe instead."""
+    import subprocess
+
+    exe = APP_ROOT / "ZenLink.exe"
+    if exe.is_file():
+        subprocess.Popen([str(exe)], close_fds=True)  # noqa: S603
+        return
+    try:
+        ctypes.windll.user32.MessageBoxW(None, "Open ZenLink.exe to start ZenLink.", "ZenLink", 0x40)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -129,7 +143,7 @@ def main() -> None:
         try:
             import ctypes
 
-            ctypes.windll.user32.MessageBoxW(None, msg, "ZenLink Next", 0x10)
+            ctypes.windll.user32.MessageBoxW(None, msg, "ZenLink", 0x10)
         except Exception:  # noqa: BLE001
             pass
         sys.exit(msg)
@@ -141,13 +155,19 @@ def main() -> None:
         manager.stop()
         return
 
-    import webview
+    try:
+        import webview
+    except ImportError:
+        # Packaged builds leave the classic window out: open the real one.
+        manager.stop()
+        _open_rust_window()
+        return
 
     _app_id()
 
     api = WindowApi()
     window = webview.create_window(
-        "ZenLink Next",
+        "ZenLink",
         f"http://{HOST}:{PORT}/",
         js_api=api,
         width=1180,

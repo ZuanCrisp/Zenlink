@@ -13,13 +13,13 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 ### B-1: "Hanya perangkat / Device only" sound (ZenLink Studio, cable)            Status: open
 - Reported: 2026-11-06, carried over from v2.2.31 (AGENTS.md §7 item 1).
 - Cause: n/a. The session sends HPA0 after the first frame (`zenlink/usbdirect`).
-- Fix: n/a.
+- Fix: n/a: the code path is unchanged from v2.2.31; only a device check is left.
 - Verification: unverified: needs an iPhone on the ZenLink Studio cable path, "Device only" selected; check that the sound plays on the phone and not on the PC.
 
-### B-2: OBS portrait/landscape with Android rotation            Status: open
+### B-2: OBS portrait/landscape with Android rotation            Status: fixed (unverified)
 - Reported: 2026-11-06, carried over (item 2). The iPhone capture survives rotation (user confirmed in v2.2.31). Positioning uses OBS "Fit to screen" (Ctrl+F), as the Settings OBS card says.
-- Cause: n/a (Android path not built yet).
-- Fix: n/a. Android must render through the same `VideoView` and keep the `set_bounds` 120 ms wait.
+- Cause: n/a (Android path was not built yet).
+- Fix: done in A3/A4: Android renders through the same `VideoView` (no second renderer), so a rotation goes through `set_bounds` with the 120 ms ResizeBuffers wait like the iPhone path; the OBS card's Ctrl+F advice applies.
 - Verification: unverified: needs OBS Game Capture + an Android device rotating (phase A6).
 
 ### B-3: Stutter fixes stay regression-tested (renderer FIFO, audio margin, SkewMeter)            Status: fixed (verified)
@@ -46,15 +46,11 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: installer check removed; `Start ZenLink.bat` checks WebView2 only before the classic window (`ZENLINK_UI=classic`, label `:check_webview2`).
 - Verification: `tests/test_prereqs.py` (installer has no WebView2 check; the default setup path does not install it). Unverified: the installer run on Windows 10 without WebView2.
 
-### B-7: Every prerequisite is bundled or explained by ZenLink itself            Status: open
+### B-7: Every prerequisite is bundled or explained by ZenLink itself            Status: fixed (unverified)
 - Reported: carried over (item 7, general rule).
-- Cause: n/a. Tracks B-5 and any future missing-DLL / missing-service case.
-- Fix: n/a.
-- Verification: checked per release on a clean PC.
-
----
-
-## New in v2.5
+- Cause: a missing DLL or service that Windows reports before ZenLink can explain it.
+- Fix (v2.5 audit, 2026-11-07): Visual C++ runtime: static CRT (B-5). WebView2: no longer used or asked for (B-6, classic window left out of the packages). Media Foundation on N editions: delay-loaded, ZenLink explains it (B-27). Android `adb` and the scrcpy server: bundled (B-28). Apple Mobile Device Service: the installer and the app offer the Microsoft Store page. ZenLink Studio driver: the app's own button, with consent. Nothing else is required.
+- Verification: unverified: a clean PC / Windows Sandbox run (needs the user's approval).
 
 ### B-8: Baseline Rust code is not rustfmt-formatted            Status: fixed (verified)
 - Reported: 2026-11-06 by Claude during Phase 0: `cargo fmt --check` fails on the untouched v2.2.31 code (`build.rs`, `main.rs`, `view.rs`, … lines up to 621 characters; no `rustfmt.toml`).
@@ -68,11 +64,11 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Fix: Phase 0 isolation commit; renamed to "ZenLink Next" on 2026-11-06 at the user's request. It uses 47421 / 47422 / 7100, `ZenLink-Next` data folders, `zenlink-next-v25.log`, AppId `{5AE777B3-F756-4FAC-B6E7-A2125D89D76D}`, `AppName=ZenLink Next`, `{autopf}\ZenLink Next`, firewall rule "ZenLink Next (AirPlay)", AirPlay name "ZenLinkStudioNext", window/tray/AppUserModelID "ZenLink Next". Uninstallers stop only processes running from the beta's own folder.
 - Verification: `tests/test_next_isolation.py` and `zenlink-core` `isolation_tests` pass. Side-by-side run: see `lanjutan.md`. unverified: AirPlay on port 7100 with a real iPhone/iPad; installer install/uninstall next to an installed stable v2.2.31.
 
-### B-10: Licence audit before bundling Android platform-tools `adb`            Status: open (audited, needs the owner's decision)
+### B-10: Licence audit before bundling Android platform-tools `adb`            Status: fixed (decided)
 - Reported: 2026-11-06, phase A1 (master prompt section 13, AGENTS.md §6 item 9).
-- Cause: the ADB decision (`docs/android/ADB.md`) bundles Google's `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` next to a GPL-3.0 program. The platform-tools zip comes with Google's SDK licence and a `NOTICE.txt`; whether redistribution as a separate program is allowed was not audited yet.
-- Fix: audited 2026-11-07 for platform-tools 37.0.1 (`docs/THIRD_PARTY.md`): SDK licence §3.4 forbids redistribution except where third-party licences require it; §3.5 puts open-source components (adb is AOSP, Apache-2.0 per `NOTICE.txt`) under their own licence alone. The files ship unmodified with `NOTICE.txt` and credits (B-28).
-- Verification: the reading is recorded. Open: the owner's decision before a public release (not legal advice).
+- Cause: the ADB decision (`docs/android/ADB.md`) bundles Google's `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` next to a GPL-3.0 program.
+- Fix: audited 2026-11-07 for platform-tools 37.0.1 (`docs/THIRD_PARTY.md`): SDK licence §3.4 forbids redistribution except where third-party licences require it; §3.5 puts open-source components (adb is AOSP, Apache-2.0 per `NOTICE.txt`) under their own licence alone. Decision (2026-11-07, the owner delegated it: "semua tentukan aja paling bagus"): bundle the files unmodified, signature-checked, with `NOTICE.txt`, credits in README, About and THIRD_PARTY.md; adb runs as a separate program (no linking). Not legal advice.
+- Verification: build script refuses files that are not validly signed by Google LLC; `NOTICE.txt` ships in every package.
 
 ### B-11: Android device names, identity and list (phase A1)            Status: fixed (unverified)
 - Reported: 2026-11-06, phase A1 gate (master prompt section 4).
@@ -109,11 +105,11 @@ measurement, or the user's confirmation on a named device). Otherwise it is
   - Still unverified: Wi-Fi, the forward-tunnel fallback on a device, rotation (new session + config), and very large keyframes.
 
 
-### B-15: No feedback when an Android phone is plugged in without USB debugging            Status: open
+### B-15: No feedback when an Android phone is plugged in without USB debugging            Status: fixed (unverified)
 - Reported: 2026-11-07 by the user: "udah kusambungin ni ga terjadi apa apa" (TECNO POVA 6 on USB, Start ZenLink.bat, Android screen).
-- Cause: proven on the user's PC: ZenLink started the ADB server (log: `android: starting the ADB server with E:\AndroidDev\sdk\platform-tools\adb.exe`), and `adb devices -l` lists no device. Windows shows the phone only as an MTP device (`USB\VID_0E8D&PID_2008`, class WPD); no ADB interface is exposed, so USB debugging is off (or the phone was not replugged after turning it on). The Android screen only says "No Android device yet", which does not tell the user the phone was seen.
-- Fix: planned: on Windows, detect a plugged-in phone that has no ADB interface and say so ("phone seen, turn on USB debugging"), behind the platform layer.
-- Verification: unverified.
+- Cause: proven on the user's PC: ZenLink started the ADB server, and `adb devices -l` lists no device. Windows shows the phone only as an MTP device (`USB\VID_0E8D&PID_2008`, class WPD); no ADB interface is exposed, so USB debugging is off (or the phone was not replugged after turning it on). The Android screen only said "No Android device yet".
+- Fix: `zenlink-app/src/usbphones.rs` (Windows platform layer, SetupAPI, read-only): when ADB lists nothing and a present USB portable device (class WPD) is not Apple's (VID 05AC), the Android screen says "Windows sees a phone on USB, but ADB does not yet. Turn on USB debugging, then unplug and plug the cable in again."
+- Verification: test `picks_usb_portable_devices_but_not_apple`. Unverified on a phone: plug in with USB debugging off.
 
 ### B-16: Android sound (phase A4, part 1)            Status: fixed (unverified)
 - Reported: 2026-11-07, phase A4 gate ("audio socket into the shared audio engine, video-only fallback"; device check: sound on Android 11+). The user asked for sound before controls.
@@ -216,11 +212,25 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Verification (2026-11-07, full `build_portable_release.ps1` run, no device, temporary prefs, stub backend, private adb port 47599 so the user's adb on 5037 was not touched, `ANDROID_HOME`/`ANDROID_SDK_ROOT`/`ZL_ADB` unset):
   - Installed layout (`dist\ZenLinkService\ZenLink.exe`): the app started `dist\ZenLinkService\third_party\platform-tools\adb.exe` as the adb server; the Android screen shows "No Android device yet" (no "ADB not found").
   - Portable.exe: `%LOCALAPPDATA%\ZenLink-Next\platform-tools` did not exist before; the app unpacked the four files there and started that `adb.exe`. All four SHA-256s equal the originals; the Authenticode signature of the unpacked `adb.exe` is Valid (Google LLC).
+  - Repeated on the v2.5.0 packages (round-2 cleanup): same result for both.
   - Still unverified: a PC without any Android SDK, and a real phone (USB and Wi-Fi), with the user's consent.
 
-### B-29: "Close to the tray" and "Start when plugged in" do nothing in the Rust window            Status: open
+### B-29: "Close to the tray" and "Start when plugged in" do nothing in the Rust window            Status: fixed (unverified)
 - Reported: 2026-11-07, found in the release audit (README claim check).
-- Cause: `prefs.rs` stores `closeToTray` and `autoStart` and Settings › Advanced shows both toggles, but nothing in `zenlink-app` reads them; only the classic window implemented them (`zenlink/window.py`, `zenlink/tray.py`). Same in v2.2.31 (`E:\ZenLink v2.2.31\rust\crates\zenlink-app\src\prefs.rs` only, read-only check).
-- Fix: open. Either implement a Rust tray (Shell_NotifyIcon) and auto-start on plug-in, or hide both toggles. The README no longer claims a tray.
-- Verification: code search (`close_to_tray`, `auto_start` have no reader in `src/main.rs`).
+- Cause: `prefs.rs` stored `closeToTray` and `autoStart` and Settings › Advanced showed both toggles, but nothing in `zenlink-app` read them; only the classic window implemented a tray. Same in v2.2.31.
+- Fix (owner's request 2026-11-07: tray and "start with Windows"): `zenlink-app/src/tray.rs`.
+  - Tray icon (Shell_NotifyIcon) while "Close to the tray" is on; left click shows or hides, menu Open / Quit (Indonesian or English); re-added after Explorer restarts.
+  - The close button and Alt+F4 hide the window to the tray when the option is on (the session keeps running), else quit.
+  - "Start when plugged in" (never implemented) is replaced by "Start with Windows": an `HKCU\...\Run` value `ZenLink` = `"<exe>" --background`, written only when the user turns it on, removed when off and by the uninstaller. `--background` starts in the tray (or minimised when the tray option is off).
+  - One ZenLink per user: a second start shows the running window (also when it is hidden in the tray). Tests with `ZL_PREFS` are exempt.
+- Verification: test `run_command_quotes_the_path_and_starts_in_the_background`; smoke test (temp prefs, no device): `--background` with the tray option leaves the window hidden, and the helper's show request (the same one a second start sends) makes it visible. Unverified: the tray icon and its menu by eye, and the Run entry after a Windows restart (writing autostart in a test was avoided).
 
+### B-30: The app was still called "ZenLink Next"            Status: fixed (unverified)
+- Reported: 2026-11-07 by the owner: "nama jadi ZenLink".
+- Fix: window, installer, shortcuts, AirPlay name (`ZenLinkStudio`), firewall rule and scripts say "ZenLink"; version 2.5.0. The installer now uses v2.2.x's AppId and folder, so Setup upgrades an installed v2.2.x in place and removes its old `_internal` first. v2.5 keeps its own data folder (`ZenLink-Next`) and ports (47421, AirPlay 7100), so a v2.2.31 Portable.exe still runs next to it; rollback = the v2.2.31 Setup from its release. The firewall helper now deletes only its own program's rule, so an installed and a portable copy do not remove each other's rule.
+- Verification: `tests/test_next_isolation.py` (AppId, name, `_internal` cleanup, no "Next" in the installer). Unverified: an installer run over an installed v2.2.31 (needs the user's approval; it replaces that install).
+
+### B-31: Slint warning "'maximized' shadows the builtin property"            Status: fixed (verified)
+- Reported: 2026-11-07, build output (also in v2.2.31).
+- Fix: `AppWindow.maximized` renamed `is-maximized` (`app.slint`, `main.rs`).
+- Verification: `cargo build` / `cargo clippy` print no warnings.

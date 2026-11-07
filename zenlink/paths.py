@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 FROZEN = bool(getattr(sys, "frozen", False))
-# ZenLink Next data folder name (the stable build uses "ZenLink").
+# v2.5 data folder name (the stable build uses "ZenLink").
 DATA_DIR_NAME = "ZenLink-Next"
 
 if FROZEN:

@@ -37,7 +37,7 @@ pub fn defaults() -> Prefs {
         touch: true,
         keyboard: true,
         gestures: true,
-        auto_start: false,
+        start_with_windows: false,
         close_to_tray: false,
         on_top: false,
         stats: false,
@@ -114,7 +114,8 @@ pub fn from_value(v: &Value) -> Prefs {
     b("touch", &mut p.touch);
     b("keyboard", &mut p.keyboard);
     b("gestures", &mut p.gestures);
-    b("autoStart", &mut p.auto_start);
+    // "autoStart" (start when plugged in) was never implemented; not read.
+    b("startWithWindows", &mut p.start_with_windows);
     b("closeToTray", &mut p.close_to_tray);
     b("onTop", &mut p.on_top);
     b("stats", &mut p.stats);
@@ -187,7 +188,7 @@ pub fn to_value(p: &Prefs) -> Value {
         "cropL": p.crop_l, "cropT": p.crop_t, "cropR": p.crop_r, "cropB": p.crop_b,
         "audioOut": p.audio_out.as_str(), "volume": p.volume, "lipSync": p.lip_sync,
         "audioBuffer": p.audio_buffer.as_str(), "touch": p.touch, "keyboard": p.keyboard,
-        "gestures": p.gestures, "autoStart": p.auto_start, "closeToTray": p.close_to_tray,
+        "gestures": p.gestures, "startWithWindows": p.start_with_windows, "closeToTray": p.close_to_tray,
         "onTop": p.on_top, "stats": p.stats, "dots": p.dots,
         "platform": p.platform.as_str(), "rememberPlatform": p.remember_platform,
         "androidMaxSize": p.android_max_size.as_str(), "androidFps": p.android_fps.as_str(),

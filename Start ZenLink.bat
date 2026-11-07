@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
 cd /d "%~dp0"
-title ZenLink Next
+title ZenLink
 
 rem Standalone build: ZenLink.exe and its backend ZenLinkService.exe sit next to this file.
 if exist "%~dp0ZenLinkService.exe" if exist "%~dp0ZenLink.exe" (
@@ -20,7 +20,7 @@ if exist "%PY%" if exist "%STAMP%" (
     fc /b "%~dp0requirements.txt" "%STAMP%" >nul 2>&1 && goto :launch
 )
 
-echo ZenLink Next - first-time setup
+echo ZenLink - first-time setup
 echo.
 
 if not exist "%PY%" (
@@ -64,7 +64,7 @@ echo Setup complete. Run Create-Desktop-Shortcut.bat for a desktop shortcut.
 :launch
 rem ZenLink window (Rust, native GPU video). It starts the Python backend
 rem from .venv by itself. Set ZENLINK_UI=classic for the old window.
-rem Android: ZenLink Next finds adb in the Android SDK (ANDROID_HOME,
+rem Android: ZenLink finds adb in the Android SDK (ANDROID_HOME,
 rem ANDROID_SDK_ROOT, %LOCALAPPDATA%\Android\Sdk) or on PATH. Machine-only
 rem settings such as ANDROID_HOME can go in "Start ZenLink.local.bat" next
 rem to this file (not part of the repository).
@@ -99,14 +99,14 @@ where cargo >nul 2>&1 || (
     if exist "%NEXT%" echo Starting the last build instead.
     exit /b 0
 )
-echo Building the ZenLink Next window from the current code. The first build takes a few minutes...
+echo Building the ZenLink window from the current code. The first build takes a few minutes...
 pushd "%~dp0rust"
 cargo build --release -p zenlink-app
 set "RC=!errorlevel!"
 popd
 if not "!RC!"=="0" (
     echo.
-    echo The build failed. If ZenLink Next is still open, close it and run Start ZenLink.bat again.
+    echo The build failed. If ZenLink is still open, close it and run Start ZenLink.bat again.
     pause
     exit /b 1
 )
@@ -135,7 +135,7 @@ if errorlevel 1 (
 rem Windows Firewall: lets the iPhone/iPad reach ZenLink for AirPlay (ZenLink Studio over Wi-Fi).
 "%PY%" -c "from zenlink import firewall; raise SystemExit(0 if firewall.has_rule() else 1)" >nul 2>&1
 if errorlevel 1 (
-    choice /c YN /n /m " - Allow ZenLink Next on the local network for AirPlay (asks for administrator permission)? [Y/N] "
+    choice /c YN /n /m " - Allow ZenLink on the local network for AirPlay (asks for administrator permission)? [Y/N] "
     if !errorlevel! equ 1 "%PY%" -c "from zenlink import firewall; firewall.request_rule()"
 ) else (
     echo  - Firewall for AirPlay: OK

@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-RULE = "ZenLink Next (AirPlay)"
+RULE = "ZenLink (AirPlay)"
 _NO_WINDOW = 0x08000000
 
 
@@ -44,8 +44,11 @@ def request_rule() -> bool:
     """Ask Windows (UAC) to add the rule. Returns True if the elevated helper ran."""
     from zenlink.paths import DATA_DIR
 
-    lines = ["@echo off", f'netsh advfirewall firewall delete rule name="{RULE}" >nul 2>&1']
+    # Delete only this program's old rule: an installed ZenLink and a portable
+    # copy share the rule name, and each keeps its own rule.
+    lines = ["@echo off"]
     for program in programs():
+        lines.append(f'netsh advfirewall firewall delete rule name="{RULE}" program="{program}" >nul 2>&1')
         lines.append(f'netsh advfirewall firewall add rule name="{RULE}" dir=in action=allow '
                      f'program="{program}" enable=yes profile=any remoteip=localsubnet >nul')
     script = DATA_DIR / "allow-airplay.cmd"

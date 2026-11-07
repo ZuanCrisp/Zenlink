@@ -1,8 +1,11 @@
-; ZenLink Next installer (Inno Setup 6). Built by build_portable_release.ps1.
-; Separate identity from the stable ZenLink (AppId, name, folders, firewall rule),
-; so the beta installs and uninstalls next to it without touching it.
+; ZenLink v2.5 installer (Inno Setup 6). Built by build_portable_release.ps1.
+; Same AppId, folder and firewall rule as ZenLink v2.2.x: v2.5 is its successor
+; and upgrades an installed v2.2.x in place (one "ZenLink" in Start, one entry
+; in Apps). v2.5 keeps its own data folder (%LOCALAPPDATA%\ZenLink-Next) and
+; ports, so a v2.2.31 Portable.exe still runs next to it. To roll back, run the
+; v2.2.31 Setup.exe from its GitHub release.
 #ifndef AppVersion
-  #define AppVersion "2.5.0-beta.1"
+  #define AppVersion "2.5.0"
 #endif
 #ifndef AppVersionNum
   ; Numeric part only: VersionInfoVersion must be n.n.n.n.
@@ -13,16 +16,16 @@
 #endif
 
 [Setup]
-AppId={{5AE777B3-F756-4FAC-B6E7-A2125D89D76D}
-AppName=ZenLink Next
+AppId={{6B0E8C1A-5D3F-4E0A-9C2B-2E7A1F5D9A10}
+AppName=ZenLink
 AppVersion={#AppVersion}
-AppVerName=ZenLink Next {#AppVersion}
+AppVerName=ZenLink {#AppVersion}
 AppPublisher=Zenvy Zenshiro
 AppPublisherURL=https://github.com/zenvyzenshiro/zenlink
 AppSupportURL=https://github.com/zenvyzenshiro/zenlink/issues
 AppCopyright=Copyright (C) 2026 Zenvy Zenshiro
-DefaultDirName={autopf}\ZenLink Next
-DefaultGroupName=ZenLink Next
+DefaultDirName={autopf}\ZenLink
+DefaultGroupName=ZenLink
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 SetupIconFile=..\assets\zenlink.ico
@@ -38,7 +41,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 MinVersion=10.0.17763
 CloseApplications=yes
 VersionInfoCompany=Zenvy Zenshiro
-VersionInfoDescription=ZenLink Next Setup
+VersionInfoDescription=ZenLink Setup
 VersionInfoVersion={#AppVersionNum}
 
 [Languages]
@@ -49,33 +52,57 @@ Name: "indonesian"; MessagesFile: "compiler:Languages\Indonesian.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "firewall"; Description: "Allow ZenLink Next on the local network (needed for AirPlay over Wi-Fi; asks for administrator permission)"; GroupDescription: "Network:"
+Name: "firewall"; Description: "Allow ZenLink on the local network (needed for AirPlay over Wi-Fi; asks for administrator permission)"; GroupDescription: "Network:"
+
+[InstallDelete]
+; An upgrade from v2.2.x (its libraries sit directly in {app}): remove what
+; v2.5 no longer ships, measured by comparing both build folders.
+Type: filesandordirs; Name: "{app}\av"
+Type: filesandordirs; Name: "{app}\av.libs"
+Type: filesandordirs; Name: "{app}\PIL"
+Type: filesandordirs; Name: "{app}\webview"
+Type: filesandordirs; Name: "{app}\pythonnet"
+Type: filesandordirs; Name: "{app}\clr_loader"
+Type: filesandordirs; Name: "{app}\chardet"
+Type: filesandordirs; Name: "{app}\pydantic_core"
+Type: filesandordirs; Name: "{app}\setuptools"
+Type: filesandordirs; Name: "{app}\ui"
+Type: filesandordirs; Name: "{app}\pywebview-*.dist-info"
+Type: filesandordirs; Name: "{app}\typer-*.dist-info"
+Type: filesandordirs; Name: "{app}\sounddevice-*.dist-info"
+Type: files; Name: "{app}\sqlite3.dll"
+Type: files; Name: "{app}\_sqlite3.pyd"
+Type: files; Name: "{app}\_sounddevice_data\portaudio-binaries\*"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "Start ZenLink.bat,run.bat,Create-Desktop-Shortcut.bat,Uninstall-ZenLink.bat,portable.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\ZenLink Next"; Filename: "{app}\ZenLink.exe"
-Name: "{group}\Uninstall ZenLink Next"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\ZenLink Next"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
+Name: "{group}\ZenLink"; Filename: "{app}\ZenLink.exe"
+Name: "{group}\Uninstall ZenLink"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\ZenLink"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
 
 [Run]
 ; AirPlay (ZenLink Studio over Wi-Fi): the iPhone/iPad must reach ZenLink. Inbound allow, local subnet only.
-Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rule name=""ZenLink Next (AirPlay)"" & netsh advfirewall firewall add rule name=""ZenLink Next (AirPlay)"" dir=in action=allow program=""{app}\ZenLinkService.exe"" enable=yes profile=any remoteip=localsubnet"; Flags: runhidden shellexec waituntilterminated; Verb: runas; Tasks: firewall
+Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rule name=""ZenLink (AirPlay)"" program=""{app}\ZenLinkService.exe"" & netsh advfirewall firewall add rule name=""ZenLink (AirPlay)"" dir=in action=allow program=""{app}\ZenLinkService.exe"" enable=yes profile=any remoteip=localsubnet"; Flags: runhidden shellexec waituntilterminated; Verb: runas; Tasks: firewall
 ; Apple Driver mode needs Apple Mobile Device Service (Apple Devices or iTunes).
 Filename: "ms-windows-store://pdp/?ProductId=9NP83LWLPZ9K"; Description: "Install Apple Devices from the Microsoft Store (needed for Apple Driver mode)"; Flags: postinstall shellexec skipifsilent unchecked; Check: not AppleServiceInstalled
-Filename: "{app}\ZenLink.exe"; Description: "{cm:LaunchProgram,ZenLink Next}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\ZenLink.exe"; Description: "{cm:LaunchProgram,ZenLink}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; Stop only the processes started from this install folder: the stable ZenLink uses the same exe names.
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -Command ""Get-Process ZenLink,ZenLinkService -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -like '{app}\*' } | Stop-Process -Force"""; Flags: runhidden; RunOnceId: "StopZenLinkNext"
-Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""ZenLink Next (AirPlay)"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; RunOnceId: "DelFirewall"; Check: FirewallRuleExists
+; Stop only the processes started from this install folder: a portable ZenLink uses the same exe names.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -Command ""Get-Process ZenLink,ZenLinkService -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -like '{app}\*' } | Stop-Process -Force"""; Flags: runhidden; RunOnceId: "StopZenLink"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""ZenLink (AirPlay)"" program=""{app}\ZenLinkService.exe"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; RunOnceId: "DelFirewall"; Check: FirewallRuleExists
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\ZenLink-Next"
 
+[Registry]
+; "Start with Windows" (Settings) writes this value itself; remove it on uninstall.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "ZenLink"; Flags: dontcreatekey uninsdeletevalue
+
 [Code]
-// Only ask for administrator rights on uninstall when the beta's AirPlay rule exists.
+// Only ask for administrator rights on uninstall when the AirPlay rule exists.
 function FirewallRuleExists(): Boolean;
 var
   Names: TArrayOfString;
@@ -86,7 +113,7 @@ begin
   if RegGetValueNames(HKLM, 'SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules', Names) then
     for I := 0 to GetArrayLength(Names) - 1 do
       if RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules', Names[I], Value) then
-        if Pos('|Name=ZenLink Next (AirPlay)|', Value) > 0 then
+        if Pos('|Name=ZenLink (AirPlay)|', Value) > 0 then
         begin
           Result := True;
           Exit;

@@ -39,7 +39,7 @@ export struct Prefs {
     touch: bool,
     keyboard: bool,
     gestures: bool,
-    auto-start: bool,
+    start-with-windows: bool,
     close-to-tray: bool,
     on-top: bool,
     stats: bool,
@@ -399,7 +399,7 @@ component Placeholder inherits Rectangle {
             [I18n.t("Cek kepercayaan", "Check trust"), I18n.t("Biarkan tidak terkunci sementara ZenLink membuktikan PC ini dipercaya", "Keep it unlocked while ZenLink proves this PC is trusted")],
             [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar lewat ZenLink Studio", "Receiving the screen over ZenLink Studio")]]
         : flow-kind == "airplay" ? [
-            [I18n.t("Perangkat tersambung", "Device connected"), I18n.t("iPhone/iPad memilih ZenLinkStudioNext di Pencerminan Layar", "Your iPhone/iPad chose ZenLinkStudioNext in Screen Mirroring")],
+            [I18n.t("Perangkat tersambung", "Device connected"), I18n.t("iPhone/iPad memilih ZenLinkStudio di Pencerminan Layar", "Your iPhone/iPad chose ZenLinkStudio in Screen Mirroring")],
             [I18n.t("Koneksi aman", "Secure connection"), I18n.t("Pairing AirPlay dan pertukaran kunci FairPlay", "AirPlay pairing and FairPlay key exchange")],
             [I18n.t("Terima video", "Receive video"), I18n.t("Mendekripsi stream AirPlay", "Decrypting the AirPlay stream")],
             [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar lewat Wi-Fi", "Receiving the screen over Wi-Fi")]]
@@ -1639,7 +1639,7 @@ component SettingsPanel inherits Glass {
                     }
                     Text {
                         text: root.mode == "usbdirect"
-                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pilih ZenLinkStudioNext di Pencerminan Layar pada perangkat.", "Wi-Fi: pick ZenLinkStudioNext in Screen Mirroring on the device.") : I18n.t("Kabel: lewat driver libusb0, bitrate tinggi.", "Cable: through the libusb0 driver, high bitrate."))
+                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pilih ZenLinkStudio di Pencerminan Layar pada perangkat.", "Wi-Fi: pick ZenLinkStudio in Screen Mirroring on the device.") : I18n.t("Kabel: lewat driver libusb0, bitrate tinggi.", "Cable: through the libusb0 driver, high bitrate."))
                             : (root.link == "wireless" ? I18n.t("Wi-Fi: tekan Atur Wi-Fi sekali dengan kabel tersambung. Perangkat yang dicolok tetap jalan lewat kabel.", "Wi-Fi: press Set up Wi-Fi once with the cable in. A plugged-in device still works over the cable.") : I18n.t("Kabel: lewat driver Apple.", "Cable: through Apple's driver."));
                         font-size: 11px;
                         color: Theme.text-3;
@@ -1664,7 +1664,7 @@ component SettingsPanel inherits Glass {
                     icon: "\u{E713}";
                     tint-a: #a1a1aa;
                     tint-b: #52525b;
-                    Row { label: I18n.t("Mulai otomatis saat dicolok", "Start when plugged in"); Toggle { checked: prefs.auto-start; toggled(v) => { root.prefs.auto-start = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("Mulai bersama Windows", "Start with Windows"); Toggle { checked: prefs.start-with-windows; toggled(v) => { root.prefs.start-with-windows = v; root.changed(root.prefs); } } }
                     Row { label: I18n.t("Tutup ke tray", "Close to the tray"); Toggle { checked: prefs.close-to-tray; toggled(v) => { root.prefs.close-to-tray = v; root.changed(root.prefs); } } }
                     Row { label: I18n.t("Selalu di atas", "Always on top"); Toggle { checked: prefs.on-top; toggled(v) => { root.prefs.on-top = v; root.changed(root.prefs); } } }
                     Row { label: I18n.t("Statistik di header", "Stats in the header"); Toggle { checked: prefs.stats; toggled(v) => { root.prefs.stats = v; root.changed(root.prefs); } } }
@@ -1880,13 +1880,13 @@ export component AppWindow inherits Window {
     // Narrow window: icon-only buttons. Set from Rust (window width), not
     // from layout, so the layout cannot feed back into it.
     in property <bool> compact: false;
-    in property <bool> maximized: false;
+    in property <bool> is-maximized: false;
     in property <bool> fullscreen: false;
     // Picture column too narrow for labelled shortcuts.
     in property <bool> compact-bar: false;
     // Full screen / maximised: square edges to the screen border (no
     // rounded corners showing the desktop, no resize strips).
-    property <bool> edge: root.fullscreen || root.maximized;
+    property <bool> edge: root.fullscreen || root.is-maximized;
     // F11 toggles full screen, Esc leaves it.
     keys := FocusScope {
         key-pressed(ev) => {
@@ -1907,7 +1907,7 @@ export component AppWindow inherits Window {
             spacing: 8px;
             TopBar {
                 compact: root.compact;
-                maximized: root.maximized;
+                maximized: root.is-maximized;
                 fullscreen: root.fullscreen;
                 device: root.screen == "apple" ? root.device : root.on-android ? root.android-device : "";
                 phase: root.screen == "apple" ? root.phase : root.on-android ? root.android-phase : "idle";
