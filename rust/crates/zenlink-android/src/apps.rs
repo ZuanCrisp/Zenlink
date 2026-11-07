@@ -210,7 +210,10 @@ mod tests {
         let path = std::env::var("ZL_APPS_LIST").expect("ZL_APPS_LIST");
         let text = std::fs::read_to_string(path).unwrap();
         let text = text.trim_start_matches('\u{feff}');
-        let entries = text.lines().filter(|l| l.starts_with(" * ") || l.starts_with(" - ")).count();
+        let entries = text
+            .lines()
+            .filter(|l| l.starts_with(" * ") || l.starts_with(" - "))
+            .count();
         let apps = parse_list(text);
         eprintln!("{} entries, {} apps", entries, apps.len());
         assert!(entries > 0);
