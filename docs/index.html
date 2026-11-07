@@ -48,7 +48,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="site.css?v=20261108120000">
+<link rel="stylesheet" href="site.css?v=20261108140000">
 <link rel="stylesheet" href="demo.css?v=20261108013000">
 </head>
 <body>
@@ -88,7 +88,7 @@
     <span class="pill glass"><b data-id="BARU" data-en="NEW">BARU</b><span data-id="Android kini masuk ZenLink" data-en="Android is now part of ZenLink">Android kini masuk ZenLink</span></span>
     <h1 class="wordmark"><span class="zl"><span>ZenLink</span></span><span class="v25" aria-label="versi 2.5"><em>2.5</em><b></b><b></b><b></b></span></h1>
     <p class="hook" data-id="Satu jendela untuk <em>semua HP-mu.</em>" data-en="One window for <em>every phone you own.</em>">Satu jendela untuk <em>semua HP-mu.</em></p>
-    <p class="lead" data-id="iPhone, iPad, HP dan tablet Android tampil dan bisa dikontrol di PC Windows, lewat kabel atau Wi-Fi. Jendela native Rust yang ringan, mulus di OBS, tajam untuk live streaming." data-en="iPhone, iPad, Android phones and tablets show up on your Windows PC and you control them there, over the cable or Wi-Fi. A light native Rust window, smooth in OBS, sharp for live streaming.">iPhone, iPad, HP dan tablet Android tampil dan bisa dikontrol di PC Windows, lewat kabel atau Wi-Fi. Jendela native Rust yang ringan, mulus di OBS, tajam untuk live streaming.</p>
+    <p class="lead" data-id="iPhone, iPad, HP dan tablet Android tampil dan bisa dikontrol di PC Windows, lewat kabel atau Wi-Fi. 60 fps di iPhone &amp; iPad, sampai 120 fps di Android. Jendela native Rust yang ringan, mulus di OBS, tajam untuk live streaming." data-en="iPhone, iPad, Android phones and tablets show up on your Windows PC and you control them there, over the cable or Wi-Fi. 60 fps on iPhone &amp; iPad, up to 120 fps on Android. A light native Rust window, smooth in OBS, sharp for live streaming.">iPhone, iPad, HP dan tablet Android tampil dan bisa dikontrol di PC Windows, lewat kabel atau Wi-Fi. 60 fps di iPhone &amp; iPad, sampai 120 fps di Android. Jendela native Rust yang ringan, mulus di OBS, tajam untuk live streaming.</p>
     <div class="chips" aria-label="Pratinjau perangkat / Device preview">
       <button type="button" class="chip" data-go="iphone"><i class="a"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="3"/></svg></i>iPhone</button>
       <button type="button" class="chip" data-go="ipad"><i class="a"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/></svg></i>iPad</button>
@@ -268,6 +268,7 @@
       <p data-id="HP dan tablet Android lewat USB atau Wi-Fi, memakai server scrcpy resmi dan adb resmi Google yang sudah ikut di ZenLink. Gambar, suara, mouse, keyboard dan clipboard, plus Back, Home dan aplikasi terbaru." data-en="Android phones and tablets over USB or Wi-Fi, using the official scrcpy server and Google's official adb, both included in ZenLink. Picture, sound, mouse, keyboard and clipboard, plus Back, Home and recent apps.">HP dan tablet Android lewat USB atau Wi-Fi, memakai server scrcpy resmi dan adb resmi Google yang sudah ikut di ZenLink. Gambar, suara, mouse, keyboard dan clipboard, plus Back, Home dan aplikasi terbaru.</p>
       <div class="big">
         <div><b>5.0+</b><span data-id="versi Android" data-en="Android version">versi Android</span></div>
+        <div><b>120</b><span data-id="fps maksimal" data-en="fps max">fps maksimal</span></div>
         <div><b>11+</b><span data-id="untuk suara" data-en="for sound">untuk suara</span></div>
         <div><b>0</b><span data-id="aplikasi dipasang" data-en="apps installed">aplikasi dipasang</span></div>
       </div>
@@ -360,6 +361,7 @@
           </tr>
         </thead>
         <tbody>
+          <tr class="grp"><th colspan="4" scope="rowgroup" data-id="Layar &amp; koneksi" data-en="Screen &amp; connection">Layar &amp; koneksi</th></tr>
           <tr>
             <th scope="row" data-id="Layar iPhone &amp; iPad di PC" data-en="iPhone &amp; iPad screen on the PC">Layar iPhone &amp; iPad di PC</th>
             <td class="zl"><i class="y"></i><span data-id="Kabel atau Wi-Fi" data-en="Cable or Wi-Fi">Kabel atau Wi-Fi</span></td>
@@ -373,10 +375,10 @@
             <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
           </tr>
           <tr>
-            <th scope="row" data-id="Kontrol mouse &amp; keyboard" data-en="Mouse &amp; keyboard control">Kontrol mouse &amp; keyboard</th>
-            <td class="zl"><i class="y"></i><span data-id="Android &amp; mode Apple Driver" data-en="Android &amp; Apple Driver mode">Android &amp; mode Apple Driver</span></td>
-            <td><i class="p"></i><span data-id="HP Android tertentu" data-en="Selected Android phones">HP Android tertentu</span></td>
-            <td><i class="n"></i><span data-id="Hanya lihat" data-en="View only">Hanya lihat</span></td>
+            <th scope="row" data-id="Frame rate" data-en="Frame rate">Frame rate</th>
+            <td class="zl"><i class="y"></i><span data-id="60 fps iPhone &amp; iPad · 120 fps Android" data-en="60 fps iPhone &amp; iPad · 120 fps Android">60 fps iPhone &amp; iPad · 120 fps Android</span></td>
+            <td><i class="u"></i><span data-id="Tidak dicantumkan" data-en="Not stated">Tidak dicantumkan</span></td>
+            <td><i class="u"></i><span data-id="Tidak dicantumkan" data-en="Not stated">Tidak dicantumkan</span></td>
           </tr>
           <tr>
             <th scope="row" data-id="Lewat kabel USB" data-en="Over a USB cable">Lewat kabel USB</th>
@@ -385,9 +387,84 @@
             <td><i class="n"></i><span data-id="Wi-Fi saja" data-en="Wi-Fi only">Wi-Fi saja</span></td>
           </tr>
           <tr>
+            <th scope="row" data-id="Suara HP di PC" data-en="Phone sound on the PC">Suara HP di PC</th>
+            <td class="zl"><i class="y"></i><span data-id="Sinkron dengan gambar" data-en="In sync with the picture">Sinkron dengan gambar</span></td>
+            <td><i class="u"></i><span data-id="Tidak dicantumkan" data-en="Not stated">Tidak dicantumkan</span></td>
+            <td><i class="y"></i><span data-id="Ya" data-en="Yes">Ya</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="Atur kualitas video" data-en="Video quality settings">Atur kualitas video</th>
+            <td class="zl"><i class="y"></i><span data-id="Profil, resolusi, FPS, bitrate, H.264 / H.265" data-en="Profiles, resolution, FPS, bitrate, H.264 / H.265">Profil, resolusi, FPS, bitrate, H.264 / H.265</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+            <td><i class="p"></i><span data-id="Berbeda-beda" data-en="Varies">Berbeda-beda</span></td>
+          </tr>
+          <tr class="grp"><th colspan="4" scope="rowgroup" data-id="Kontrol" data-en="Control">Kontrol</th></tr>
+          <tr>
+            <th scope="row" data-id="Kontrol mouse &amp; keyboard" data-en="Mouse &amp; keyboard control">Kontrol mouse &amp; keyboard</th>
+            <td class="zl"><i class="y"></i><span data-id="Android &amp; mode Apple Driver" data-en="Android &amp; Apple Driver mode">Android &amp; mode Apple Driver</span></td>
+            <td><i class="p"></i><span data-id="HP Android tertentu" data-en="Selected Android phones">HP Android tertentu</span></td>
+            <td><i class="n"></i><span data-id="Hanya lihat" data-en="View only">Hanya lihat</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="Salin-tempel clipboard" data-en="Clipboard copy &amp; paste">Salin-tempel clipboard</th>
+            <td class="zl"><i class="y"></i><span data-id="Android, dan tempel ke iPhone (Alt+V)" data-en="Android, and paste to iPhone (Alt+V)">Android, dan tempel ke iPhone (Alt+V)</span></td>
+            <td><i class="p"></i><span data-id="HP Android tertentu" data-en="Selected Android phones">HP Android tertentu</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="Buka aplikasi HP di jendela sendiri" data-en="Phone apps in their own window">Buka aplikasi HP di jendela sendiri</th>
+            <td class="zl"><i class="y"></i><span data-id="Android 10+" data-en="Android 10+">Android 10+</span></td>
+            <td><i class="p"></i><span data-id="HP Android tertentu" data-en="Selected Android phones">HP Android tertentu</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="Seret file &amp; APK ke HP" data-en="Drag files &amp; APKs to the phone">Seret file &amp; APK ke HP</th>
+            <td class="zl"><i class="y"></i><span data-id="APK langsung terpasang, file ke HP / iPhone" data-en="APKs install, files go to the phone / iPhone">APK langsung terpasang, file ke HP / iPhone</span></td>
+            <td><i class="p"></i><span data-id="HP Android tertentu" data-en="Selected Android phones">HP Android tertentu</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="Buka kunci otomatis (Alt+U)" data-en="Auto unlock (Alt+U)">Buka kunci otomatis (Alt+U)</th>
+            <td class="zl"><i class="y"></i><span data-id="Kode sandi terenkripsi DPAPI" data-en="Passcode encrypted with DPAPI">Kode sandi terenkripsi DPAPI</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+          </tr>
+          <tr class="grp"><th colspan="4" scope="rowgroup" data-id="Streaming &amp; kerja" data-en="Streaming &amp; work">Streaming &amp; kerja</th></tr>
+          <tr>
+            <th scope="row" data-id="Salin teks dari layar (OCR, Alt+C)" data-en="Copy text from the screen (OCR, Alt+C)">Salin teks dari layar (OCR, Alt+C)</th>
+            <td class="zl"><i class="y"></i><span data-id="Offline, gabung halaman yang di-scroll" data-en="Offline, stitches scrolled pages">Offline, gabung halaman yang di-scroll</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="OBS Game Capture" data-en="OBS Game Capture">OBS Game Capture</th>
+            <td class="zl"><i class="y"></i><span data-id="Mulus, tetap jalan saat HP diputar" data-en="Smooth, survives rotation">Mulus, tetap jalan saat HP diputar</span></td>
+            <td><i class="u"></i><span data-id="Tidak dicantumkan" data-en="Not stated">Tidak dicantumkan</span></td>
+            <td><i class="u"></i><span data-id="Tidak dicantumkan" data-en="Not stated">Tidak dicantumkan</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="Layar HP gelap, PC tetap terang (Alt+D)" data-en="Phone screen dark, PC stays bright (Alt+D)">Layar HP gelap, PC tetap terang (Alt+D)</th>
+            <td class="zl"><i class="y"></i><span data-id="iPhone &amp; iPad, mode Apple Driver" data-en="iPhone &amp; iPad, Apple Driver mode">iPhone &amp; iPad, mode Apple Driver</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="Statistik FPS &amp; delay langsung" data-en="Live FPS &amp; delay stats">Statistik FPS &amp; delay langsung</th>
+            <td class="zl"><i class="y"></i><span data-id="Di samping nama perangkat" data-en="Next to the device name">Di samping nama perangkat</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+            <td><i class="n"></i><span data-id="Tidak ada" data-en="No">Tidak ada</span></td>
+          </tr>
+          <tr class="grp"><th colspan="4" scope="rowgroup" data-id="Privasi &amp; harga" data-en="Privacy &amp; price">Privasi &amp; harga</th></tr>
+          <tr>
             <th scope="row" data-id="Akun yang dibutuhkan" data-en="Account needed">Akun yang dibutuhkan</th>
             <td class="zl"><i class="y"></i><span data-id="Tanpa akun" data-en="None">Tanpa akun</span></td>
             <td><i class="p"></i><span data-id="Akun Microsoft" data-en="Microsoft account">Akun Microsoft</span></td>
+            <td><i class="p"></i><span data-id="Berbeda-beda" data-en="Varies">Berbeda-beda</span></td>
+          </tr>
+          <tr>
+            <th scope="row" data-id="Di mana data diproses" data-en="Where your data goes">Di mana data diproses</th>
+            <td class="zl"><i class="y"></i><span data-id="Semua di PC-mu, tanpa cloud" data-en="All on your PC, no cloud">Semua di PC-mu, tanpa cloud</span></td>
+            <td><i class="p"></i><span data-id="Lewat akun &amp; layanan Microsoft" data-en="Through your Microsoft account &amp; services">Lewat akun &amp; layanan Microsoft</span></td>
             <td><i class="p"></i><span data-id="Berbeda-beda" data-en="Varies">Berbeda-beda</span></td>
           </tr>
           <tr>
@@ -399,7 +476,7 @@
         </tbody>
       </table>
     </div>
-    <p class="cmp-note" data-id="Berdasarkan fitur yang didokumentasikan publik per November 2026 dan bisa berubah. Microsoft Phone Link adalah merek dagang Microsoft; ZenLink tidak berafiliasi dengan Microsoft." data-en="Based on publicly documented features as of November 2026; these may change. Microsoft Phone Link is a trademark of Microsoft; ZenLink is not affiliated with Microsoft.">Berdasarkan fitur yang didokumentasikan publik per November 2026 dan bisa berubah. Microsoft Phone Link adalah merek dagang Microsoft; ZenLink tidak berafiliasi dengan Microsoft.</p>
+    <p class="cmp-note" data-id="Berdasarkan fitur yang didokumentasikan publik per November 2026 dan bisa berubah. ✕ = tidak ada di dokumentasi publik, – = tidak dicantumkan. Microsoft Phone Link adalah merek dagang Microsoft; ZenLink tidak berafiliasi dengan Microsoft." data-en="Based on publicly documented features as of November 2026; these may change. ✕ = not in the public documentation, – = not stated. Microsoft Phone Link is a trademark of Microsoft; ZenLink is not affiliated with Microsoft.">Berdasarkan fitur yang didokumentasikan publik per November 2026 dan bisa berubah. ✕ = tidak ada di dokumentasi publik, – = tidak dicantumkan. Microsoft Phone Link adalah merek dagang Microsoft; ZenLink tidak berafiliasi dengan Microsoft.</p>
   </div>
 </section>
 

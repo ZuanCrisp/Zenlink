@@ -582,3 +582,8 @@ html.lite .btn-love .hrt { animation: none; filter: none; }
   .cmp tbody th { width: 118px; }
   .cmp tbody th, .cmp thead th:first-child { position: sticky; left: 0; z-index: 1; background: var(--bg-2); box-shadow: 8px 0 14px -10px var(--shade); }
 }
+.cmp tr.grp th { padding: 20px 18px 8px; font: 650 11.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--pink); border-bottom: 0; background: none; }
+.cmp tbody tr.grp:hover { background: none; }
+.cmp tbody tr.grp + tr > * { border-top: 1px solid color-mix(in srgb, var(--text) 8%, transparent); }
+.cmp i.u { color: var(--text-3); background: color-mix(in srgb, var(--text) 6%, transparent); }
+.cmp i.u::before { content: "–"; }
