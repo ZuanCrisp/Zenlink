@@ -114,6 +114,18 @@ impl Api {
         r.body_mut().read_json::<Value>().ok()
     }
 
+    /// GET for work that takes a few seconds (an iPhone's app list). The JSON
+    /// body comes back also for error statuses: they carry the message.
+    pub fn get_slow(&self, path: &str, secs: u64) -> Option<Value> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(secs)))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        let mut r = agent.get(format!("{}{path}", base_url())).call().ok()?;
+        r.body_mut().read_json::<Value>().ok()
+    }
+
     pub fn alive(&self) -> bool {
         self.get("/api/state").is_some()
     }

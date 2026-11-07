@@ -167,6 +167,7 @@ fn phone() -> Option<(String, Option<u64>, String)> {
 
 /// Watches the window for files dragged in from Explorer.
 pub fn install(ui: &AppWindow) {
+    install_ios(ui);
     let weak = ui.as_weak();
     ui.window().on_winit_window_event(move |_, ev| {
         let Some(ui) = weak.upgrade() else {
@@ -174,9 +175,14 @@ pub fn install(ui: &AppWindow) {
         };
         match ev {
             WindowEvent::HoveredFile(_) => {
-                let on_android = ui.get_screen().as_str() == "android";
+                let apple = ui.get_screen().as_str() != "android";
                 ui.set_drop_hover(true);
-                ui.set_drop_ok(on_android && phone().is_some());
+                ui.set_drop_apple(apple);
+                ui.set_drop_ok(if apple {
+                    ui.get_mode_active().as_str() == "apple"
+                } else {
+                    phone().is_some()
+                });
                 EventResult::PreventDefault
             }
             WindowEvent::HoveredFileCancelled => {
@@ -195,14 +201,7 @@ pub fn install(ui: &AppWindow) {
 
 fn drop_file(ui: &AppWindow, path: PathBuf) {
     if ui.get_screen().as_str() != "android" {
-        show_toast(
-            ui,
-            tr_ui(
-                ui,
-                "Kirim file ke iPhone/iPad belum tersedia di versi ini.",
-                "Sending files to an iPhone/iPad is not available in this version yet.",
-            ),
-        );
+        ios::dropped(ui, path);
         return;
     }
     let Some((serial, transport_id, device)) = phone() else {
@@ -233,4 +232,264 @@ fn drop_file(ui: &AppWindow, path: PathBuf) {
         transport_id,
         device,
     });
+}
+
+/// Registers the iPhone/iPad app picker's callbacks.
+fn install_ios(ui: &AppWindow) {
+    let weak = ui.as_weak();
+    ui.on_files_pick(move |i| {
+        if let Some(ui) = weak.upgrade() {
+            ios::pick(&ui, i);
+        }
+    });
+    let weak = ui.as_weak();
+    ui.on_files_close(move || {
+        if let Some(ui) = weak.upgrade() {
+            ios::close(&ui);
+        }
+    });
+}
+
+/// iPhone/iPad (Apple Driver mode): the backend streams the files into the
+/// Documents folder of an app with File Sharing (zenlink/apple/files.py).
+mod ios {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use serde_json::{json, Value};
+    use slint::ComponentHandle;
+    use zenlink_core::api::Api;
+
+    use super::pill;
+    use crate::{app_letters, app_tint, show_toast, tr_ui, AppRow, AppWindow};
+
+    thread_local! {
+        /// Files waiting for the user to pick an app.
+        static PENDING: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+        /// (bundle id, name) of the apps shown.
+        static APPS: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn msg(v: &Value) -> String {
+        v.get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    }
+
+    fn set_title(ui: &AppWindow) {
+        let n = PENDING.with_borrow(Vec::len);
+        let t = tr_ui(
+            ui,
+            &format!("Kirim {n} file ke app di iPhone/iPad"),
+            &format!("Send {n} file(s) to an app on the iPhone/iPad"),
+        );
+        ui.set_files_title(t.into());
+    }
+
+    fn list_error(ui: &AppWindow, v: Option<&Value>) -> String {
+        let m = v.map(msg).unwrap_or_default();
+        if !m.is_empty() {
+            return m;
+        }
+        tr_ui(
+            ui,
+            "Daftar app iPhone/iPad tidak terbaca. Pastikan perangkat tersambung di mode Apple Driver dan sudah dipercaya (Trust).",
+            "Could not read the iPhone/iPad apps. Check that the device is connected in Apple Driver mode and trusted.",
+        )
+    }
+
+    pub fn dropped(ui: &AppWindow, path: PathBuf) {
+        if ui.get_mode_active().as_str() != "apple" {
+            show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    "Kirim file ke iPhone/iPad butuh mode Apple Driver (ZenLink Studio tidak bisa).",
+                    "Sending files to an iPhone/iPad needs Apple Driver mode (ZenLink Studio cannot).",
+                ),
+            );
+            return;
+        }
+        if !path.is_file() {
+            show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    "Folder belum bisa dikirim: pilih file-nya.",
+                    "Folders cannot be sent yet: drop the files.",
+                ),
+            );
+            return;
+        }
+        let first = PENDING.with_borrow_mut(|p| {
+            p.push(path);
+            p.len() == 1
+        });
+        set_title(ui);
+        if !first || ui.get_files_open() {
+            return;
+        }
+        ui.set_files_open(true);
+        ui.set_files_busy(true);
+        ui.set_files_apps(std::rc::Rc::new(slint::VecModel::<AppRow>::default()).into());
+        ui.set_files_status(
+            tr_ui(
+                ui,
+                "Membaca app di iPhone/iPad…",
+                "Reading the iPhone/iPad apps…",
+            )
+            .into(),
+        );
+        let weak = ui.as_weak();
+        std::thread::spawn(move || {
+            let r = Api::new().get_slow("/api/files/apps", 30);
+            let _ = slint::invoke_from_event_loop(move || {
+                let Some(ui) = weak.upgrade() else { return };
+                ui.set_files_busy(false);
+                let ok = r
+                    .as_ref()
+                    .and_then(|v| v.get("ok"))
+                    .and_then(Value::as_bool)
+                    == Some(true);
+                if !ok {
+                    let m = list_error(&ui, r.as_ref());
+                    ui.set_files_status(m.into());
+                    return;
+                }
+                let apps: Vec<(String, String)> = r
+                    .as_ref()
+                    .and_then(|v| v.get("apps"))
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| {
+                                Some((
+                                    x.get("bundle")?.as_str()?.to_string(),
+                                    x.get("name")?.as_str()?.to_string(),
+                                ))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let rows: Vec<AppRow> = apps
+                    .iter()
+                    .map(|(b, n)| AppRow {
+                        name: n.as_str().into(),
+                        sub: b.as_str().into(),
+                        letter: app_letters(n).into(),
+                        tint: app_tint(b),
+                    })
+                    .collect();
+                let status = if rows.is_empty() {
+                    tr_ui(
+                        &ui,
+                        "Tidak ada app yang menerima file (File Sharing). Pasang mis. VLC atau Documents dari App Store.",
+                        "No app accepts files (File Sharing). Install e.g. VLC or Documents from the App Store.",
+                    )
+                } else {
+                    tr_ui(
+                        &ui,
+                        "Pilih app: file masuk ke folder app itu dan terlihat di app Files › Di iPhone Saya.",
+                        "Pick an app: the files go to its folder and show in Files › On My iPhone.",
+                    )
+                };
+                ui.set_files_status(status.into());
+                APPS.with_borrow_mut(|a| *a = apps);
+                ui.set_files_apps(std::rc::Rc::new(slint::VecModel::from(rows)).into());
+            });
+        });
+    }
+
+    pub fn close(ui: &AppWindow) {
+        ui.set_files_open(false);
+        PENDING.with_borrow_mut(Vec::clear);
+    }
+
+    pub fn pick(ui: &AppWindow, index: i32) {
+        let Some((bundle, app)) = APPS.with_borrow(|a| a.get(index.max(0) as usize).cloned())
+        else {
+            return;
+        };
+        let paths = PENDING.with_borrow_mut(std::mem::take);
+        ui.set_files_open(false);
+        let weak = ui.as_weak();
+        std::thread::spawn(move || {
+            let api = Api::new();
+            let total = paths.len();
+            let mut sent = 0;
+            let mut last_error = String::new();
+            for (i, path) in paths.iter().enumerate() {
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let k = i + 1;
+                let label = format!(
+                    "Mengirim {name} ke {app} ({k}/{total})…|Sending {name} to {app} ({k}/{total})…"
+                );
+                pill(&weak, &label, 0.0);
+                let r = api.post_slow(
+                    "/api/files/send",
+                    &json!({"path": path.to_string_lossy(), "bundle": bundle, "app": app}),
+                    15,
+                );
+                if r.as_ref()
+                    .and_then(|v| v.get("ok"))
+                    .and_then(Value::as_bool)
+                    != Some(true)
+                {
+                    last_error = r.as_ref().map(msg).unwrap_or_else(|| "backend".into());
+                    log::warn!("files: {} not started: {last_error}", path.display());
+                    continue;
+                }
+                loop {
+                    std::thread::sleep(Duration::from_millis(200));
+                    let Some(j) = api.get("/api/files/job") else {
+                        continue;
+                    };
+                    let state = j.get("state").and_then(Value::as_str).unwrap_or("");
+                    let done = j.get("sent").and_then(Value::as_u64).unwrap_or(0);
+                    let size = j.get("total").and_then(Value::as_u64).unwrap_or(0);
+                    match state {
+                        "running" => {
+                            let p = if size > 0 {
+                                done as f32 / size as f32
+                            } else {
+                                0.0
+                            };
+                            pill(&weak, &label, p);
+                        }
+                        "done" => {
+                            sent += 1;
+                            break;
+                        }
+                        _ => {
+                            last_error = msg(&j);
+                            break;
+                        }
+                    }
+                }
+            }
+            pill(&weak, "", -1.0);
+            let (id, en) = if sent == total {
+                (
+                    format!("{sent} file terkirim ke {app}. Buka app {app} atau Files › Di iPhone Saya."),
+                    format!("{sent} file(s) sent to {app}. Open {app} or Files › On My iPhone."),
+                )
+            } else {
+                (
+                    format!("{sent} dari {total} file terkirim ke {app}. {last_error}"),
+                    format!("{sent} of {total} file(s) sent to {app}. {last_error}"),
+                )
+            };
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = weak.upgrade() {
+                    let t = tr_ui(&ui, &id, &en);
+                    show_toast(&ui, t);
+                }
+            });
+        });
+    }
 }

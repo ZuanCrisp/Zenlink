@@ -4257,7 +4257,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let tw = ui.get_transfer_w();
                     holes.push((px((ww - tw) / 2.0), px(wh - 150.0), px(tw), px(40.0)));
                 }
-                if (ui.get_android_apps_open() && on_android) || ui.get_drop_hover() {
+                if (ui.get_android_apps_open() && on_android) || ui.get_drop_hover() || ui.get_files_open() {
                     holes.push((
                         px(ui.get_launcher_x()),
                         px(ui.get_launcher_y()),

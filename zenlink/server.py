@@ -180,6 +180,60 @@ def build_app(manager: CastManager) -> web.Application:
         stats = await asyncio.to_thread(manager.set_audio, body.get("enabled"), body.get("volume"), body.get("muted"))
         return web.json_response(stats)
 
+    # Files to an iPhone/iPad (v2.5.1): Apple Driver mode only (usbmux).
+    def files_device() -> dict | None:
+        if manager.connection.active != "apple":
+            return None
+        dev = manager.state.get("device")
+        if manager.state.get("backend") in ("apple", "hybrid") and dev and dev.get("id") != "airplay":
+            return dev
+        snap = manager.snapshot()
+        return next((d for d in snap.get("devices", []) if d.get("ready") and d.get("id")), None)
+
+    @routes.get("/api/files/apps")
+    async def files_apps(_request: web.Request) -> web.Response:
+        from zenlink.apple import files
+
+        dev = files_device()
+        if dev is None:
+            return web.json_response({"ok": False, "message": "Needs Apple Driver mode and a connected device."},
+                                     status=409)
+        try:
+            apps = await files.list_apps(dev["id"])
+        except Exception as error:
+            log.warning("files: app list failed: %s", error)
+            return web.json_response({"ok": False, "message": files._short(error)}, status=502)
+        return web.json_response({"ok": True, "device": dev.get("deviceName") or dev.get("name"), "apps": apps})
+
+    @routes.post("/api/files/send")
+    async def files_send(request: web.Request) -> web.Response:
+        from pathlib import Path
+
+        from zenlink.apple import files
+
+        # A JSON content type keeps web pages from posting here (CORS preflight).
+        if request.content_type != "application/json":
+            return web.json_response({"ok": False, "message": "JSON only."}, status=415)
+        body = await request.json()
+        dev = files_device()
+        local = Path(str(body.get("path") or ""))
+        bundle = str(body.get("bundle") or "")
+        if dev is None:
+            return web.json_response({"ok": False, "message": "Needs Apple Driver mode and a connected device."},
+                                     status=409)
+        if not local.is_absolute() or not local.is_file() or not re.fullmatch(r"[A-Za-z0-9.\-]+", bundle):
+            return web.json_response({"ok": False, "message": "Bad file or app."}, status=400)
+        if files.job.get("state") == "running":
+            return web.json_response({"ok": False, "message": "Another file is being sent."}, status=409)
+        files.start(asyncio.get_running_loop(), dev["id"], bundle, str(body.get("app") or bundle), local)
+        return web.json_response({"ok": True})
+
+    @routes.get("/api/files/job")
+    async def files_job(_request: web.Request) -> web.Response:
+        from zenlink.apple import files
+
+        return web.json_response(files.job)
+
     @routes.post("/api/client-log")
     async def client_log(request: web.Request) -> web.Response:
         try:

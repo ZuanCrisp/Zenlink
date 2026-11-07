@@ -2067,6 +2067,7 @@ component AppLauncher inherits Rectangle {
     // Android 10+: an app can also open in its own window.
     in property <bool> window-ok;
     in-out property <string> open-in: "phone";
+    in property <bool> searchable: true;
     callback filter(string);
     callback launch(int, string);
     callback close();
@@ -2102,7 +2103,7 @@ component AppLauncher inherits Rectangle {
             }
             GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup", "Close"); clicked => { root.close(); } }
         }
-        if !root.busy: Field {
+        if !root.busy && root.searchable: Field {
             placeholder: I18n.t("Cari app…", "Search apps…");
             edited(v) => { root.filter(v); }
         }
@@ -2250,6 +2251,15 @@ export component AppWindow inherits Window {
     // Files dragged over the window, and a running transfer (filedrop.rs).
     in property <bool> drop-hover;
     in property <bool> drop-ok;
+    in property <bool> drop-apple;
+    // iPhone/iPad: which app gets the dropped files (Apple Driver mode).
+    in property <bool> files-open;
+    in property <bool> files-busy;
+    in property <string> files-title;
+    in property <string> files-status;
+    in property <[AppRow]> files-apps;
+    callback files-pick(int);
+    callback files-close();
     in property <string> transfer;
     in property <float> transfer-p: -1;
     out property <length> transfer-w: min(self.width - 40px, 360px);
@@ -2587,6 +2597,22 @@ export component AppWindow inherits Window {
             launch(i, where) => { root.android-app-launch(i, where); }
             close => { root.android-apps-close(); }
         }
+        // iPhone/iPad: pick the app that receives the dropped files.
+        AppLauncher {
+            x: root.launcher-x;
+            y: root.launcher-y;
+            width: root.launcher-w;
+            height: root.launcher-h;
+            open: root.files-open;
+            title: root.files-title;
+            status: root.files-status;
+            busy: root.files-busy;
+            apps: root.files-apps;
+            window-ok: false;
+            searchable: false;
+            launch(i, where) => { root.files-pick(i); }
+            close => { root.files-close(); }
+        }
         // Files dragged in from Explorer (v2.5.1, filedrop.rs).
         Rectangle {
             x: root.launcher-x;
@@ -2613,7 +2639,7 @@ export component AppWindow inherits Window {
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: root.drop-ok ? I18n.t("Lepas untuk kirim ke HP", "Drop to send to the phone") : I18n.t("Belum ada HP Android yang di-mirror", "No Android phone is being mirrored");
+                    text: root.drop-ok ? I18n.t("Lepas untuk kirim ke perangkat", "Drop to send to the device") : root.drop-apple ? I18n.t("Kirim file butuh mode Apple Driver", "Sending files needs Apple Driver mode") : I18n.t("Belum ada HP Android yang di-mirror", "No Android phone is being mirrored");
                     font-size: 16px;
                     font-weight: 700;
                     color: Theme.text;
@@ -2621,7 +2647,10 @@ export component AppWindow inherits Window {
                     wrap: word-wrap;
                 }
                 Text {
-                    text: root.drop-ok ? I18n.t("File .apk dipasang. File lain masuk ke folder Download di HP.", "An .apk file is installed. Other files go to the phone's Download folder.") : I18n.t("Mulai mirroring HP Android, lalu tarik file ke sini.", "Start mirroring an Android phone, then drop files here.");
+                    text: root.drop-apple
+                        ? (root.drop-ok ? I18n.t("Lalu pilih app tujuan di iPhone/iPad (mis. VLC, Documents). File juga terlihat di app Files › Di iPhone Saya.", "Then pick the app on the iPhone/iPad (e.g. VLC, Documents). The file also shows in Files › On My iPhone.")
+                                        : I18n.t("ZenLink Studio mengganti driver USB Apple, jadi tidak bisa kirim file. Ganti ke Apple Driver di Pengaturan.", "ZenLink Studio replaces Apple's USB driver, so it cannot send files. Switch to Apple Driver in Settings."))
+                        : root.drop-ok ? I18n.t("File .apk dipasang. File lain masuk ke folder Download di HP.", "An .apk file is installed. Other files go to the phone's Download folder.") : I18n.t("Mulai mirroring HP Android, lalu tarik file ke sini.", "Start mirroring an Android phone, then drop files here.");
                     font-size: 12px;
                     color: Theme.text-2;
                     horizontal-alignment: center;
