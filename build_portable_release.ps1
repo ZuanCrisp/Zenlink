@@ -4,7 +4,7 @@
 
     ZenLink-v<ver>-Portable.exe           one ZenLink.exe, nothing to install (no Python)
     ZenLink-v<ver>-Setup.exe              installer (Inno Setup 6, if installed)
-    ZenLink-v<ver>-Portable-Source.zip    source + Start ZenLink.bat (sets up Python on first run)
+    ZenLink-v<ver>-Portable-Source.zip    source + Start ZenLink.bat (sets up Python and adb on first run)
 
   ZenLink.exe is the Rust window (rust\). The Python backend is built as
   ZenLinkService.exe; ZenLink.exe starts it headless. Needs cargo (rustup).
@@ -49,6 +49,10 @@ foreach ($f in $adbFiles) {
 }
 $adbRev = (Select-String -Path (Join-Path $PlatformTools "source.properties") -Pattern '^Pkg.Revision=(.+)$').Matches[0].Groups[1].Value
 Write-Host "    platform-tools $adbRev from $PlatformTools" -ForegroundColor Green
+# The source package downloads the revision pinned in Start ZenLink.bat; every
+# package must carry the same adb.
+$pinRev = (Select-String -Path "Start ZenLink.bat" -Pattern '^set "ZL_ADB_REV=(.+)"$').Matches[0].Groups[1].Value
+if ($adbRev -ne $pinRev) { throw "platform-tools $adbRev differs from ZL_ADB_REV=$pinRev in Start ZenLink.bat." }
 foreach ($f in $adbFiles) {
     Write-Host ("    {0,-18} {1}" -f $f, (Get-FileHash (Join-Path $PlatformTools $f) -Algorithm SHA256).Hash)
 }
@@ -235,13 +239,13 @@ if ($iscc) {
 $srcZip = Join-Path $release "ZenLink-v$Version-Portable-Source.zip"
 git archive --format=zip --prefix="ZenLink-v$Version/" -o $srcZip HEAD
 # Ready-built ZenLink.exe next to Start ZenLink.bat (no Rust toolchain needed).
+# adb is not packed: Start ZenLink.bat downloads Google's official copy
+# (tools\get-adb.ps1). The website, agent notes and the scrcpy server
+# (built into ZenLink.exe) are export-ignore in .gitattributes.
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::Open($srcZip, "Update")
 try {
     [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $rustExe, "ZenLink-v$Version/ZenLink.exe")
-    foreach ($f in $adbFiles) {
-        [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, (Join-Path $PlatformTools $f), "ZenLink-v$Version/third_party/platform-tools/$f")
-    }
 } finally { $zip.Dispose() }
 
 Get-ChildItem $release | ForEach-Object {

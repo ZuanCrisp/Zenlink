@@ -79,7 +79,12 @@ Design references for the Rust window are listed in `docs/rust/THIRD_PARTY.md`.
     the build prints all four SHA-256s.
   - Authenticode: `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` are validly
     signed by **Google LLC**. `build_portable_release.ps1` stops if not.
-- Where: installer and source zip in `third_party\platform-tools\`. Portable.exe
+- Where: installer in `third_party\platform-tools\`. The source zip does not
+  carry them: `Start ZenLink.bat` offers to download Google's
+  `platform-tools_r37.0.1-win.zip` (SHA-256
+  `45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99`, checked;
+  `adb.exe` must be Google-signed) and extracts the same four files there
+  (`tools\get-adb.ps1`). Portable.exe
   packs the same files and unpacks them to `%LOCALAPPDATA%\ZenLink-Next\platform-tools`.
 - Licence (audit for B-10, 2026-11-07; a reading of the texts, not legal advice):
   - The platform-tools package comes with the Android SDK License Agreement

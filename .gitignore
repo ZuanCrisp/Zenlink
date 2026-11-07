@@ -18,3 +18,7 @@ airplay.json
 allow-airplay.cmd
 native/playfair/*.obj
 crash.log
+
+# adb downloaded by Start ZenLink.bat (tools/get-adb.ps1)
+third_party/platform-tools/
+.no-adb

@@ -4,6 +4,14 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title ZenLink
 
+rem --- Pinned versions: the same as the release build -----------------------
+rem Python packages: requirements.txt, with the exact versions of
+rem requirements.lock as constraints. adb: Google platform-tools, downloaded
+rem once by tools\get-adb.ps1 when no adb is found (checksum and Google
+rem signature checked). Change these only together with docs\THIRD_PARTY.md.
+set "ZL_ADB_REV=37.0.1"
+set "ZL_ADB_SHA256=45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99"
+
 rem Standalone build: ZenLink.exe and its backend ZenLinkService.exe sit next to this file.
 if exist "%~dp0ZenLinkService.exe" if exist "%~dp0ZenLink.exe" (
     start "" "%~dp0ZenLink.exe"
@@ -14,10 +22,11 @@ set "VENV=%~dp0.venv"
 set "PY=%VENV%\Scripts\python.exe"
 set "PYW=%VENV%\Scripts\pythonw.exe"
 set "STAMP=%VENV%\.requirements"
+set "STAMPLOCK=%VENV%\.requirements-lock"
 
-rem Fast path: environment exists and requirements.txt hasn't changed.
-if exist "%PY%" if exist "%STAMP%" (
-    fc /b "%~dp0requirements.txt" "%STAMP%" >nul 2>&1 && goto :launch
+rem Fast path: environment exists and requirements.txt / .lock haven't changed.
+if exist "%PY%" if exist "%STAMP%" if exist "%STAMPLOCK%" (
+    fc /b "%~dp0requirements.txt" "%STAMP%" >nul 2>&1 && fc /b "%~dp0requirements.lock" "%STAMPLOCK%" >nul 2>&1 && goto :launch
 )
 
 echo ZenLink - first-time setup
@@ -54,8 +63,9 @@ if not exist "%PY%" (
 
 echo [2/3] Installing components (about a minute the first time)...
 "%PY%" -m pip install --disable-pip-version-check -q --upgrade pip >nul 2>&1
-"%PY%" -m pip install --disable-pip-version-check -q -r "%~dp0requirements.txt" || goto :failed
+"%PY%" -m pip install --disable-pip-version-check -q -r "%~dp0requirements.txt" -c "%~dp0requirements.lock" || goto :failed
 copy /y "%~dp0requirements.txt" "%STAMP%" >nul
+copy /y "%~dp0requirements.lock" "%STAMPLOCK%" >nul
 
 echo [3/3] Checking Windows components...
 call :check_env
@@ -69,6 +79,7 @@ rem ANDROID_SDK_ROOT, %LOCALAPPDATA%\Android\Sdk) or on PATH. Machine-only
 rem settings such as ANDROID_HOME can go in "Start ZenLink.local.bat" next
 rem to this file (not part of the repository).
 if exist "%~dp0Start ZenLink.local.bat" call "%~dp0Start ZenLink.local.bat"
+call :check_adb
 if /i "%ZENLINK_UI%"=="classic" goto :classic
 set "NEXT=%~dp0ZenLink.exe"
 if exist "%NEXT%" goto :start_next
@@ -108,6 +119,33 @@ if not "!RC!"=="0" (
     echo The build failed. If ZenLink is still open, close it and run Start ZenLink.bat again.
     pause
     exit /b 1
+)
+exit /b 0
+
+:check_adb
+rem Android needs Google's adb. The installer and Portable.exe bundle it; the
+rem source package downloads the official copy once (tools\get-adb.ps1, pinned
+rem revision, SHA-256 and Google signature checked). Skipped when an adb is
+rem already there (Android SDK or PATH) or when the user said no before.
+if exist "%~dp0third_party\platform-tools\adb.exe" exit /b 0
+if exist "%~dp0.no-adb" exit /b 0
+if defined ANDROID_HOME if exist "%ANDROID_HOME%\platform-tools\adb.exe" exit /b 0
+if defined ANDROID_SDK_ROOT if exist "%ANDROID_SDK_ROOT%\platform-tools\adb.exe" exit /b 0
+if exist "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" exit /b 0
+where adb >nul 2>&1 && exit /b 0
+if not exist "%~dp0tools\get-adb.ps1" exit /b 0
+echo.
+echo  - Android phones and tablets need adb (Google platform-tools %ZL_ADB_REV%, about 8 MB).
+choice /c YN /n /m "   Download it from Google now? iPhone and iPad work without it. [Y/N] "
+if !errorlevel! neq 1 (
+    echo Not downloaded. Delete this file to be asked again.> "%~dp0.no-adb"
+    exit /b 0
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\get-adb.ps1" -Revision "%ZL_ADB_REV%" -Sha256 "%ZL_ADB_SHA256%"
+if errorlevel 1 (
+    echo    adb could not be downloaded. ZenLink still starts; Android needs adb.
+    echo    It will be offered again next time.
+    timeout /t 5 >nul
 )
 exit /b 0
 

@@ -122,7 +122,7 @@ git clone https://github.com/zenvyzenshiro/zenlink.git
 cd zenlink
 .\"Start ZenLink.bat"
 ```
-The first run sets everything up: it installs Python 3.13 with winget if needed, creates the environment and installs `requirements.txt`, offers Apple Devices (for Apple Driver mode) and the firewall permission for AirPlay. For Android from source, set `ANDROID_HOME` to an Android SDK with platform-tools (the release packages bundle `adb`). Later runs open straight away. **`run.bat`** starts ZenLink with a visible console log.
+The first run sets everything up: it installs Python 3.13 with winget if needed, creates the environment and installs `requirements.txt`, offers Apple Devices (for Apple Driver mode) and the firewall permission for AirPlay. For Android it offers to download Google's official `adb` (platform-tools 37.0.1, about 8 MB, checksum and Google signature checked), unless an Android SDK is already there (`ANDROID_HOME`). Setup.exe and Portable.exe bundle `adb`. Later runs open straight away. **`run.bat`** starts ZenLink with a visible console log.
 
 Tests: `.venv\Scripts\python -m unittest discover -s tests` (no device needed; `tests\airplay_sim.py` simulates an iPhone mirroring over AirPlay).
 
