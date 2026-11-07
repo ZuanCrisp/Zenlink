@@ -299,3 +299,20 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Request: 2026-11-07 by the owner (Apple mode only, not ZenLink Studio).
 - Fix: Settings › "Auto unlock": save a passcode or password (Windows DPAPI, existing `/api/passcode`), toggle "Unlock when mirroring starts" (sends `wake` 1.5 s after the picture starts, Apple Driver/Hybrid only). Alphanumeric passwords and custom-length codes now type with Shift and Return.
 - Verification: tests `PasscodeTests` (3); unverified on an iPhone.
+
+### B-45: No Cable/Wi-Fi, mode or Start on the Apple "Plug in" screen            Status: fixed (unverified)
+- Reported: 2026-11-07 by the owner (screenshot): the empty Apple screen only said "Plug in an iPhone or iPad"; Cable/Wi-Fi and Change mode were only in Settings.
+- Fix: the Apple placeholder shows the mode (Apple Driver / ZenLink Studio · Change), a Cable (USB) / Wi-Fi switch (same `set-link` as Settings) and a Start button; the hint text follows the chosen link.
+- Verification: builds; seen with the fake backend (no device) in both modes. Unverified with an iPhone.
+
+### B-46: Settings showed options the chosen Apple mode does not have            Status: fixed (unverified)
+- Reported: 2026-11-07 by the owner: hide what a mode does not support.
+- Cause: ZenLink Studio (USB Direct / AirPlay) has no touch, keyboard, buttons or device shortcuts: `server.py` `hub_route` answers 409 for touch/key/button and `/api/keyboard/action` only runs for the `apple`/`hybrid` backends. Wi-Fi setup is Apple Driver only; the Studio driver install is Studio only.
+- Fix: in ZenLink Studio the Control card, the device shortcuts (Back, Lock, Notification/Control Center, U, D, V, Ctrl+K, Ctrl+C...), Auto unlock, Set up Wi-Fi, Restore Apple driver and the bottom dock are hidden; in Apple Driver mode the Install ZenLink Studio driver button is hidden. The libusb0 filter warning stays in both. Device audio (On this PC / Device only) stays in both: it works in both.
+- Verification: builds; seen with the fake backend: ZenLink Studio has no Control card or dock, Apple Driver has both. Unverified with an iPhone.
+
+### B-47: Window opened at the top left, not in the middle of the screen            Status: fixed (verified)
+- Reported: 2026-11-07 by the owner (screenshot on a 2560x1440 screen).
+- Cause: the first sizing (`clamp_to_work_area`) set the size but kept Windows' default position (26, 26); the fit to the picture then changed the width again.
+- Fix: the first tick centres the window in the monitor's work area and keeps it centred while its size settles (up to 3 s, stops if the user moves it, not during the Settings slide).
+- Verification: test `first_window_opens_in_the_middle_of_the_work_area`; measured with the fake backend: window centre (1280, 696.5) on a 2560x1392 work area, stable at 1, 2, 3 and 8 s.

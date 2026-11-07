@@ -47,19 +47,26 @@ def main():
     ap.add_argument("--jitter", type=float, default=0,
                     help="send each frame up to this many ms late (random, not cumulative), like a real link")
     ap.add_argument("--need", help="device needs this first (restore, bind, removefilter, trust, ...)")
+    ap.add_argument("--no-device", action="store_true", help="no device plugged in (the Plug in screen)")
+    ap.add_argument("--mode", default="apple", choices=["apple", "usbdirect"], help="active connection mode")
     a = ap.parse_args()
     clips = [load(a.video)] + ([load(a.video2)] if a.video2 else [])
     state = {"phase": "idle", "detail": "", "device": {"name": "iPhone (fake)"}, "error": None, "rotation": 0,
              "devices": [{"id": "fake", "name": "iPhone (fake)", "wifi": False}], "service": True,
              "connection": {"active": "apple", "link": "wired", "remember": True, "needsChoice": False}, "capture": None, "nativeAudio": False}
     log = {"touch": 0, "button": []}
+    state["connection"]["active"] = a.mode
+    if a.no_device:
+        state.update(device=None, devices=[])
     if a.needs_choice:
         state["connection"].update(active=None, needsChoice=True)
     drv_mode = {"restore": "replaced", "bind": "apple"}.get(a.need or "", "apple")
     state["drivers"] = {"libusb0": {"available": True}, "devices": [{
         "instance": "USB\\VID_05AC&PID_12A8\\FAKE", "serial": "FAKE", "family": "iPhone",
         "mode": drv_mode, "unsafeFilter": a.need == "removefilter"}]}
-    if a.need:
+    if a.no_device:
+        pass
+    elif a.need:
         dev = state["devices"][0]
         dev["ready"] = False
         if a.need != "trust":

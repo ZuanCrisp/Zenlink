@@ -182,10 +182,19 @@ fn clamp_to_work_area(ui: &AppWindow) {
     // screen width, at most 1.35 x the height.
     let w = cur.width.max((ww * 0.55).min(h * 1.35)).min(ww * 0.95);
     if (w, h) != (cur.width, cur.height) {
-        let size = LogicalSize::new(w, h);
-        ui.window().set_size(size);
-        keep_on_screen(ui, (wx, wy, ww, wh), size);
+        ui.window().set_size(LogicalSize::new(w, h));
     }
+    // Open in the middle of the screen (Windows' default put it at the top left).
+    let (x, y) = centered((wx, wy, ww, wh), (w, h));
+    ui.window().set_position(slint::LogicalPosition::new(x, y));
+}
+
+/// Top-left corner that centres a `w` x `h` window in the work area.
+fn centered((wx, wy, ww, wh): (f32, f32, f32, f32), (w, h): (f32, f32)) -> (f32, f32) {
+    (
+        (wx + (ww - w) / 2.0).max(wx).round(),
+        (wy + (wh - h) / 2.0).max(wy).round(),
+    )
 }
 
 /// CSS `cubic-bezier(0.05, 0.7, 0.1, 1)` (the v2.2.31 settings slide curve)
@@ -3462,6 +3471,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let input = input.clone();
         let (t, g) = (touch_on.clone(), gestures_on.clone());
         let clamped = std::cell::Cell::new(false);
+        // Startup: the window is re-centred while its size still settles
+        // (fit to the picture), until the user moves it or 3 s pass.
+        let centring = std::cell::Cell::new(None::<(Instant, slint::PhysicalPosition)>);
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(16), move || {
             let Some(ui) = weak.upgrade() else { return };
             // The first tick sizes the window for the screen; the settings
@@ -3470,6 +3482,23 @@ fn main() -> Result<(), slint::PlatformError> {
             let first = !clamped.replace(true);
             if first {
                 clamp_to_work_area(&ui);
+                centring.set(Some((Instant::now(), ui.window().position())));
+            } else if let Some((at, pos)) = centring.get() {
+                let w = ui.window();
+                let sliding = APP.with_borrow(|a| a.slide.is_some());
+                if at.elapsed() > Duration::from_secs(3) || w.position() != pos {
+                    centring.set(None); // settled, or the user moved it
+                } else if !sliding {
+                    if let Some(wa) = work_area(&ui) {
+                        let size = w.size().to_logical(w.scale_factor());
+                        let (x, y) = centered(wa, (size.width, size.height));
+                        let want = slint::LogicalPosition::new(x, y).to_physical(w.scale_factor());
+                        if (want.x - pos.x).abs() > 1 || (want.y - pos.y).abs() > 1 {
+                            w.set_position(want);
+                            centring.set(Some((at, want)));
+                        }
+                    }
+                }
             }
             // Auto unlock, a moment after the picture started.
             let unlock = APP.with_borrow_mut(|a| {
@@ -3838,6 +3867,30 @@ mod icon_tests {
     fn windows_10_falls_back_to_mdl2() {
         assert_eq!(super::pick_icon_font(false), "Segoe MDL2 Assets");
         assert_eq!(super::pick_icon_font(true), "Segoe Fluent Icons");
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::centered;
+
+    #[test]
+    fn first_window_opens_in_the_middle_of_the_work_area() {
+        // 2560 x 1392 work area (taskbar at the bottom), 1024 x 1183 window.
+        assert_eq!(
+            centered((0.0, 0.0, 2560.0, 1392.0), (1024.0, 1183.0)),
+            (768.0, 105.0)
+        );
+        // Second monitor left of the primary one.
+        assert_eq!(
+            centered((-1920.0, 148.0, 1920.0, 1032.0), (1000.0, 900.0)),
+            (-1460.0, 214.0)
+        );
+        // Never above or left of the work area.
+        assert_eq!(
+            centered((0.0, 0.0, 800.0, 600.0), (900.0, 700.0)),
+            (0.0, 0.0)
+        );
     }
 }
 

@@ -371,10 +371,17 @@ component Placeholder inherits Rectangle {
     // What stands between the device and Start ("" = ready): restore, bind,
     // package, removefilter, mode, wifi, trust.
     in property <string> need;
+    // Connection mode ("apple" | "usbdirect" | "") and link ("wired" | "wireless"),
+    // switchable right here like in Settings > Connection & driver.
+    in property <string> mode;
+    in property <string> link: "wired";
     callback start();
     callback dismiss();
     callback fix();
+    callback set-link(string);
+    callback change-mode();
     property <bool> card: flow-step >= 0;
+    property <bool> air: link == "wireless";
     property <color> tone: device == "" ? Theme.text-3 : need != "" ? Theme.warn : Theme.ok;
     property <string> need-label: need == "trust" ? I18n.t("Perlu Trust", "Needs Trust")
         : need == "wifi" ? I18n.t("Wi-Fi belum siap", "Wi-Fi not set up")
@@ -438,7 +445,7 @@ component Placeholder inherits Rectangle {
                 background: Theme.dark ? #ffffff08 : #ffffff80;
                 Rectangle { y: 8px; width: 26px; height: 6px; border-radius: 3px; background: root.tone; opacity: 0.6; }
             }
-            if !wifi: Rectangle {
+            if !wifi && !air: Rectangle {
                 x: (parent.width - 2px) / 2;
                 y: 160px;
                 width: 2px;
@@ -479,12 +486,38 @@ component Placeholder inherits Rectangle {
         Text {
             text: message != "" ? message
                 : device != "" && need != "" ? root.need-hint
-                : device == "" ? I18n.t("Pakai kabel USB, buka kunci, lalu tekan Percayai (Trust). Atau sambungkan lewat Wi-Fi.", "Use a USB cable, unlock it and tap Trust. Or connect over Wi-Fi.")
+                : device == "" && air && mode == "usbdirect" ? I18n.t("Di iPhone/iPad: Pusat Kontrol → Pencerminan Layar → ZenLinkStudio.", "On the iPhone/iPad: Control Center → Screen Mirroring → ZenLinkStudio.")
+                : device == "" && air ? I18n.t("Wi-Fi: PC dan perangkat di jaringan yang sama. Pertama kali, tekan Atur Wi-Fi di Pengaturan dengan kabel tersambung.", "Wi-Fi: the PC and the device on the same network. The first time, press Set up Wi-Fi in Settings with the cable in.")
+                : device == "" ? I18n.t("Pakai kabel USB, buka kunci, lalu tekan Percayai (Trust).", "Use a USB cable, unlock it and tap Trust.")
                 : I18n.t("Buka kunci, lalu tekan Mulai mirroring.", "Unlock it, then press Start mirroring.");
             font-size: 12.5px;
             color: message != "" ? #ff8a80 : Theme.text-2;
             horizontal-alignment: center;
             wrap: word-wrap;
+        }
+        // Mode and Cable / Wi-Fi, the same choices as Settings > Connection & driver.
+        if device == "" || need == "": HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            padding-top: 4px;
+            GlassButton {
+                icon: "\u{E8AB}";
+                label: (mode == "usbdirect" ? "ZenLink Studio" : "Apple Driver") + " · " + I18n.t("Ganti", "Change");
+                tip: I18n.t("Pilih Apple Driver atau ZenLink Studio", "Choose Apple Driver or ZenLink Studio");
+                clicked => { root.change-mode(); }
+            }
+            Seg {
+                width: 190px;
+                height: 32px;
+                options: ["wired", "wireless"];
+                labels: [I18n.t("Kabel (USB)", "Cable (USB)"), "Wi-Fi"];
+                value: root.link;
+                changed(v) => { root.set-link(v); }
+            }
+        }
+        if device == "": HorizontalLayout {
+            alignment: center;
+            GlassButton { primary: true; icon: "\u{E768}"; label: I18n.t("Mulai", "Start"); clicked => { root.start(); } }
         }
         if device != "": HorizontalLayout {
             alignment: center;
@@ -1544,6 +1577,9 @@ component SettingsPanel inherits Glass {
     in property <bool> drv-bind;
     in property <bool> drv-filter;
     callback set-link(string);
+    // ZenLink Studio (USB Direct / AirPlay): picture and sound only. Touch,
+    // keyboard, buttons, device shortcuts and auto unlock need Apple Driver mode.
+    property <bool> studio: root.screen != "android" && root.mode == "usbdirect";
     // Auto unlock (Apple Driver mode): a passcode is saved on this PC.
     in property <bool> passcode-set;
     callback save-passcode(string);
@@ -1690,7 +1726,7 @@ component SettingsPanel inherits Glass {
                     }
                 }
 
-                Card {
+                if !root.studio: Card {
                     title: I18n.t("Kontrol", "Control");
                     icon: "\u{E765}";
                     tint-a: #38bdf8;
@@ -1716,23 +1752,24 @@ component SettingsPanel inherits Glass {
                     KeyRow { keys: "F11 · Esc"; text: I18n.t("Fullscreen / keluar", "Full screen / leave"); }
                     KeyRow { keys: "Ctrl + ,"; text: I18n.t("Buka / tutup Pengaturan", "Open / close Settings"); }
                     KeyRow { keys: "Alt + H"; text: I18n.t("Putar tampilan (Auto, 90°, 180°, 270°, 0°)", "Rotate the view (Auto, 90°, 180°, 270°, 0°)"); }
-                    KeyRow { keys: "Alt + ←"; text: "Back"; }
+                    if !root.studio: KeyRow { keys: "Alt + ←"; text: "Back"; }
                     KeyRow { keys: "Alt + C"; text: I18n.t("Salin teks di layar perangkat ke PC (OCR)", "Copy the text on the device screen to the PC (OCR)"); }
                     KeyRow { keys: "Alt + R"; text: I18n.t("Hapus riwayat teks yang disalin", "Clear the copied-text history"); }
-                    KeyRow { keys: "Alt + L"; text: root.screen == "android" ? I18n.t("Tombol power (kunci / nyalakan layar)", "Power button (lock / wake the screen)") : I18n.t("Kunci perangkat", "Lock the device"); }
+                    if !root.studio: KeyRow { keys: "Alt + L"; text: root.screen == "android" ? I18n.t("Tombol power (kunci / nyalakan layar)", "Power button (lock / wake the screen)") : I18n.t("Kunci perangkat", "Lock the device"); }
                     if root.screen == "android": KeyRow { keys: "Ctrl + V"; text: I18n.t("Paste clipboard PC di HP", "Paste the PC clipboard on the phone"); }
                     if root.screen == "android": KeyRow { keys: "Ctrl + C / X / A / Z"; text: I18n.t("Copy, cut, select all, undo di HP", "Copy, cut, select all, undo on the phone"); }
-                    KeyRow { keys: "Alt + N"; text: root.screen == "android" ? "Notifications" : I18n.t("Pusat Notifikasi (buka / tutup)", "Notification Center (open / close)"); }
-                    KeyRow { keys: "Alt + Q"; text: root.screen == "android" ? "Quick Settings" : I18n.t("Pusat Kontrol (buka / tutup)", "Control Center (open / close)"); }
+                    if !root.studio: KeyRow { keys: "Alt + N"; text: root.screen == "android" ? "Notifications" : I18n.t("Pusat Notifikasi (buka / tutup)", "Notification Center (open / close)"); }
+                    if !root.studio: KeyRow { keys: "Alt + Q"; text: root.screen == "android" ? "Quick Settings" : I18n.t("Pusat Kontrol (buka / tutup)", "Control Center (open / close)"); }
                     if root.screen == "android": KeyRow { keys: "Alt + S"; text: "Recent Apps"; }
                     if root.screen == "android": KeyRow { keys: "Alt + ↑ / ↓"; text: I18n.t("Volume HP naik / turun", "Phone volume up / down"); }
-                    if root.screen != "android": KeyRow { keys: "Alt + U"; text: I18n.t("Wake & unlock (passcode tersimpan)", "Wake & unlock (saved passcode)"); }
-                    if root.screen != "android": KeyRow { keys: "Alt + D"; text: I18n.t("Stealth dim: layar perangkat 0% / pulihkan", "Stealth dim: device screen to 0% / restore"); }
-                    if root.screen != "android": KeyRow { keys: "Alt + V"; text: I18n.t("Ketik teks clipboard PC di perangkat", "Type the PC clipboard text on the device"); }
-                    if root.screen != "android": KeyRow { keys: "Ctrl + K"; text: I18n.t("Keyboard di layar on / off", "Show / hide the on-screen keyboard"); }
-                    if root.screen != "android": KeyRow { keys: "Ctrl + C / X / V / A / Z"; text: I18n.t("Copy, cut, paste, select all, undo di iOS", "Copy, cut, paste, select all, undo in iOS"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + U"; text: I18n.t("Wake & unlock (passcode tersimpan)", "Wake & unlock (saved passcode)"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + D"; text: I18n.t("Stealth dim: layar perangkat 0% / pulihkan", "Stealth dim: device screen to 0% / restore"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + V"; text: I18n.t("Ketik teks clipboard PC di perangkat", "Type the PC clipboard text on the device"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Ctrl + K"; text: I18n.t("Keyboard di layar on / off", "Show / hide the on-screen keyboard"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Ctrl + C / X / V / A / Z"; text: I18n.t("Copy, cut, paste, select all, undo di iOS", "Copy, cut, paste, select all, undo in iOS"); }
                     if root.screen != "android": Text {
-                        text: I18n.t("Shortcut perangkat Apple jalan di Apple Driver mode saat mirroring.", "Apple device shortcuts work in Apple Driver mode while mirroring.");
+                        text: root.studio ? I18n.t("ZenLink Studio hanya gambar dan suara: kontrol perangkat dan shortcut-nya ada di Apple Driver mode.", "ZenLink Studio is picture and sound only: device control and its shortcuts are in Apple Driver mode.")
+                            : I18n.t("Shortcut perangkat Apple jalan di Apple Driver mode saat mirroring.", "Apple device shortcuts work in Apple Driver mode while mirroring.");
                         font-size: 11px;
                         color: Theme.text-3;
                         wrap: word-wrap;
@@ -1763,7 +1800,7 @@ component SettingsPanel inherits Glass {
                     changed(p) => { root.changed(p); }
                 }
 
-                if root.screen != "android": Card {
+                if root.screen != "android" && !root.studio: Card {
                     title: I18n.t("Buka kunci otomatis", "Auto unlock");
                     icon: "\u{E72E}";
                     tint-a: #a78bfa;
@@ -1832,13 +1869,13 @@ component SettingsPanel inherits Glass {
                         spacing: 6px;
                         GlassButton { label: I18n.t("Ganti mode", "Change mode"); tip: I18n.t("Pilih Apple Driver atau ZenLink Studio", "Choose Apple Driver or ZenLink Studio"); clicked => { root.driver-action("mode"); } }
                         GlassButton { label: I18n.t("Periksa driver", "Check drivers"); clicked => { root.driver-action("refresh"); } }
-                        GlassButton { label: I18n.t("Atur Wi-Fi", "Set up Wi-Fi"); clicked => { root.driver-action("wifi"); } }
+                        if !root.studio: GlassButton { label: I18n.t("Atur Wi-Fi", "Set up Wi-Fi"); clicked => { root.driver-action("wifi"); } }
                     }
-                    if root.drv-filter || root.drv-restore || root.drv-bind: HorizontalLayout {
+                    if root.drv-filter || (root.drv-restore && !root.studio) || (root.drv-bind && root.studio): HorizontalLayout {
                         spacing: 6px;
                         if root.drv-filter: GlassButton { primary: true; label: I18n.t("Hapus filter libusb0", "Remove libusb0 filter"); clicked => { root.driver-action("removefilter"); } }
-                        if root.drv-restore: GlassButton { label: I18n.t("Kembalikan driver Apple", "Restore Apple driver"); clicked => { root.driver-action("restore"); } }
-                        if root.drv-bind: GlassButton { label: I18n.t("Pasang driver ZenLink Studio", "Install ZenLink Studio driver"); clicked => { root.driver-action("bind"); } }
+                        if root.drv-restore && !root.studio: GlassButton { label: I18n.t("Kembalikan driver Apple", "Restore Apple driver"); clicked => { root.driver-action("restore"); } }
+                        if root.drv-bind && root.studio: GlassButton { label: I18n.t("Pasang driver ZenLink Studio", "Install ZenLink Studio driver"); clicked => { root.driver-action("bind"); } }
                     }
                 }
 
@@ -2191,12 +2228,16 @@ export component AppWindow inherits Window {
                             flow-kind: root.flow-kind;
                             wifi: root.device-wifi;
                             need: root.device-need;
+                            mode: root.mode-active;
+                            link: root.mode-link;
+                            set-link(l) => { root.set-link(l); }
+                            change-mode => { root.driver-action("mode"); }
                             fix => { root.need-fix(); }
                             start => { root.start-cast(); }
                             dismiss => { root.flow-dismiss(); }
                         }
                     }
-                    BottomBar {
+                    if root.on-android || root.mode-active != "usbdirect": BottomBar {
                         compact: root.compact-bar;
                         android: root.on-android;
                         action(a) => { root.action(a); }
