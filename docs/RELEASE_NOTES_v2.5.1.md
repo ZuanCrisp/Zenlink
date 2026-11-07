@@ -15,6 +15,7 @@
 - ZenLink Studio over Wi-Fi no longer looks stuck on "Connecting…": it says it is waiting for the iPhone / iPad and shows the Screen Mirroring steps.
 - "Backend not found" now says what is missing and what to do.
 - The Android app list no longer fails with "os error 10060" on slower phones.
+- Installer: "Allow ZenLink on the local network" now also allows the bundled `adb`, in the same single administrator prompt, so Windows no longer asks separately for `adb.exe`. ZenLink itself still runs without admin.
 
 ### ⚠️ Known limits
 
