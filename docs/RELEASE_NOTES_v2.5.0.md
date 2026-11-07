@@ -29,7 +29,9 @@
 - Android sound no longer crackles: the buffer follows the phone's clock smoothly and keeps more margin on Wi-Fi.
 - Android Wi-Fi setup shows each step (1/3, 2/3, 3/3) with a progress bar, and the QR / pairing-code instructions are numbered and clearer.
 - Settings info panels no longer overlap, and their colours match the theme.
-- The window opens wider on a fresh start.
+- The window opens wider on a fresh start, in the middle of the screen.
+- The iPhone/iPad screen shows the mode (Apple Driver / ZenLink Studio), Cable or Wi-Fi and a Start button before a device is plugged in.
+- Settings only show what the chosen Apple mode can do: ZenLink Studio (picture and sound) hides touch, keyboard, device shortcuts, auto unlock and Wi-Fi setup.
 - Shortcuts: `Alt+N` / `Alt+Q` open notifications and Control Center (or Quick Settings on Android); a second press closes them. `Alt+M` turns the sound on the PC on or off. Plain keys always go to the phone or iPad (Space no longer starts or stops mirroring).
 
 ### 📦 Downloads
@@ -37,7 +39,7 @@
 | File | Size |
 | :--- | ---: |
 | `ZenLink-v2.5.0-Setup.exe` | 38.6 MB |
-| `ZenLink-v2.5.0-Portable.exe` | 52.2 MB |
+| `ZenLink-v2.5.0-Portable.exe` | 52.3 MB |
 | `ZenLink-v2.5.0-Portable-Source.zip` | 8.9 MB |
 
 Smaller than the beta even with `adb` inside: unused Python packages, the old WebView2 window and extra PortAudio builds are left out, and Portable.exe stores `adb` compressed. The source package downloads Google's `adb` (37.0.1, checksum and signature checked) and the Python packages at the release build's exact versions the first time `Start ZenLink.bat` runs.
