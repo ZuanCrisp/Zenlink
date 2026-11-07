@@ -19,6 +19,7 @@
 
 use crate::adb::{AdbClient, AdbError, Target};
 use crate::scrcpy::{DEVICE_SERVER_PATH, SCRCPY_VERSION};
+use std::time::Duration;
 
 /// Oldest Android API level with a new virtual display (`new_display`):
 /// the server refuses it below Android 10 (`Server.java`).
@@ -94,6 +95,12 @@ pub fn list_command() -> String {
     )
 }
 
+/// How long the server may stay silent while it builds the list. It prints
+/// the whole list at once at the end: 4.1 s for 389 apps on an idle TECNO
+/// POVA 6, longer while the phone is mirroring, which broke the client's
+/// usual 5 s read timeout (B-50).
+pub const LIST_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Pushes the server and asks it for the installed apps (a few seconds on
 /// a phone with many apps).
 pub fn query(
@@ -102,7 +109,11 @@ pub fn query(
     server: &[u8],
 ) -> Result<Vec<DeviceApp>, AdbError> {
     client.push(target, server, DEVICE_SERVER_PATH, 0o100644)?;
-    let out = client.shell(target, &list_command(), 1 << 20)?;
+    let slow = AdbClient {
+        timeout: client.timeout.max(LIST_TIMEOUT),
+        ..client.clone()
+    };
+    let out = slow.shell(target, &list_command(), 1 << 20)?;
     Ok(parse_list(&String::from_utf8_lossy(&out)))
 }
 

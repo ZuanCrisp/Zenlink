@@ -304,6 +304,7 @@ component BottomBar inherits Rectangle {
                 if !root.android: Chip { icon: "\u{E76C}"; tip: I18n.t("Geser dari tepi kiri ke kanan (kembali, juga Alt+←)", "Swipe from the left edge (back, also Alt+←)"); label: compact ? "" : I18n.t("Geser kanan", "Swipe right"); clicked => { root.action("swipe-right"); } }
                 Rectangle { width: 1px; background: Theme.dark ? #ffffff1f : #0000001a; }
                 if !root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Control Center", "Control Center"); label: compact ? "" : "Control"; clicked => { root.action("control-center"); } }
+                if root.android: Chip { icon: "\u{E71D}"; tip: I18n.t("Aplikasi HP (buka di layar HP atau jendela baru)", "Phone apps (open on the phone or in a new window)"); label: compact ? "" : I18n.t("Aplikasi", "Apps"); clicked => { root.action("apps"); } }
                 if root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Quick Settings", "Quick Settings"); label: compact ? "" : "Quick"; clicked => { root.action("quick-settings"); } }
                 Chip { icon: "\u{EA8F}"; tip: I18n.t("Notifikasi", "Notifications"); label: compact ? "" : I18n.t("Notifikasi", "Alerts"); clicked => { root.action("notifications"); } }
                 if root.android: Chip { icon: "\u{E993}"; tip: I18n.t("Volume HP turun", "Phone volume down"); label: ""; clicked => { root.action("vol-down"); } }
@@ -1114,14 +1115,16 @@ export struct AndroidRow {
     wifi: bool,
     // Connected over USB and Wi-Fi at once: the user picks the link.
     both: bool,
-    // Android 10+: its apps can open in their own windows (virtual display).
-    apps: bool,
 }
 
 // One installed app in the app picker.
 export struct AppRow {
     name: string,
     sub: string,
+    // Launcher tile: one or two letters on a colour from the package name
+    // (scrcpy gives no icons).
+    letter: string,
+    tint: color,
 }
 
 // One numbered instruction step: a plain wrapped Text (nested layouts
@@ -1287,16 +1290,6 @@ component AndroidHome inherits Rectangle {
     callback wifi-qr();
     callback wifi-qr-cancel();
     property <bool> wifi-open: false;
-    // v2.5.1 app windows: the picker for one device's apps.
-    in property <bool> apps-open;
-    in property <bool> apps-busy;
-    in property <string> apps-title;
-    in property <string> apps-status;
-    in property <[AppRow]> apps;
-    callback apps-device(int);
-    callback apps-filter(string);
-    callback app-open(int);
-    callback apps-close();
     Glass {
         width: min(parent.width - 32px, 460px);
         height: min(parent.height - 32px, acol.preferred-height + 2px);
@@ -1345,16 +1338,6 @@ component AndroidHome inherits Rectangle {
                             clicked => { root.wifi-device(i); }
                         }
                     }
-                    if d.apps && root.phase != "connecting": VerticalLayout {
-                        alignment: center;
-                        GlassButton {
-                            icon: "\u{E71D}";
-                            label: I18n.t("Aplikasi", "Apps");
-                            active: root.apps-open;
-                            tip: I18n.t("Buka app HP di jendelanya sendiri (layar virtual)", "Open a phone app in its own window (virtual display)");
-                            clicked => { root.apps-device(i); }
-                        }
-                    }
                     if d.ok && !d.both && root.phase != "connecting": VerticalLayout {
                         alignment: center;
                         GlassButton {
@@ -1382,47 +1365,6 @@ component AndroidHome inherits Rectangle {
                             label: "Wi-Fi";
                             tip: I18n.t("Mulai lewat Wi-Fi (kabel boleh dicabut)", "Start over Wi-Fi (you can unplug the cable)");
                             clicked => { root.start-device-via(i, "wifi"); }
-                        }
-                    }
-                }
-                if root.apps-open: Card {
-                    VerticalLayout {
-                        spacing: 8px;
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text { text: root.apps-title; font-size: 12.5px; font-weight: 650; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
-                            GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup", "Close"); clicked => { root.apps-close(); } }
-                        }
-                        Text {
-                            text: I18n.t("Tiap app terbuka di jendela sendiri dan berjalan di layar virtual HP, jadi layar HP bebas dipakai. Suara app tetap di HP.", "Each app opens in its own window and runs on a virtual display of the phone, so the phone's own screen stays free. The app's sound stays on the phone.");
-                            font-size: 11px;
-                            color: Theme.text-2;
-                            wrap: word-wrap;
-                        }
-                        if !root.apps-busy: Field {
-                            placeholder: I18n.t("Cari app…", "Search apps…");
-                            edited(s) => { root.apps-filter(s); }
-                        }
-                        if root.apps-busy: BusyBar { }
-                        if root.apps-status != "": Text { text: root.apps-status; font-size: 11.5px; color: root.apps-busy ? Theme.accent : Theme.text-2; wrap: word-wrap; }
-                        for a[i] in root.apps: Rectangle {
-                            height: 38px;
-                            border-radius: 10px;
-                            background: ata.has-hover ? Theme.fill-hover : transparent;
-                            animate background { duration: 150ms; easing: ease-out; }
-                            ata := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.app-open(i); } }
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 8px;
-                                spacing: 8px;
-                                VerticalLayout {
-                                    alignment: center;
-                                    horizontal-stretch: 1;
-                                    Text { text: a.name; font-size: 12.5px; font-weight: 600; color: Theme.text; overflow: elide; }
-                                    Text { text: a.sub; font-size: 10.5px; color: Theme.text-3; overflow: elide; }
-                                }
-                                Text { text: "\u{E8A7}"; font-family: Theme.icons; font-size: 13px; color: Theme.text-3; vertical-alignment: center; }
-                            }
                         }
                     }
                 }
@@ -2113,6 +2055,107 @@ component SettingsPanel inherits Glass {
     }
 }
 
+// Android app launcher (v2.5.1): a grid like the phone's app drawer, over
+// the picture while a phone is mirrored (dock › Apps). The picture leaves its
+// rectangle open (main.rs, VideoView::set_holes).
+component AppLauncher inherits Rectangle {
+    in property <bool> open;
+    in property <string> title;
+    in property <string> status;
+    in property <bool> busy;
+    in property <[AppRow]> apps;
+    // Android 10+: an app can also open in its own window.
+    in property <bool> window-ok;
+    in-out property <string> open-in: "phone";
+    callback filter(string);
+    callback launch(int, string);
+    callback close();
+    border-radius: 22px;
+    background: Theme.dark ? #18181cf5 : #f6f6f9f5;
+    border-width: 0.75px;
+    border-color: Theme.dark ? #ffffff24 : #0000001c;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: #00000055;
+    clip: true;
+    property <float> t: root.open ? 1 : 0;
+    animate t { duration: 220ms; easing: cubic-bezier(0.2, 0.9, 0.3, 1); }
+    opacity: self.t;
+    visible: self.t > 0.01;
+    // Swallow clicks so nothing behind reacts.
+    TouchArea { }
+    VerticalLayout {
+        y: 14px * (1 - root.t);
+        padding: 16px;
+        padding-bottom: 8px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 8px;
+            Image { source: @image-url("../../../../ui/logo-256.png"); width: 22px; height: 22px; y: (parent.height - self.height) / 2; }
+            Text { text: root.title; font-size: 14px; font-weight: 700; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+            if root.window-ok: Seg {
+                width: 210px;
+                options: ["phone", "window"];
+                labels: [I18n.t("Di layar HP", "On the phone"), I18n.t("Jendela baru", "New window")];
+                value: root.open-in;
+                changed(v) => { root.open-in = v; }
+            }
+            GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup", "Close"); clicked => { root.close(); } }
+        }
+        if !root.busy: Field {
+            placeholder: I18n.t("Cari app…", "Search apps…");
+            edited(v) => { root.filter(v); }
+        }
+        if root.busy: BusyBar { }
+        if root.status != "": Text { text: root.status; font-size: 11px; color: root.busy ? Theme.accent : Theme.text-3; wrap: word-wrap; }
+        grid := Flickable {
+            vertical-stretch: 1;
+            property <int> cols: max(1, floor(self.width / 96px));
+            property <length> cw: self.width / self.cols;
+            content-height: ceil(root.apps.length / self.cols) * 100px;
+            for a[i] in root.apps: Rectangle {
+                x: mod(i, grid.cols) * grid.cw;
+                y: floor(i / grid.cols) * 100px;
+                width: grid.cw;
+                height: 100px;
+                border-radius: 16px;
+                background: ta.pressed ? Theme.fill-hover.darker(10%) : ta.has-hover ? Theme.fill-hover : transparent;
+                animate background { duration: 150ms; easing: ease-out; }
+                ta := TouchArea {
+                    mouse-cursor: MouseCursor.pointer;
+                    clicked => { root.launch(i, root.window-ok ? root.open-in : "phone"); }
+                }
+                Rectangle {
+                    x: (parent.width - self.width) / 2;
+                    y: 12px + (ta.pressed ? 2px : 0px);
+                    width: 50px;
+                    height: 50px;
+                    border-radius: 15px;
+                    background: @linear-gradient(140deg, a.tint.brighter(18%) 0%, a.tint.darker(22%) 100%);
+                    drop-shadow-blur: 8px;
+                    drop-shadow-offset-y: 3px;
+                    drop-shadow-color: a.tint.with-alpha(0.35);
+                    animate y { duration: 90ms; }
+                    Text { text: a.letter; font-size: 19px; font-weight: 750; color: #ffffff; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                Text {
+                    x: 6px;
+                    y: 68px;
+                    width: parent.width - 12px;
+                    height: 28px;
+                    text: a.name;
+                    font-size: 11px;
+                    color: Theme.text;
+                    horizontal-alignment: center;
+                    vertical-alignment: top;
+                    wrap: word-wrap;
+                    overflow: elide;
+                }
+            }
+        }
+    }
+}
+
 // Shown in Settings › About (set from Cargo's version at start).
 export global AppInfo {
     in property <string> version;
@@ -2201,10 +2244,15 @@ export component AppWindow inherits Window {
     in property <string> android-apps-title;
     in property <string> android-apps-status;
     in property <[AppRow]> android-apps;
-    callback android-apps-device(int);
     callback android-apps-filter(string);
-    callback android-app-open(int);
     callback android-apps-close();
+    in property <bool> android-apps-window-ok;
+    callback android-app-launch(int, string);
+    // Launcher rectangle (logical px), kept open in the picture by Rust.
+    out property <length> launcher-x: root.stage-x + 10px;
+    out property <length> launcher-y: root.stage-y + 10px;
+    out property <length> launcher-w: max(0px, root.stage-w - 20px);
+    out property <length> launcher-h: max(0px, root.stage-h - 20px);
     callback android-stop();
     callback android-restart();
     property <bool> on-android: root.screen == "android";
@@ -2369,15 +2417,6 @@ export component AppWindow inherits Window {
                             qr-status: root.android-qr-status;
                             wifi-qr => { root.android-wifi-qr(); }
                             wifi-qr-cancel => { root.android-wifi-qr-cancel(); }
-                            apps-open: root.android-apps-open;
-                            apps-busy: root.android-apps-busy;
-                            apps-title: root.android-apps-title;
-                            apps-status: root.android-apps-status;
-                            apps: root.android-apps;
-                            apps-device(i) => { root.android-apps-device(i); }
-                            apps-filter(s) => { root.android-apps-filter(s); }
-                            app-open(i) => { root.android-app-open(i); }
-                            apps-close => { root.android-apps-close(); }
                         }
                         if root.screen == "apple" && root.phase != "streaming": Placeholder {
                             phase: root.phase;
@@ -2526,6 +2565,21 @@ export component AppWindow inherits Window {
                 vertical-alignment: center;
                 width: parent.width - 20px;
             }
+        }
+        AppLauncher {
+            x: root.launcher-x;
+            y: root.launcher-y;
+            width: root.launcher-w;
+            height: root.launcher-h;
+            open: root.android-apps-open && root.on-android;
+            title: root.android-apps-title;
+            status: root.android-apps-status;
+            busy: root.android-apps-busy;
+            apps: root.android-apps;
+            window-ok: root.android-apps-window-ok;
+            filter(v) => { root.android-apps-filter(v); }
+            launch(i, where) => { root.android-app-launch(i, where); }
+            close => { root.android-apps-close(); }
         }
         toast-measure := Text { text: root.toast; font-size: 12.5px; visible: false; }
         if root.toast != "": Glass {

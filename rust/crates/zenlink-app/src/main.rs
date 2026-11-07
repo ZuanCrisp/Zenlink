@@ -1416,8 +1416,6 @@ fn show_android(
                 title: d.name.display.clone().into(),
                 sub: sub.join(" · ").into(),
                 ok: d.readiness == Readiness::Ready,
-                apps: d.readiness == Readiness::Ready
-                    && d.sdk.unwrap_or(0) >= zenlink_android::apps::MIN_SDK_NEW_DISPLAY,
                 both: d.readiness == Readiness::Ready && on_usb && on_wifi,
                 wifi: d.readiness == Readiness::Ready
                     && d.primary.connection == Connection::Usb
@@ -1816,6 +1814,33 @@ fn apps_matching<'a>(
         .collect()
 }
 
+/// Launcher tile text: the first letter of the first two words ("Google
+/// Maps" → "GM", "Chrome" → "C").
+fn app_letters(name: &str) -> String {
+    name.split_whitespace()
+        .filter_map(|w| w.chars().find(|c| c.is_alphanumeric()))
+        .take(2)
+        .flat_map(char::to_uppercase)
+        .collect::<String>()
+        .chars()
+        .take(2)
+        .collect()
+}
+
+/// Launcher tile colour: one of 12 hues, fixed per package.
+fn app_tint(package: &str) -> slint::Color {
+    const HUES: [u32; 12] = [
+        0xef4444, 0xf97316, 0xf59e0b, 0x84cc16, 0x22c55e, 0x14b8a6, 0x06b6d4, 0x3b82f6, 0x6366f1,
+        0x8b5cf6, 0xd946ef, 0xec4899,
+    ];
+    // FNV-1a: stable across runs (std's hasher is randomly seeded).
+    let h = package.bytes().fold(0x811c_9dc5u32, |h, b| {
+        (h ^ b as u32).wrapping_mul(0x0100_0193)
+    });
+    let c = HUES[(h % HUES.len() as u32) as usize];
+    slint::Color::from_rgb_u8((c >> 16) as u8, (c >> 8) as u8, c as u8)
+}
+
 /// Shows the picker's rows for `filter`.
 fn apps_show(ui: &AppWindow, filter: &str) {
     let rows = APP.with_borrow_mut(|a| {
@@ -1828,6 +1853,8 @@ fn apps_show(ui: &AppWindow, filter: &str) {
     let model: Vec<AppRow> = shown
         .iter()
         .map(|a| AppRow {
+            letter: app_letters(&a.name).into(),
+            tint: app_tint(&a.package),
             name: a.name.clone().into(),
             sub: if a.system {
                 format!("{} · {}", a.package, tr_ui(ui, "sistem", "system"))
@@ -1860,10 +1887,24 @@ fn apps_show(ui: &AppWindow, filter: &str) {
 
 /// Opens the app picker for list entry `index` and reads its apps (once per
 /// device; about a second or two on the phone).
-fn apps_open_device(ui: &AppWindow, index: i32) {
-    let Some(d) = APP.with_borrow(|a| a.android_list.get(index.max(0) as usize).cloned()) else {
+fn apps_open(ui: &AppWindow) {
+    if ui.get_android_apps_open() {
+        ui.set_android_apps_open(false);
+        return;
+    }
+    // The phone being mirrored (set in android_start), on the link in use.
+    let Some(d) = APP.with_borrow(|a| a.android.as_ref().and(a.apps_device.clone())) else {
+        show_toast(
+            ui,
+            tr_ui(
+                ui,
+                "Mulai mirroring HP Android dulu.",
+                "Start mirroring an Android phone first.",
+            ),
+        );
         return;
     };
+    ui.set_android_apps_window_ok(d.sdk.unwrap_or(0) >= zenlink_android::apps::MIN_SDK_NEW_DISPLAY);
     ui.set_android_apps_title(
         tr_ui(
             ui,
@@ -1929,7 +1970,7 @@ fn apps_open_device(ui: &AppWindow, index: i32) {
 }
 
 /// Opens picker row `index` in its own window.
-fn apps_launch(ui: &AppWindow, index: i32) {
+fn apps_launch(ui: &AppWindow, index: i32, place: &str) {
     let Some((d, app)) = APP.with_borrow(|a| {
         Some((
             a.apps_device.clone()?,
@@ -1938,6 +1979,31 @@ fn apps_launch(ui: &AppWindow, index: i32) {
     }) else {
         return;
     };
+    ui.set_android_apps_open(false);
+    if place != "window" {
+        // On the phone's own screen, in the picture being mirrored.
+        match android::active() {
+            Some(sh) => {
+                sh.send(&[zenlink_android::control::Control::StartApp(
+                    app.package.clone(),
+                )]);
+                log::info!("android: start {} on the phone", app.package);
+                show_toast(
+                    ui,
+                    tr_ui(
+                        ui,
+                        &format!("Membuka {}…", app.name),
+                        &format!("Opening {}…", app.name),
+                    ),
+                );
+            }
+            None => show_toast(
+                ui,
+                tr_ui(ui, "Kontrol HP belum siap.", "Phone control is not ready."),
+            ),
+        }
+        return;
+    }
     let args = appwin::AppArgs {
         serial: d.primary.serial.clone(),
         transport_id: d.primary.transport_id,
@@ -2402,6 +2468,7 @@ fn android_start(ui: &AppWindow, index: i32) {
             Connection::Unknown => "",
         };
         android_select_device(ui, &d);
+        APP.with_borrow_mut(|a| a.apps_device = Some(d.clone()));
         let known = APP.with_borrow(|a| a.android_encoders.get(&d.id.key).cloned());
         let p = ui.get_prefs();
         (
@@ -2441,6 +2508,7 @@ fn android_start(ui: &AppWindow, index: i32) {
 
 /// Ends the Android session, if any.
 fn android_stop(ui: &AppWindow) {
+    ui.set_android_apps_open(false);
     let had = APP.with_borrow_mut(|a| {
         a.android_pending = None;
         let Some(s) = a.android.take() else {
@@ -3401,21 +3469,16 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = ui.as_weak();
-        ui.on_android_apps_device(move |i| {
-            if let Some(ui) = weak.upgrade() {
-                apps_open_device(&ui, i);
-            }
-        });
-        let weak = ui.as_weak();
+
         ui.on_android_apps_filter(move |s| {
             if let Some(ui) = weak.upgrade() {
                 apps_show(&ui, s.as_str());
             }
         });
         let weak = ui.as_weak();
-        ui.on_android_app_open(move |i| {
+        ui.on_android_app_launch(move |i, place| {
             if let Some(ui) = weak.upgrade() {
-                apps_launch(&ui, i);
+                apps_launch(&ui, i, place.as_str());
             }
         });
         let weak = ui.as_weak();
@@ -3462,6 +3525,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let input = input.clone();
         ui.on_action(move |a| {
             let Some(ui) = weak.upgrade() else { return };
+            if a.as_str() == "apps" {
+                apps_open(&ui);
+                return;
+            }
             if ui.get_screen().as_str() == "android" {
                 if let Some(sh) = android::active() {
                     if sh.action(a.as_str()) {
@@ -4183,6 +4250,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     let tw = ui.get_toast_w();
                     holes.push((px((ww - tw) / 2.0), px(wh - 104.0), px(tw), px(52.0)));
                 }
+                if ui.get_android_apps_open() && on_android {
+                    holes.push((
+                        px(ui.get_launcher_x()),
+                        px(ui.get_launcher_y()),
+                        px(ui.get_launcher_w()),
+                        px(ui.get_launcher_h()),
+                    ));
+                }
                 v.set_holes(&holes);
                 v.set_bounds(x.round() as i32, y.round() as i32, w.round() as i32, h.round() as i32, streaming, ((22.0 - PIC_INSET) * sf).round() as i32);
                 let shown = v.shown_size();
@@ -4325,6 +4400,33 @@ fn main() -> Result<(), slint::PlatformError> {
         m.lock().unwrap().take();
     }
     r
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::*;
+
+    #[test]
+    fn tile_letters() {
+        assert_eq!(app_letters("Google Maps"), "GM");
+        assert_eq!(app_letters("Chrome"), "C");
+        assert_eq!(app_letters("  (Beta) app store x"), "BA");
+        assert_eq!(app_letters("ñandu"), "Ñ");
+        assert_eq!(app_letters(""), "");
+    }
+
+    #[test]
+    fn tile_colour_is_fixed_per_package() {
+        assert_eq!(
+            app_tint("com.android.chrome"),
+            app_tint("com.android.chrome")
+        );
+        let hues: std::collections::HashSet<_> = ["a.b", "c.d", "e.f", "g.h", "i.j", "k.l"]
+            .iter()
+            .map(|p| app_tint(p).as_argb_encoded())
+            .collect();
+        assert!(hues.len() > 1);
+    }
 }
 
 #[cfg(test)]
