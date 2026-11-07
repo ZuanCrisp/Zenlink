@@ -446,3 +446,22 @@ s[class^="old"], s.old { color: var(--text-3); text-decoration-thickness: 2px; t
 .pips { position: absolute; z-index: 12; left: 50%; bottom: -34px; transform: translateX(-50%); display: flex; gap: 6px; }
 .pips i { width: 6px; height: 6px; border-radius: 99px; background: color-mix(in srgb, var(--text) 25%, transparent); transition: width .5s var(--ease), background .5s; }
 .pips i.on { width: 22px; background: linear-gradient(90deg, var(--pink), var(--violet)); }
+
+/* the 2.5 bubble: floats, wobbles like liquid, a shine runs around it, squishes on hover */
+.v25 { animation: blob 5.5s ease-in-out infinite, bubfloat 4.2s ease-in-out infinite; transition: scale .5s cubic-bezier(.3, 1.6, .5, 1); cursor: default; }
+.v25:hover { scale: 1.08 .94; }
+.v25:active { scale: .94 1.06; }
+.v25::before {
+  content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 2px; pointer-events: none;
+  background: conic-gradient(from var(--ang, 0deg), transparent 0 70%, rgba(255, 255, 255, .9) 80%, transparent 90%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  animation: shine 4s linear infinite;
+}
+.v25 b { position: absolute; border-radius: 50%; pointer-events: none; background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .85), rgba(255, 255, 255, .12) 55%, transparent 70%); border: 1px solid rgba(255, 255, 255, .45); animation: pop 5s ease-in-out infinite; }
+.v25 b:nth-of-type(1) { width: 16px; height: 16px; right: -10px; top: -8px; }
+.v25 b:nth-of-type(2) { width: 9px; height: 9px; right: 18%; top: -18px; animation-delay: -1.7s; animation-duration: 4s; }
+.v25 b:nth-of-type(3) { width: 11px; height: 11px; left: -12px; bottom: 6px; animation-delay: -3s; animation-duration: 6s; }
+@property --ang { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes shine { to { --ang: 360deg; } }
+@keyframes bubfloat { 50% { translate: 0 -7px; } }
+@keyframes pop { 0%, 100% { transform: translate(0, 0) scale(1); opacity: .9; } 50% { transform: translate(4px, -10px) scale(1.15); opacity: 1; } }
