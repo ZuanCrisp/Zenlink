@@ -10,6 +10,7 @@
   const applyTheme = (pref) => {
     root.dataset.pref = pref;
     root.dataset.theme = pref === "system" ? (sysLight.matches ? "light" : "dark") : pref;
+    document.dispatchEvent(new Event("zenlink:theme"));
     if (themeMeta) themeMeta.content = root.dataset.theme === "light" ? "#eef0f7" : "#06060a";
     const btn = document.getElementById("theme-btn");
     if (btn) {
@@ -21,6 +22,12 @@
   let pref = root.dataset.pref || "system";
   applyTheme(pref);
   sysLight.addEventListener("change", () => { if (pref === "system") applyTheme(pref); });
+  // The demo's Settings panel sets the theme too.
+  window.zlTheme = (p) => {
+    pref = p;
+    try { localStorage.setItem(TKEY, pref); } catch (_) {}
+    applyTheme(pref);
+  };
   document.getElementById("theme-btn").addEventListener("click", () => {
     pref = { system: "light", light: "dark", dark: "system" }[pref] || "system";
     try { localStorage.setItem(TKEY, pref); } catch (_) {}

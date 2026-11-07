@@ -210,7 +210,7 @@
   }));
 
   // --- autoplay: every gesture on one device, then the next device ----------
-  const SEQ = { apple: ["tap", "home", "cc", "notif", "next", "prev", "switcher", "volup", "lock"], android: ["tap", "back", "notif", "qs", "recents", "home", "volup", "power"] };
+  const SEQ = { apple: ["tap", "home", "cc", "notif", "next", "prev", "switcher", "lock"], android: ["tap", "back", "notif", "qs", "recents", "home", "volup", "power"] };
   const TOUR = ["iphone", "android", "ipad", "atab"];
   let auto = null, step = 0;
   const playStep = () => {
@@ -269,7 +269,7 @@
     clearAll(); fillGrid(); setPage(0);
     caption.innerHTML = caption.dataset[lang()] || caption.dataset.id;
     if (was !== isAndroid() || !modeSeg.children.length) { renderModes(); setMode(isAndroid() ? "usb" : "apple"); }
-    renderTop();
+    renderTop(); renderSettings();
     step = 0;
     if (fromTour) playStep();
   }
@@ -280,11 +280,109 @@
     $("#preview").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
     app.dataset.touched = ""; stopAuto(); setTimeout(startAuto, 700);
   }));
+  // --- Settings panel: the same cards as the app, and it scrolls -------------------
+  const setp = $("#demo-settings");
+  const ui = { fit: "contain", rot: "0", glass: true, thick: 30, anim: true, follow: true, audio: "pc", vol: 100, profile: "balanced", res: "1920", fps: "60", rate: "8", conn: "wired" };
+  const L = (id, en) => (lang() === "en" ? en : id);
+  const ICON = {
+    look: "M12 3a9 9 0 1 0 0 18c1 0 1.5-.8 1.5-1.5 0-.9-.7-1.2-.7-2 0-.9.7-1.5 1.6-1.5H17a4 4 0 0 0 4-4c0-5-4-9-9-9z",
+    disp: "M4 5h16v11H4zM9 20h6M12 16v4", obs: "M4 7h11v10H4zM15 10l5-3v10l-5-3", audio: "M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7",
+    ctl: "M3 7h18v10H3zM7 11h.01M11 11h.01M15 11h.01M8 14h8", lock: "M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4",
+    plug: "M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4", adv: "M4 6h16M4 12h16M4 18h16", vid: "M4 6h12v12H4zM16 10l4-2v8l-4-2", dev: "M7 3h10v18H7z",
+  };
+  const segOf = (key, opts, cur) => `<div class="sseg" data-k="${key}">${opts.map(([v, l]) => `<button type="button" data-v="${v}" class="${cur === v ? "on" : ""}">${l}</button>`).join("")}</div>`;
+  const seg = (key, opts) => segOf(key, opts, String(ui[key]));
+  const tog = (key, def) => {
+    if (!(key in ui)) ui[key] = def;
+    return `<button type="button" class="stg${ui[key] ? " on" : ""}" data-t="${key}" aria-label="toggle"></button>`;
+  };
+  const row = (label, right, hint = "") => `<div class="srow"><span>${label}${hint ? `<small>${hint}</small>` : ""}</span>${right}</div>`;
+  const range = (key) => `<input class="srange" type="range" min="0" max="100" value="${ui[key]}" data-r="${key}" style="--p:${ui[key]}%">`;
+  const card = (title, icon, ta, tb, body) =>
+    `<section class="scard"><h5><i style="--ta:${ta};--tb:${tb}"><svg viewBox="0 0 24 24"><path d="${ICON[icon]}"/></svg></i>${title}<u>i</u></h5>${body}</section>`;
+  const renderSettings = () => {
+    const theme = document.documentElement.dataset.pref || "system";
+    const and = isAndroid();
+    let h = card(L("Tampilan", "Appearance"), "look", "#f472b6", "#db2777",
+      segOf("theme", [["light", L("Terang", "Light")], ["dark", L("Gelap", "Dark")], ["system", L("Sistem", "System")]], theme) +
+      row("Liquid Glass", tog("glass", true)) + row(L("Ketebalan kaca", "Glass thickness"), `<span class="val">${ui.thick}%</span>`) + range("thick") +
+      row(L("Latar animasi", "Animated background"), tog("anim", true)) +
+      row(L("Bahasa", "Language"), `<div style="width:160px">${segOf("lang", [["id", "Indonesia"], ["en", "English"]], lang())}</div>`));
+    if (and) h += card(L("Video Android", "Android video"), "vid", "#4ade80", "#16a34a",
+      seg("profile", [["low-latency", "Low Latency"], ["balanced", "Balanced"], ["high-quality", "High Quality"]]) +
+      row(L("Resolusi", "Resolution"), "") + seg("res", [["1280", "720p"], ["1920", "1080p"], ["2560", "1440p"], ["0", "Native"]]) +
+      row("FPS", "") + seg("fps", [["30", "30"], ["60", "60"], ["90", "90"], ["120", "120"]]) +
+      row("Bitrate", "") + seg("rate", [["4", "4"], ["8", "8"], ["16", "16"], ["24", "24 Mbps"]]) +
+      row(L("Sedang dipakai", "In use"), `<span class="val">H.264 · 1080p · 60 fps</span>`));
+    h += card(L("Layar & rasio", "Display & aspect"), "disp", "#a78bfa", "#7c3aed",
+      seg("fit", [["contain", "Auto-Fit"], ["cover", "Edge-to-Edge"], ["fill", "Stretch"]]) +
+      row(L("Jendela ikut ukuran layar", "Window follows the screen"), tog("follow", true), L("Potret / lanskap otomatis", "Portrait / landscape automatically")) +
+      row(L("Rotasi", "Rotation"), "") + seg("rot", [["auto", "Auto"], ["0", "0°"], ["90", "90°"], ["180", "180°"], ["270", "270°"]]));
+    h += card(L("Rekam / live di OBS", "Record / stream in OBS"), "obs", "#f87171", "#dc2626",
+      `<p>${L("Di OBS, tambah sumber Game Capture → Mode: tangkap jendela tertentu → pilih [ZenLink.exe]: ZenLink. Lalu pilih sumbernya dan tekan Ctrl+F (Fit to screen): gambar potret/lanskap otomatis pas di tengah.",
+        "In OBS, add a Game Capture source → Mode: capture a specific window → pick [ZenLink.exe]: ZenLink. Then select the source and press Ctrl+F (Fit to screen): portrait or landscape lands centred automatically.")}</p>`);
+    h += card(L("Audio perangkat → PC", "Device audio → PC"), "audio", "#fb923c", "#ea580c",
+      seg("audio", [["pc", L("Di PC ini", "On this PC")], ["device", L("Hanya perangkat", "Device only")]]) +
+      row(L("Volume PC", "PC volume"), `<span class="val">${ui.vol}%</span>`) + range("vol") + row("Lip sync", tog("lips", true)));
+    h += card(L("Kontrol", "Control"), "ctl", "#38bdf8", "#0284c7",
+      row(L("Sentuh dengan mouse", "Touch with the mouse"), tog("mouse", true)) + row(L("Keyboard PC ke perangkat", "PC keyboard to the device"), tog("kbd", true)) +
+      (and ? "" : row(L("Gesture (scroll, tombol Back mouse)", "Gestures (scroll, mouse Back button)"), tog("gest", true))));
+    if (!and) h += card(L("Buka kunci otomatis", "Auto unlock"), "lock", "#a78bfa", "#7c3aed",
+      `<p style="color:#22c55e;font-weight:600">${L("Kode tersimpan di PC ini.", "A passcode is saved on this PC.")}</p>` +
+      `<div class="srow"><span class="sfield">••••••</span><button type="button" class="sbtn">${L("Hapus", "Remove")}</button></div>` +
+      row(L("Buka kunci saat mirroring mulai", "Unlock when mirroring starts"), tog("unlock", true), L("Juga Alt+U kapan saja", "Also Alt+U at any time")));
+    h += card(L("Jenis perangkat", "Device type"), "dev", "#f472b6", "#db2777",
+      row(L("Ingat jenis perangkat", "Remember device type"), tog("remember", true)) +
+      `<div class="sbtns"><button type="button" class="sbtn">${L("Ganti jenis perangkat", "Change device type")}</button></div>`);
+    if (!and) h += card(L("Koneksi & driver", "Connection & driver"), "plug", "#38bdf8", "#0284c7",
+      row(L("Sambungan", "Connection"), "") + seg("conn", [["wired", L("Kabel", "Cable")], ["wireless", "Wi-Fi"]]) +
+      `<div class="sbtns"><button type="button" class="sbtn">${L("Ganti mode", "Change mode")}</button><button type="button" class="sbtn">${L("Periksa driver", "Check drivers")}</button><button type="button" class="sbtn">${L("Atur Wi-Fi", "Set up Wi-Fi")}</button></div>`);
+    h += card(L("Lanjutan", "Advanced"), "adv", "#94a3b8", "#475569",
+      row(L("Mulai bersama Windows", "Start with Windows"), tog("autostart", false)) + row(L("Tutup ke tray", "Close to the tray"), tog("tray", false)) +
+      row(L("Selalu di atas", "Always on top"), tog("top", false)) + row(L("Statistik di header", "Stats in the header"), tog("stats", true)));
+    const keep = setp.querySelector(".sc") ? setp.querySelector(".sc").scrollTop : 0;
+    setp.innerHTML = `<div class="hd"><img src="logo.png" alt=""><div><b>ZenLink</b><small>${L("Pengaturan & kontrol", "Settings & control")}</small></div><button type="button" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div><div class="sc">${h}</div>`;
+    setp.querySelector(".sc").scrollTop = keep;
+  };
+  const applyView = () => {
+    const r = ui.rot === "auto" ? 0 : +ui.rot, side = r % 180 !== 0;
+    const fit = ui.fit === "cover" ? " scale(1.22)" : ui.fit === "fill" ? " scale(1.18, 1)" : "";
+    device.style.transform = `rotate(${r}deg)${side ? " scale(.62)" : ""}${fit}`;
+    app.classList.toggle("no-glass", !ui.glass);
+    app.classList.toggle("still", !ui.anim);
+    $("#st-audio").closest(".st").style.visibility = ui.stats === false ? "hidden" : "";
+  };
+  setp.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    if (b.hasAttribute("data-close")) { app.classList.remove("set-open"); return; }
+    const sg = b.closest(".sseg");
+    if (sg) {
+      const k = sg.dataset.k, v = b.dataset.v;
+      if (k === "lang") { const lb = document.querySelector(`.lang button[data-lang="${v}"]`); if (lb) lb.click(); return; }
+      if (k === "theme") { if (window.zlTheme) window.zlTheme(v); } else ui[k] = v;
+      sg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+      applyView(); return;
+    }
+    if (b.dataset.t) { ui[b.dataset.t] = !b.classList.contains("on"); b.classList.toggle("on"); applyView(); }
+  });
+  setp.addEventListener("input", (e) => {
+    const r = e.target.closest("[data-r]"); if (!r) return;
+    ui[r.dataset.r] = +r.value; r.style.setProperty("--p", r.value + "%");
+    const val = r.previousElementSibling && r.previousElementSibling.querySelector(".val");
+    if (val) val.textContent = r.value + "%";
+    if (r.dataset.r === "thick") app.style.setProperty("--thick", r.value / 100);
+  });
+  $("#demo-gear").addEventListener("click", () => { app.classList.toggle("set-open"); renderSettings(); });
+  document.addEventListener("zenlink:theme", () => { if (setp.innerHTML) renderSettings(); });
+  if (innerWidth > 1100) app.classList.add("set-open");
+  // A click on the picture is a tap, like the mouse in the app.
+  screen.addEventListener("click", () => { app.dataset.touched = "1"; stopAuto(); press(isAndroid() ? "android" : "apple", "tap"); });
+
   selectDevice("iphone");
   document.addEventListener("zenlink:lang", () => {
     tick();
     const keep = $("button[aria-pressed='true']", modeSeg)?.dataset.mode;
     renderModes(); if (keep) setMode(keep);
-    renderTop();
+    renderTop(); renderSettings();
   });
 })();
