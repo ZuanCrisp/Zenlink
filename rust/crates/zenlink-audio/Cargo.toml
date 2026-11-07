@@ -7,7 +7,7 @@ authors.workspace = true
 description = "ZenLink sound output: the v2.2.31 jitter buffer (portable) and a WASAPI backend."
 
 # The buffer logic is portable std Rust. Only `wasapi.rs` is platform code
-# (AGENTS.md section 3e: a thin backend behind one type; CoreAudio and
+# (a thin backend behind one type; CoreAudio and
 # PulseAudio/PipeWire backends come with the platform ports).
 [dependencies]
 log = { workspace = true }

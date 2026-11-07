@@ -258,7 +258,7 @@ fn run_value() -> Option<String> {
 }
 
 /// Writes or removes the HKCU Run entry. Only the user's own key: no admin
-/// rights, no scheduled task, nothing hidden (AGENTS.md §3c). Removing at
+/// rights, no scheduled task, nothing hidden. Removing at
 /// start-up ("off") only touches an entry that points to this exe, so a
 /// second copy that the user set to start is left alone.
 pub fn set_start_with_windows(on: bool, user_action: bool) {

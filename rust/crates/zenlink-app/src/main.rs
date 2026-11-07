@@ -3229,6 +3229,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.global::<Theme>().set_icons(icon_font().into());
     ui.global::<AppInfo>()
         .set_version(env!("CARGO_PKG_VERSION").into());
+    ui.global::<AppInfo>().set_store(updater::is_store());
     ui.set_prefs(prefs::load());
     {
         let weak = ui.as_weak();
@@ -3246,8 +3247,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let p = ui.get_prefs();
         let (open, quit) = tray_labels(&p);
         tray::set_icon(p.close_to_tray, open, quit);
-        if !test_mode {
+        if !test_mode && !updater::is_store() {
             // Keeps the Run entry pointing at this exe (a moved Portable.exe).
+            // The Store edition starts with Windows through its StartupTask
+            // (Windows Settings > Apps > Startup), not the Run key.
             tray::set_start_with_windows(p.start_with_windows, false);
         }
         filedrop::install(&ui);
@@ -3467,7 +3470,10 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_prefs_changed(move |mut p| {
             // Video profile logic (phase A5), then store for the device.
             devprofiles::normalize(&last.borrow(), &mut p);
-            if p.start_with_windows != last.borrow().start_with_windows && !test_mode {
+            if p.start_with_windows != last.borrow().start_with_windows
+                && !test_mode
+                && !updater::is_store()
+            {
                 tray::set_start_with_windows(p.start_with_windows, true);
             }
             let (open, quit) = tray_labels(&p);
@@ -3955,6 +3961,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(ui) = weak.upgrade() else { return };
             match a.as_str() {
                 "check" => update_check(&ui, true),
+                "store" => updater::open_store_page(),
                 "install" => update_install(&ui),
                 "notes" => {
                     let page =
@@ -3969,7 +3976,7 @@ fn main() -> Result<(), slint::PlatformError> {
         // Startup check: a few seconds after start so it never slows the
         // first screen; never in tests (ZL_PREFS) unless a test feed is set.
         let feed_test = std::env::var_os("ZL_UPDATE_FEED").is_some();
-        if ui.get_prefs().update_check && (!test_mode || feed_test) {
+        if ui.get_prefs().update_check && (!test_mode || feed_test) && !updater::is_store() {
             let weak = ui.as_weak();
             slint::Timer::single_shot(
                 Duration::from_secs(if feed_test { 1 } else { 8 }),
@@ -4006,8 +4013,8 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             if a.as_str() == "logs" {
                 // The log folder in Explorer, for bug reports.
-                let dir = zenlink_core::log_dir();
-                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::fs::create_dir_all(zenlink_core::log_dir());
+                let dir = updater::visible_log_dir();
                 let _ = std::process::Command::new("explorer.exe").arg(&dir).spawn();
                 return;
             }

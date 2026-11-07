@@ -72,7 +72,7 @@ $sep = ";"
 $pyiArgs = @(
     "-m", "PyInstaller", "packaging\launch.py",
     "--name", "ZenLinkService", "--onedir", "--windowed", "--noconfirm", "--clean",
-    # Never pack executables (AGENTS.md: no UPX, antivirus false positives).
+    # Never pack executables (no UPX: antivirus false positives).
     "--noupx",
     "--icon", "assets\zenlink.ico",
     "--contents-directory", ".",

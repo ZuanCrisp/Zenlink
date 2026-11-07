@@ -2,7 +2,7 @@
 //!
 //! Portable logic only (no network): the app fetches
 //! [`RELEASES_URL`], passes the JSON to [`pick`], and downloads the chosen
-//! asset only after the user clicks (AGENTS.md section 3c). Every asset must
+//! asset only after the user clicks. Every asset must
 //! come from this repository's release downloads and carry a SHA-256 digest.
 
 use std::cmp::Ordering;

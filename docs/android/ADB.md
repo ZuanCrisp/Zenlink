@@ -9,7 +9,7 @@ the documented ADB host protocol on `127.0.0.1:5037`
 
 | Point | Bundled `adb` server + Rust host-protocol client | Rust USB ADB client (e.g. `rusb`) |
 | :--- | :--- | :--- |
-| USB driver | Uses whatever the phone already has: Google USB driver, the OEM drivers (Samsung, Xiaomi, MediaTek, ...) through `AdbWinApi.dll`. | Needs WinUSB on the ADB interface. OEM drivers such as Samsung's are not WinUSB, so many phones would need a driver change (AGENTS.md §4: never without consent). |
+| USB driver | Uses whatever the phone already has: Google USB driver, the OEM drivers (Samsung, Xiaomi, MediaTek, ...) through `AdbWinApi.dll`. | Needs WinUSB on the ADB interface. OEM drivers such as Samsung's are not WinUSB, so many phones would need a driver change (never without the user's consent). |
 | Other tools | Shares one server with Android Studio, scrcpy, phone suites. | Two programs cannot claim the same USB interface: a running `adb` server (very common) blocks it, or we block it. |
 | Wi-Fi | TCP/IP, Android 11+ pairing, TLS and mDNS are built in. | Must reimplement pairing (SPAKE2), TLS and mDNS. |
 | Authorization | Uses the user's existing `~/.android/adbkey`; phones already trusted stay trusted. | Needs its own RSA key handling; phones ask again. |
@@ -46,4 +46,4 @@ transport.
 ## Not verified yet
 
 - Behaviour with a real phone (authorization prompt, USB and Wi-Fi). Needs a device
-  and the user's consent (AGENTS.md §4).
+  and the user's consent.

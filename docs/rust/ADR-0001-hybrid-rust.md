@@ -63,4 +63,4 @@ Why:
   compressed) while Python stays for the Apple protocols anyway.
 
 When: with M1–M5 (the Apple backend in Rust), measured A/B against this path
-on the same devices (wired and Bluetooth), as AGENTS.md §3e requires.
+on the same devices (wired and Bluetooth), so the port never adds audio delay.

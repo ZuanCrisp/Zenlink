@@ -1,5 +1,35 @@
 # Changelog
 
+Full notes for each version are on the [Releases](https://github.com/zenvyzenshiro/zenlink/releases) page.
+
+## 2.5.1
+
+### Added
+- **Device picker:** the Apple screen lists every connected iPhone / iPad (USB or Wi-Fi, iOS version, status) and the ones used before.
+- **Android apps launcher:** a searchable grid of the phone's apps; open one on the phone or (Android 10+) in its own window.
+- **Drop files on the window:** Android installs an `.apk` or saves other files to Download; iPhone / iPad (Apple Driver mode) sends files to an app with File Sharing.
+- **In-app updates:** Settings › Updates (Stable or Beta channel), SHA-256 checked, settings kept.
+- **Logs in one place:** `%LOCALAPPDATA%\ZenLink-Next\logs`, opened from Settings › About.
+- **Microsoft Store edition:** MSIX package (`packaging/build_msix.py`); the Store version gets updates from the Store.
+
+### Fixed
+- ZenLink Studio over Wi-Fi no longer looks stuck on "Connecting…".
+- "Backend not found" says what is missing and what to do.
+- The Android app list no longer fails with "os error 10060" on slower phones.
+- The installer's single firewall prompt also covers the bundled `adb`.
+
+## 2.5.0
+
+### Added
+- **Android, no app on the phone:** Android 5.0+ over USB or Wi-Fi (QR or pairing code) with the official scrcpy server (v5.0.1) and Google's `adb`. Picture, sound (Android 11+), mouse and keyboard, clipboard.
+- **Smart Encoder Detection:** H.264 by default, H.265 only when verified, with fallback; video profiles and per-device settings.
+- **Native Rust window:** Media Foundation hardware decoding into Direct3D 11, Liquid Glass UI (Slint). No WebView2, no Visual C++ runtime.
+- OCR copy on Apple and Android, tray and start with Windows, auto unlock (Apple Driver mode), first screen to choose iPhone / iPad or Android.
+
+### Fixed
+- Portable.exe no longer needs the Visual C++ Redistributable; Windows N editions get a clear Media Feature Pack message; the installer no longer warns about WebView2.
+- OBS Game Capture is smoother and survives rotation; Android sound no longer crackles.
+
 ## 2.2.2
 
 ### Added

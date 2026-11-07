@@ -6,7 +6,7 @@ license.workspace = true
 authors.workspace = true
 description = "ZenLink Android: ADB host protocol client, device discovery and naming, scrcpy server pin."
 
-# Portable core (AGENTS.md section 3e): std plus `log`, no platform code except the
+# Portable core: std plus `log`, no platform code except the
 # small adb server launcher in adb.rs.
 [dependencies]
 log = { workspace = true }

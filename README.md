@@ -2,11 +2,22 @@
   <img src="assets/logo.png" width="180" height="180" alt="ZenLink logo" style="border-radius: 40px; box-shadow: 0 16px 36px rgba(255, 79, 163, 0.35);">
 </p>
 
-<h1 align="center">🔗 ZenLink — iPhone, iPad &amp; Android Mirroring for Windows</h1>
+<h1 align="center">ZenLink</h1>
+
+<h3 align="center">Your phone, on your PC.</h3>
 
 <p align="center">
-  <b>Mirror, control and live-stream your iPhone, iPad or Android phone on a Windows PC — over the cable or Wi-Fi.</b><br>
-  <i>ZenLink v2.5 · <b>Next</b>: a native Rust window with hardware decoding and smooth OBS capture. Apple: Apple Driver (full control) or ZenLink Studio (USB capture or AirPlay). Android: the official scrcpy server over ADB, no app on the phone.</i>
+  <b>iPhone, iPad &amp; Android screen mirroring for Windows</b> — native Rust, hardware-decoded H.264 / H.265, smooth in OBS.<br>
+  Mirror, control and live-stream over the cable or Wi-Fi. No app on Android. Free and open source.
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><img src="https://img.shields.io/badge/⬇_Download-v2.5.1-FF4FA3?style=for-the-badge" alt="Download v2.5.1"></a>
+  <a href="https://zenvyzenshiro.github.io/zenlink/"><img src="https://img.shields.io/badge/Website-zenlink-1f1f2e?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website"></a>
+</p>
+
+<p align="center">
+  <code>iPhone</code> · <code>iPad</code> · <code>Android</code> · <code>USB</code> · <code>Wi-Fi</code> · <code>AirPlay</code> · <code>scrcpy</code> · <code>OBS</code> · <code>OCR Alt+C</code> · <code>Mouse &amp; keyboard</code> · <code>Synced sound</code>
 </p>
 
 <p align="center">
@@ -18,6 +29,7 @@
   <img src="https://img.shields.io/badge/Verified%20Device-iPad%20(11th%20gen%2C%20iOS%2027.0.1)-000000.svg?style=flat-square&logo=apple" alt="Verified device: iPad (11th gen), iOS 27.0.1">
   <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/zenvyzenshiro/zenlink?style=flat-square&color=FF4FA3" alt="Latest release"></a>
   <a href="../../releases"><img src="https://img.shields.io/github/downloads/zenvyzenshiro/zenlink/total?style=flat-square&color=FF4FA3&label=Downloads" alt="Total downloads"></a>
+  <a href="../../stargazers"><img src="https://img.shields.io/github/stars/zenvyzenshiro/zenlink?style=flat-square&color=FF4FA3" alt="GitHub stars"></a>
 </p>
 
 > ### 🛡️ Tested & Verified Environment
@@ -47,6 +59,10 @@
 | Feature | Description |
 | :--- | :--- |
 | **🤖 Android (new in v2.5)** | Android 5.0+ over USB, or Wi-Fi (one click from a USB connection, or Android 11+ wireless debugging: scan a QR code shown by ZenLink, or enter a pairing code). Picture, sound (Android 11+), mouse/keyboard control, clipboard, real device names, per-device settings, video profiles and Smart Encoder Detection (H.264 by default; H.265 only when the phone and Windows both decode it, with automatic fallback). Uses Google's official `adb` and the official scrcpy server, both bundled. |
+| **📱 Device picker (new in v2.5.1)** | The Apple screen lists every connected iPhone / iPad (USB or Wi-Fi, iOS version, status) and the ones you used before; click one to choose what Start mirrors. |
+| **🧩 Android apps launcher (new in v2.5.1)** | **Apps** in the dock: a searchable grid of the phone's apps. Open one on the phone's screen or, on Android 10+, in its own window. |
+| **📂 Drop files on the window (new in v2.5.1)** | Android: an `.apk` is installed, other files go to Download. iPhone / iPad (Apple Driver): files land in an app with File Sharing (VLC, Documents …). |
+| **⬆️ In-app updates (new in v2.5.1)** | Settings › Updates checks GitHub (Stable or Beta), downloads with a SHA-256 check and updates in place, keeping your settings. |
 | **🔌 Two Apple connection modes** | Choose before anything connects: **Apple Driver** (Apple's own driver, full control) or **ZenLink Studio** (for live streaming, like TikTok LIVE Studio). Each offers **Kabel** or **Nirkabel (Wi-Fi)**. "Remember my choice" skips the question next time. |
 | **📡 ZenLink Studio over Wi-Fi (AirPlay)** | ZenLink is an AirPlay receiver: on the iPhone/iPad open **Control Center → Screen Mirroring → ZenLinkStudio**. No driver, no cable. The device's own stream is passed through untouched (HEVC or H.264, up to its native resolution); the how-to is shown on screen. |
 | **🎥 ZenLink Studio over the cable** | QuickTime capture over USB in H.264 at the device's full native resolution and high bitrate (measured 2360×1640 on iPad 11th gen, 12–30 Mbps, up to ~56 fps). Picture and sound only. |
@@ -116,7 +132,10 @@ The same list is in **Settings › Keyboard shortcuts**. Click the picture first
 1. Download **`ZenLink-vX.Y.Z-Portable.exe`** from [**Releases**](../../releases/latest) and put it anywhere.
 2. Double-click it. The first start takes a few seconds (it unpacks the Apple backend and `adb`); data is kept in `%LOCALAPPDATA%\ZenLink-Next`.
 
-### Option 2: Run from Source
+### Option 2: Manual (source code, no git)
+Download **`ZenLink-vX.Y.Z-Manual.zip`** from [**Releases**](../../releases/latest), extract it and run **`Start ZenLink.bat`** (same first-run setup as below).
+
+### Option 3: Run from Source
 ```powershell
 git clone https://github.com/zenvyzenshiro/zenlink.git
 cd zenlink
