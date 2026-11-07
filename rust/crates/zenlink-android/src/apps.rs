@@ -202,6 +202,21 @@ mod tests {
         assert!(parse_list(" - Evil                           com.x;reboot\n").is_empty());
     }
 
+    /// A list saved from a real phone: `ZL_APPS_LIST=<file> cargo test --
+    /// --ignored real_list`. Every entry line must become an app.
+    #[test]
+    #[ignore]
+    fn real_list() {
+        let path = std::env::var("ZL_APPS_LIST").expect("ZL_APPS_LIST");
+        let text = std::fs::read_to_string(path).unwrap();
+        let text = text.trim_start_matches('\u{feff}');
+        let entries = text.lines().filter(|l| l.starts_with(" * ") || l.starts_with(" - ")).count();
+        let apps = parse_list(text);
+        eprintln!("{} entries, {} apps", entries, apps.len());
+        assert!(entries > 0);
+        assert_eq!(apps.len(), entries);
+    }
+
     #[test]
     fn package_names() {
         assert!(is_package_name("com.android.settings"));
