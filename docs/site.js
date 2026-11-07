@@ -132,6 +132,14 @@
   }), { threshold: .12 });
   document.querySelectorAll(".reveal").forEach((el, i) => { el.style.transitionDelay = `${(i % 3) * 70}ms`; io.observe(el); });
 
+  // --- no GPU (html.lite): pause animations of sections that are off screen ---
+  if (root.classList.contains("lite")) {
+    const off = new IntersectionObserver((entries) => entries.forEach((e) => {
+      e.target.toggleAttribute("data-off", !e.isIntersecting);
+    }), { rootMargin: "120px 0px" });
+    document.querySelectorAll("header, section, footer, .hero").forEach((el) => off.observe(el));
+  }
+
   // --- download total: counts up the first time it is on screen -------------------
   let lastTotal = null;
   function animateTo(el, to) {

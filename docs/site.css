@@ -497,3 +497,26 @@ html[data-theme="light"] .aurora::before { opacity: .16; }
   border: 1px solid color-mix(in srgb, #fbbf24 40%, transparent);
 }
 .nav .stars { margin-left: 4px; font-weight: 700; opacity: .8; }
+
+
+/* ---------------------------------------------------------------------------
+   No GPU (html.lite, set in index.html when the browser renders in software).
+   Same look, drawn without per-frame blur: the coloured blobs become soft
+   radial gradients instead of a 90px blur filter, glass keeps its tint and
+   edges without re-blurring what moves behind it, and animations pause while
+   their section is off screen. None of this applies when the GPU is on.
+   ------------------------------------------------------------------------ */
+html.lite .aurora i { filter: none; will-change: auto; }
+html.lite .aurora i:nth-child(1) { background: radial-gradient(closest-side, var(--pink) 0%, color-mix(in srgb, var(--pink) 60%, transparent) 50%, transparent 100%); }
+html.lite .aurora i:nth-child(2) { background: radial-gradient(closest-side, var(--violet) 0%, color-mix(in srgb, var(--violet) 60%, transparent) 50%, transparent 100%); }
+html.lite .aurora i:nth-child(3) { background: radial-gradient(closest-side, var(--green) 0%, color-mix(in srgb, var(--green) 60%, transparent) 50%, transparent 100%); }
+html.lite .aurora i:nth-child(4) { background: radial-gradient(closest-side, var(--cyan) 0%, color-mix(in srgb, var(--cyan) 60%, transparent) 50%, transparent 100%); }
+html.lite *, html.lite *::before, html.lite *::after { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.lite[data-theme="dark"] { --glass: rgba(22, 20, 32, .62); --glass-2: rgba(34, 30, 48, .66); --chip: rgba(30, 28, 42, .6); }
+html.lite[data-theme="light"] { --glass: rgba(255, 255, 255, .78); --glass-2: rgba(255, 255, 255, .86); --chip: rgba(255, 255, 255, .8); }
+html.lite .v25 { background: linear-gradient(135deg, rgba(255, 255, 255, .26), rgba(255, 255, 255, .1)); }
+html.lite .dim { background: rgba(10, 6, 16, .66); }
+html.lite .a-dim { background: rgba(6, 14, 12, .72); }
+html.lite .switcher { background: rgba(0, 0, 0, .6); }
+html.lite .a-recents { background: rgba(8, 16, 14, .7); }
+html.lite [data-off], html.lite [data-off] * { animation-play-state: paused !important; }
