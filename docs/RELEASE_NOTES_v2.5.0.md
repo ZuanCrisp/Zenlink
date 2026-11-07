@@ -1,5 +1,5 @@
-<!-- Draft for the v2.5.0 release. Not published yet: it waits for the device
-     test round and the owner's decisions listed under "Before publishing". -->
+<!-- Release notes for v2.5.0 (assets rebuilt 2026-11-07 with the auto unlock,
+     Android sound and USB/Wi-Fi choice fixes). -->
 
 **ZenLink 2.5 · Next** brings Android to ZenLink and moves the window to native Rust. iPhone and iPad modes stay the way you know them.
 
@@ -12,6 +12,8 @@
 - **🎬 OBS.** Game Capture of the ZenLink window is smoother and keeps working through rotation.
 - **📋 OCR copy.** `Alt+C` copies the text on the screen to the PC, on Apple and Android.
 - **📥 Tray & start with Windows.** Close to the notification area (the session keeps running) and start with Windows straight into the tray, both in Settings › Advanced.
+- **🔓 Auto unlock (Apple Driver mode).** Save the iPhone/iPad passcode or password in Settings; ZenLink unlocks the device when mirroring starts. Stored encrypted with Windows DPAPI on this PC only. `Alt+U` unlocks at any time.
+- **🔌 USB or Wi-Fi, your choice.** An Android phone connected both ways shows "USB + Wi-Fi", and Start lets you pick the connection.
 - **🧭 First screen.** Choose iPhone / iPad or Android; the Apple Driver / ZenLink Studio choice stays as the Apple step.
 
 ### 🛠️ Fixes
@@ -24,17 +26,21 @@
 - Setup upgrades an installed ZenLink 2.2 in place (one ZenLink in Start and in Apps).
 - Notifications and tooltips are no longer hidden behind the picture.
 - The window opens larger (up to 85% of the screen height); a size you pick is remembered.
-- Shortcuts: `Alt+M` turns the sound on the PC on or off. Plain keys always go to the phone or iPad (Space no longer starts or stops mirroring).
+- Android sound no longer crackles: the buffer follows the phone's clock smoothly and keeps more margin on Wi-Fi.
+- Android Wi-Fi setup shows each step (1/3, 2/3, 3/3) with a progress bar, and the QR / pairing-code instructions are numbered and clearer.
+- Settings info panels no longer overlap, and their colours match the theme.
+- The window opens wider on a fresh start.
+- Shortcuts: `Alt+N` / `Alt+Q` open notifications and Control Center (or Quick Settings on Android); a second press closes them. `Alt+M` turns the sound on the PC on or off. Plain keys always go to the phone or iPad (Space no longer starts or stops mirroring).
 
 ### 📦 Downloads
 
 | File | Size |
 | :--- | ---: |
 | `ZenLink-v2.5.0-Setup.exe` | 38.6 MB |
-| `ZenLink-v2.5.0-Portable.exe` | 51.8 MB |
-| `ZenLink-v2.5.0-Portable-Source.zip` | 13.7 MB |
+| `ZenLink-v2.5.0-Portable.exe` | 52.2 MB |
+| `ZenLink-v2.5.0-Portable-Source.zip` | 8.9 MB |
 
-Smaller than the beta even with `adb` inside: unused Python packages, the old WebView2 window and extra PortAudio builds are left out, and Portable.exe stores `adb` compressed.
+Smaller than the beta even with `adb` inside: unused Python packages, the old WebView2 window and extra PortAudio builds are left out, and Portable.exe stores `adb` compressed. The source package downloads Google's `adb` (37.0.1, checksum and signature checked) and the Python packages at the release build's exact versions the first time `Start ZenLink.bat` runs.
 
 ### ⚠️ Known limits
 
