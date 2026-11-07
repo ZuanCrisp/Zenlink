@@ -89,6 +89,9 @@ Name: "{group}\ZenLink"; Filename: "{app}\ZenLink.exe"
 Name: "{group}\Uninstall ZenLink"; Filename: "{uninstallexe}"
 ; The log folder (window, backend, crash and setup logs) for bug reports.
 Name: "{group}\ZenLink logs"; Filename: "{localappdata}\ZenLink-Next\logs"
+; Also in the install folder (Program Files is read-only, so the logs live in
+; %LOCALAPPDATA%; this shortcut leads there from where ZenLink is installed).
+Name: "{app}\Logs"; Filename: "{localappdata}\ZenLink-Next\logs"
 Name: "{autodesktop}\ZenLink"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
 
 [Run]

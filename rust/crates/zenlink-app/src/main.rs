@@ -163,6 +163,9 @@ struct App {
     /// only these may resize the window, not volume or other settings.
     fit_prefs: Option<String>,
     meter_at: Option<Instant>,
+    /// Apple session went live at; cleared once a frame arrived or after the
+    /// "no picture" hint (B-56).
+    live_since: Option<Instant>,
     dark: bool,
     backdrop: Option<(bool, bool, i32, bool)>,
     on_top: Option<bool>,
@@ -872,7 +875,9 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
                     v.stop();
                 }
             }
+            a.live_since = live.then(Instant::now);
             if live {
+                log::info!("apple: streaming ({backend}, device {device:?})");
                 push_audio(api, &ui.get_prefs(), ui.get_muted());
             }
         }
@@ -4535,6 +4540,20 @@ fn main() -> Result<(), slint::PlatformError> {
                 if due {
                     a.meter_at = Some(Instant::now());
                     let s = v.stats();
+                    // Apple: the backend says "streaming" but no frame came (B-56).
+                    // Say what to do instead of an empty window, and log it.
+                    if streaming && s.width > 0 {
+                        a.live_since = None;
+                    } else if let Some(t) = a.live_since.filter(|t| streaming && !on_android && t.elapsed() > Duration::from_secs(10)) {
+                        a.live_since = None;
+                        log::warn!("apple: no picture {:.0} s after streaming started (decoded {:.1} fps, hardware {})", t.elapsed().as_secs_f32(), s.decoded_fps, s.hardware);
+                        let msg = tr_ui_static(
+                            &ui,
+                            "Belum ada gambar dari iPhone/iPad. Buka kunci perangkat lalu tekan Mulai ulang. Kalau tetap kosong, kirim log (Pengaturan › Tentang › Buka folder log).",
+                            "No picture from the iPhone/iPad yet. Unlock the device and press Restart. If it stays empty, send the logs (Settings › About › Open log folder).",
+                        );
+                        show_toast(&ui, msg.to_string());
+                    }
                     if streaming && s.width > 0 && std::env::var_os("ZL_STATS_LOG").is_some() {
                         // Measuring frame pacing (tests): once a second, to the log.
                         log::info!("stats decoded={:.1} presented={:.1} dropped_total={}", s.decoded_fps, s.presented_fps, s.replaced);

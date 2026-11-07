@@ -364,3 +364,9 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Cause: `Sidecar::ensure` found neither `ZenLinkService.exe` next to the exe nor a `.venv` above it (e.g. the source package's ZenLink.exe opened before Start ZenLink.bat). Logs were spread: window log in %TEMP%, backend log in the data or repo folder, appending without limit.
 - Fix: the message now says what is missing and what to do. All logs in `%LOCALAPPDATA%\ZenLink-Beta\logs`: `zenlink-v251-beta.log` (window, version / start time / Windows build / pid header, elapsed time per line, the previous run kept as `.prev.log`), the apps window log, `zenlink-service.log` (backend, rotating 2 MB × 3), `crash.log`, and `setup.log` (Inno Setup log copied at the end; `SetupLogging=yes`). Settings › About › "Buka folder log"; Start menu "ZenLink Beta logs".
 - Verification: tests pass; unverified: installer shortcut and setup.log (needs an install).
+
+### B-56: "Start, but the iPhone picture never appears" (user report, Windows 11)            Status: open (mitigated)
+- Reported: 2026-11-07, a user via the owner: pressing Start shows no iPhone screen, Windows 11. No mode, log or device details.
+- Cause: not found yet; not reproduced (the owner's iPhone 17, Apple Driver over USB, streams in under 2 s). Possible: ZenLink Studio over Wi-Fi waiting (B-54), missing Apple service or backend (B-55), a locked device, a decoder problem.
+- Fix (mitigation): the window logs the session start and, when the backend reports streaming but no frame arrives in 10 s, logs "apple: no picture …" with the decode numbers and tells the user to unlock and Restart, or to send the logs. Installer: a "Logs" shortcut in the install folder and the Start menu.
+- Verification: needs the user's logs from `%LOCALAPPDATA%\ZenLink-Next\logs`.
