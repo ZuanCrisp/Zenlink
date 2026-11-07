@@ -122,6 +122,11 @@ impl Player {
         self.shared.muted.store(m, Relaxed);
     }
 
+    /// Rate-adjusted playback instead of chunk drops (Android, see buffer.rs).
+    pub fn set_smooth(&self, on: bool) {
+        self.shared.buf.lock().unwrap().set_smooth(on);
+    }
+
     /// Minimum queue for bursty links (Wi-Fi); 0 for a cable.
     pub fn set_jitter_ms(&self, ms: f32) {
         self.shared.buf.lock().unwrap().set_jitter_ms(ms);

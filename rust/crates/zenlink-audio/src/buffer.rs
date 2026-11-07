@@ -10,6 +10,12 @@
 //!   sound in large blocks, and a target smaller than one block ran dry on
 //!   every pull (measured: gaps every few seconds at the 50 ms limit).
 //!
+//! Smooth mode ([`JitterBuffer::set_smooth`], Android): sound comes over ADB
+//! in bursts next to the video and the phone's clock drifts from the PC's.
+//! Instead of dropping whole chunks (heard as cracks) the buffer plays a
+//! little faster or slower (at most 0.5%, below hearing) until the queue is
+//! back at its target; a hard drop only happens after a long stall.
+//!
 //! Units are frames (one s16 sample per channel) at [`RATE`].
 
 use std::collections::VecDeque;
@@ -37,7 +43,16 @@ pub struct JitterBuffer {
     pub dropped_frames: u64,
     /// Largest block the output asked for, frames.
     pub block: usize,
+    /// Rate-adjusted playback instead of chunk drops (Android).
+    smooth: bool,
+    /// Fractional read position (smooth mode), frames.
+    pos: f64,
+    /// Queue length averaged over about half a second (smooth mode), frames.
+    avg: f64,
 }
+
+/// Largest speed change in smooth mode (0.5%: about 8 cents of pitch).
+pub const MAX_SKEW: f64 = 0.005;
 
 impl Default for JitterBuffer {
     fn default() -> Self {
@@ -57,7 +72,15 @@ impl JitterBuffer {
             underruns: 0,
             dropped_frames: 0,
             block: 0,
+            smooth: false,
+            pos: 0.0,
+            avg: 0.0,
         }
+    }
+
+    /// Smooth mode (see the module notes).
+    pub fn set_smooth(&mut self, on: bool) {
+        self.smooth = on;
     }
 
     /// Keep at least `ms` of sound queued (0 for a cable).
@@ -89,7 +112,13 @@ impl JitterBuffer {
         let samples = &samples[..frames * CHANNELS];
         self.packet = frames.max((self.packet as f64 * 0.995) as usize);
         let target = self.target();
-        let ceiling = target * 2 + self.block.max(128);
+        // Smooth mode corrects slowly, so it only cuts after a real stall
+        // (150 ms above the target).
+        let ceiling = if self.smooth {
+            target + 7200
+        } else {
+            target * 2 + self.block.max(128)
+        };
         let queued = self.queued_frames();
         if queued + frames > ceiling {
             let drop = queued.min(queued + frames - target);
@@ -109,9 +138,32 @@ impl JitterBuffer {
         if !self.started && self.queued_frames() >= self.target() {
             self.started = true;
         }
-        let played = if self.started && self.queued_frames() >= frames {
-            for (o, s) in out.iter_mut().zip(self.buf.drain(..frames * CHANNELS)) {
-                *o = s;
+        let queued = self.queued_frames();
+        if self.smooth && self.started {
+            self.avg = if self.avg == 0.0 {
+                queued as f64
+            } else {
+                self.avg * 0.98 + queued as f64 * 0.02
+            };
+        }
+        let ratio = if self.smooth {
+            let err = (self.avg - self.target() as f64) / RATE as f64;
+            1.0 + (err * 0.25).clamp(-MAX_SKEW, MAX_SKEW)
+        } else {
+            1.0
+        };
+        let need = if self.smooth {
+            (self.pos + frames as f64 * ratio).ceil() as usize + 1
+        } else {
+            frames
+        };
+        let played = if self.started && queued >= need {
+            if self.smooth {
+                self.resample(out, ratio);
+            } else {
+                for (o, s) in out.iter_mut().zip(self.buf.drain(..frames * CHANNELS)) {
+                    *o = s;
+                }
             }
             true
         } else {
@@ -135,6 +187,27 @@ impl JitterBuffer {
         self.buf.clear();
         self.started = false;
         self.block = 0;
+        self.pos = 0.0;
+        self.avg = 0.0;
+    }
+
+    /// Fills `out` reading `ratio` input frames per output frame (linear
+    /// interpolation), then drops the frames it consumed.
+    fn resample(&mut self, out: &mut [i16], ratio: f64) {
+        let mut pos = self.pos;
+        for frame in out.chunks_exact_mut(CHANNELS) {
+            let i = pos as usize;
+            let f = (pos - i as f64) as f32;
+            for (c, o) in frame.iter_mut().enumerate() {
+                let a = self.buf[i * CHANNELS + c] as f32;
+                let b = self.buf[(i + 1) * CHANNELS + c] as f32;
+                *o = (a + (b - a) * f).round() as i16;
+            }
+            pos += ratio;
+        }
+        let used = pos as usize;
+        self.buf.drain(..used * CHANNELS);
+        self.pos = pos - used as f64;
     }
 }
 
@@ -146,6 +219,62 @@ pub fn frames_ms(frames: u64) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Simulates `secs` of a phone whose clock runs `drift` fast, sending
+    /// 20 ms packets with up to `burst` packets held back and released at
+    /// once (ADB next to the video), into 10 ms output pulls.
+    fn run_phone(secs: u32, drift: f64, burst: u32, smooth: bool) -> JitterBuffer {
+        let t0 = Instant::now();
+        let mut b = JitterBuffer::new(t0);
+        b.set_smooth(smooth);
+        b.set_jitter_ms(if smooth { 40.0 } else { 0.0 });
+        let packet = vec![1000i16; 960 * CHANNELS];
+        let mut out = vec![0i16; 480 * CHANNELS];
+        let (mut sent, mut held) = (0.0f64, 0u32);
+        for step in 0..(secs * 100) {
+            let now = t0 + Duration::from_millis(step as u64 * 10);
+            // The phone produced this much by now (its clock is `drift` fast).
+            let due = step as f64 * 0.01 * (1.0 + drift) / 0.02;
+            while sent + 1.0 <= due {
+                sent += 1.0;
+                held += 1;
+                // Packets are released `burst` at a time.
+                if held >= burst.max(1) {
+                    for _ in 0..held {
+                        b.feed(&packet);
+                    }
+                    held = 0;
+                }
+            }
+            b.pull(&mut out, now);
+        }
+        b
+    }
+
+    #[test]
+    fn smooth_mode_absorbs_drift_and_bursts_without_cuts() {
+        for drift in [0.003, -0.003, 0.0] {
+            let b = run_phone(120, drift, 3, true);
+            // The first start may wait; after that no gaps and no drops.
+            assert!(b.underruns <= 1, "drift {drift}: {} gaps", b.underruns);
+            assert_eq!(b.dropped_frames, 0, "drift {drift}");
+            let q = frames_ms(b.queued_frames() as u64);
+            assert!(q < 150.0, "drift {drift}: queue {q} ms");
+        }
+    }
+
+    #[test]
+    fn plain_mode_cracks_under_the_same_load() {
+        // The cause seen in the field (gaps and dropped chunks every few s).
+        let b = run_phone(120, 0.003, 3, false);
+        assert!(b.underruns + b.dropped_frames > 0);
+    }
+
+    #[test]
+    fn plain_mode_is_unchanged_by_default() {
+        let b = JitterBuffer::new(Instant::now());
+        assert!(!b.smooth);
+    }
 
     fn packet(frames: usize, v: i16) -> Vec<i16> {
         vec![v; frames * CHANNELS]

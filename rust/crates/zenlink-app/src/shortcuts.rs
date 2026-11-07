@@ -60,9 +60,12 @@ pub fn route(
             ('u', false) => Some(Shortcut::Apple("wake")),
             ('d', false) => Some(Shortcut::Apple("stealth")),
             ('v', false) => Some(Shortcut::Apple("paste-pc")),
-            ('n', true) => Some(Shortcut::Android("notifications")),
-            // Like scrcpy: MOD+S = app switch; Quick Settings on Q.
+            ('n', _) => Some(Shortcut::Android("notifications")),
+            // Like scrcpy: MOD+S = app switch; Quick Settings on Q. On
+            // iPhone / iPad, Q opens Control Center (the window's action
+            // tracks whether it is open, so a second press closes it).
             ('q', true) => Some(Shortcut::Android("quick-settings")),
+            ('q', false) => Some(Shortcut::Android("control-center")),
             ('s', true) => Some(Shortcut::Android("switcher")),
             ('r', _) => Some(Shortcut::ClearText),
             (UP, true) => Some(Shortcut::Android("vol-up")),
@@ -259,7 +262,15 @@ mod tests {
             route(true, "n", false, false, true, true),
             Some(Shortcut::Android("notifications"))
         );
-        assert_eq!(route(false, "n", false, false, true, true), None);
+        // iPhone / iPad: Alt+N / Alt+Q open Notification / Control Center.
+        assert_eq!(
+            route(false, "n", false, false, true, true),
+            Some(Shortcut::Android("notifications"))
+        );
+        assert_eq!(
+            route(false, "q", false, false, true, true),
+            Some(Shortcut::Android("control-center"))
+        );
         assert_eq!(
             route(false, "k", true, false, false, true),
             Some(Shortcut::Apple("toggle-keyboard"))

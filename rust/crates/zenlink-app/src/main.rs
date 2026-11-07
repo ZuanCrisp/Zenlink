@@ -98,8 +98,12 @@ struct App {
     mode_pending: bool,
     /// Result of the last "Check drivers", shown under the service line.
     drivers_text: Option<String>,
-    /// Device overlay ZenLink opened last ("control-center" / "notifications").
-    panel: Option<&'static str>,
+    /// Device overlay ZenLink opened last ("control-center" / "notifications")
+    /// and when. Forgotten after a click on the picture or [`PANEL_TTL`]:
+    /// the user may have closed it on the device, and a stale "open" made
+    /// the next press send the close swipe (swipe up from the bottom), which
+    /// left the app instead.
+    panel: Option<(&'static str, Instant)>,
     /// v2-style connect card: when Start was pressed (the backend may still
     /// say "idle" for a moment).
     flow_started: Option<Instant>,
@@ -123,6 +127,17 @@ struct App {
     android_link: String,
     /// Which list entry was started (-1 = first ready), for Restart.
     android_index: i32,
+    /// Height the first sizing chose, and when (see clamp_to_work_area).
+    start_h: Option<(f32, Instant)>,
+    /// Apple phase seen last (auto unlock fires on the step to streaming).
+    apple_phase: String,
+    /// When to send the auto-unlock (Apple Driver mode, picture running).
+    unlock_at: Option<Instant>,
+    /// Whether the backend was asked if a passcode is saved.
+    passcode_asked: bool,
+    /// Link the user picked for a phone on both USB and Wi-Fi
+    /// (Some(true) = Wi-Fi); kept for restarts.
+    android_via: Option<bool>,
     /// Settings the running Android session started with (sound target,
     /// picture options); a change restarts it.
     android_key: Option<String>,
@@ -152,17 +167,20 @@ fn is_full() -> bool {
 
 /// Physical bounds of the monitor the window is on.
 /// The first time the window is on screen: 85% of the work area's height
-/// (the owner found the old 900 px start too small on large screens), kept
-/// inside the work area on small or high-DPI laptop screens.
+/// and up to 55% of its width (the owner found the old start too small and
+/// too narrow), kept inside the work area on small or high-DPI screens.
 fn clamp_to_work_area(ui: &AppWindow) {
     let Some((wx, wy, ww, wh)) = work_area(ui) else {
         return;
     };
     let cur = ui.window().size().to_logical(ui.window().scale_factor());
-    let (w, h) = (
-        cur.width.min(ww * 0.95),
-        cur.height.max(wh * 0.85).min(wh * 0.95),
-    );
+    let h = cur.height.max(wh * 0.85).min(wh * 0.95);
+    // Other resizes in the next ticks still read the old height (the size
+    // arrives with a later event): they keep at least this one for 2 s.
+    APP.with_borrow_mut(|a| a.start_h = Some((h, Instant::now())));
+    // Room for the device panel and Settings side by side: 55% of the
+    // screen width, at most 1.35 x the height.
+    let w = cur.width.max((ww * 0.55).min(h * 1.35)).min(ww * 0.95);
     if (w, h) != (cur.width, cur.height) {
         let size = LogicalSize::new(w, h);
         ui.window().set_size(size);
@@ -297,6 +315,52 @@ fn apply_look(ui: &AppWindow) {
     });
 }
 
+/// Asks the backend whether a passcode is saved, or saves one (`Some`;
+/// an empty string removes it). Off the UI thread.
+fn passcode_query(ui: &AppWindow, api: &Api, save: Option<String>) {
+    let api = api.clone();
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let r = match &save {
+            Some(code) => api.post("/api/passcode", &json!({ "passcode": code })),
+            None => api.get("/api/passcode"),
+        };
+        let set = r
+            .as_ref()
+            .and_then(|v| v.get("set"))
+            .and_then(Value::as_bool);
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            match set {
+                Some(s) => {
+                    ui.set_passcode_set(s);
+                    if save.is_some() {
+                        let msg = if s {
+                            tr_ui(
+                                &ui,
+                                "Kode tersimpan (terenkripsi di PC ini)",
+                                "Passcode saved (encrypted on this PC)",
+                            )
+                        } else {
+                            tr_ui(&ui, "Kode dihapus", "Passcode removed")
+                        };
+                        show_toast(&ui, msg);
+                    }
+                }
+                None if save.is_some() => show_toast(
+                    &ui,
+                    tr_ui(
+                        &ui,
+                        "Gagal menyimpan kode: layanan ZenLink belum jalan",
+                        "Couldn't save the passcode: the ZenLink service is not running",
+                    ),
+                ),
+                None => APP.with_borrow_mut(|a| a.passcode_asked = false),
+            }
+        });
+    });
+}
+
 fn push_audio(api: &Api, p: &Prefs, muted: bool) {
     let api = api.clone();
     let body = json!({ "enabled": p.audio_out.as_str() == "pc", "volume": p.volume / 100.0, "muted": muted });
@@ -401,6 +465,20 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     } else {
         String::new()
     };
+    // Auto unlock: Apple Driver mode only (the backend refuses Studio),
+    // once the picture runs, if a passcode is saved and the option is on.
+    let was = APP.with_borrow_mut(|a| std::mem::replace(&mut a.apple_phase, phase.clone()));
+    if phase == "streaming"
+        && was != "streaming"
+        && matches!(backend, "apple" | "hybrid")
+        && ui.get_prefs().auto_unlock
+        && ui.get_passcode_set()
+    {
+        APP.with_borrow_mut(|a| a.unlock_at = Some(Instant::now() + Duration::from_millis(1500)));
+    }
+    if !APP.with_borrow_mut(|a| std::mem::replace(&mut a.passcode_asked, true)) {
+        passcode_query(ui, api, None);
+    }
     ui.set_phase(phase.clone().into());
     ui.set_device(device.into());
     ui.set_link(link.into());
@@ -641,8 +719,20 @@ const PIC_INSET: f32 = 6.0;
 /// Narrowest window that still fits the header (logo, name, buttons,
 /// window controls).
 const MIN_W: f32 = 470.0;
-/// Stage width (logical px) while there is no picture yet.
+/// How long ZenLink trusts that an overlay it opened is still open.
+const PANEL_TTL: Duration = Duration::from_secs(20);
+
+/// Stage width (logical px) while there is no picture yet: the smallest
+/// one; [`idle_stage_w`] widens it on larger screens.
 const IDLE_STAGE_W: f32 = 440.0;
+
+/// Idle stage width for this screen: 32% of the work area, 440-640 px
+/// (the owner found 440 px next to Settings too narrow on a large screen).
+fn idle_stage_w(ui: &AppWindow) -> f32 {
+    work_area(ui)
+        .map(|(_, _, ww, _)| (ww * 0.32).clamp(IDLE_STAGE_W, 640.0))
+        .unwrap_or(IDLE_STAGE_W)
+}
 
 /// Picture prefs that change the window's fitted size.
 fn fit_prefs_key(p: &Prefs) -> String {
@@ -705,12 +795,16 @@ fn widen_for_sheet(ui: &AppWindow) {
     // Never narrower than the idle stage plus the open settings panel (the
     // window may not have taken that size yet when this runs at launch).
     let want = if ui.get_settings_open() {
-        IDLE_STAGE_W + 16.0 + 368.0
+        idle_stage_w(ui) + 16.0 + 368.0
     } else {
         600.0
     };
     let w = cur.width.max(want.max(600.0).min(ww - 16.0));
-    let h = cur.height.max(820.0f32.min(wh - 16.0));
+    let start = APP
+        .with_borrow(|a| a.start_h)
+        .filter(|(_, at)| at.elapsed() < Duration::from_secs(2))
+        .map_or(0.0, |(h, _)| h);
+    let h = cur.height.max(start).max(820.0f32.min(wh - 16.0));
     if (w, h) != (cur.width, cur.height) {
         let size = LogicalSize::new(w, h);
         ui.window().set_size(size);
@@ -1283,7 +1377,9 @@ fn show_android(
                 ),
                 Readiness::Unknown => tr_ui(ui, "Membaca info perangkat…", "Reading device info…"),
             };
-            let mut sub = vec![link.to_string()];
+            let both_links = d.transports.iter().any(|t| t.connection == Connection::Usb)
+                && d.transports.iter().any(|t| t.connection.is_wireless());
+            let mut sub = vec![if both_links { "USB + Wi-Fi" } else { link }.to_string()];
             if let Some(r) = &d.android_release {
                 sub.push(format!("Android {r}"));
             }
@@ -1294,10 +1390,12 @@ fn show_android(
                     Connection::WifiTcp { .. } | Connection::WifiTls { .. }
                 )
             });
+            let on_usb = d.transports.iter().any(|t| t.connection == Connection::Usb);
             AndroidRow {
                 title: d.name.display.clone().into(),
                 sub: sub.join(" · ").into(),
                 ok: d.readiness == Readiness::Ready,
+                both: d.readiness == Readiness::Ready && on_usb && on_wifi,
                 wifi: d.readiness == Readiness::Ready
                     && d.primary.connection == Connection::Usb
                     && !on_wifi,
@@ -1690,9 +1788,14 @@ fn scrcpy_server() -> Result<Arc<Vec<u8>>, String> {
 /// recording in ZL_ANDROID_FIXTURE.
 /// Runs one Wi-Fi step on a worker thread (the ADB calls block for
 /// seconds) and shows its message. `Ok` is a success message.
+/// Shows the current step of a Wi-Fi job under the device list.
+type Step<'a> = &'a dyn Fn(&'static str, &'static str);
+
 fn android_wifi_job(
     ui: &AppWindow,
-    job: impl FnOnce()
+    job: impl FnOnce(
+            Step,
+        )
             -> Result<(&'static str, &'static str, String), (&'static str, &'static str, String)>
         + Send
         + 'static,
@@ -1701,12 +1804,24 @@ fn android_wifi_job(
         return;
     }
     ui.set_android_wifi_busy(true);
+    ui.set_android_wifi_status("".into());
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        let r = job();
+        let w = weak.clone();
+        let step = move |id: &'static str, en: &'static str| {
+            let w = w.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = w.upgrade() {
+                    let s = tr_ui(&ui, id, en);
+                    ui.set_android_wifi_status(s.into());
+                }
+            });
+        };
+        let r = job(&step);
         let _ = slint::invoke_from_event_loop(move || {
             let Some(ui) = weak.upgrade() else { return };
             ui.set_android_wifi_busy(false);
+            ui.set_android_wifi_status("".into());
             let ((id, en, detail), _ok) = match r {
                 Ok(m) => (m, true),
                 Err(m) => (m, false),
@@ -1729,9 +1844,13 @@ fn android_wifi_device(ui: &AppWindow, index: i32) {
     use zenlink_android::wireless::{Reply, TCPIP_PORT};
     let dev = APP.with_borrow(|a| a.android_list.get(index.max(0) as usize).cloned());
     let Some(d) = dev else { return };
-    android_wifi_job(ui, move || {
+    android_wifi_job(ui, move |step| {
         let c = AdbClient::default();
         let serial = d.primary.serial.clone();
+        step(
+            "1/3 · Membaca alamat Wi-Fi HP…",
+            "1/3 · Reading the phone's Wi-Fi address…",
+        );
         let target = match d.primary.transport_id {
             Some(id) => Target::TransportId(id),
             None => Target::Serial(&serial),
@@ -1753,6 +1872,10 @@ fn android_wifi_device(ui: &AppWindow, index: i32) {
                 ))
             }
         };
+        step(
+            "2/3 · Menyalakan mode Wi-Fi ADB di HP (layar HP bisa berkedip)…",
+            "2/3 · Turning on ADB over Wi-Fi on the phone (its screen may flicker)…",
+        );
         if let Err(e) = c.tcpip(&target, TCPIP_PORT) {
             return Err((
                 "Gagal mengaktifkan mode TCP/IP",
@@ -1761,6 +1884,10 @@ fn android_wifi_device(ui: &AppWindow, index: i32) {
             ));
         }
         // adbd restarts on the phone; give it a moment, then retry.
+        step(
+            "3/3 · Menyambung lewat Wi-Fi…",
+            "3/3 · Connecting over Wi-Fi…",
+        );
         let mut last = String::new();
         for _ in 0..4 {
             std::thread::sleep(Duration::from_millis(1200));
@@ -1801,7 +1928,11 @@ fn android_wifi_connect(ui: &AppWindow, addr: String) {
         );
         return;
     };
-    android_wifi_job(ui, move || {
+    android_wifi_job(ui, move |step| {
+        step(
+            "Menyambung ke HP lewat Wi-Fi…",
+            "Connecting to the phone over Wi-Fi…",
+        );
         match AdbClient::default().connect_device(&host, port) {
             Ok(Reply::Ok(_)) => Ok((
                 "Tersambung lewat Wi-Fi",
@@ -1840,7 +1971,8 @@ fn android_wifi_pair(ui: &AppWindow, addr: String, code: String) {
         );
         return;
     }
-    android_wifi_job(ui, move || {
+    android_wifi_job(ui, move |step| {
+        step("Pairing dengan HP…", "Pairing with the phone…");
         match AdbClient::default().pair(&host, port, &code) {
         Ok(Reply::Ok(_)) => Ok((
             "Pairing berhasil. Sekarang isi alamat di layar Wireless debugging lalu tekan Sambung",
@@ -2032,6 +2164,19 @@ fn android_start(ui: &AppWindow, index: i32) {
             } else {
                 a.android_list.iter().find(ready).cloned()
             }
+        });
+        // A phone on both USB and Wi-Fi: use the link the user picked.
+        let via = APP.with_borrow(|a| a.android_via);
+        let dev = dev.map(|mut d| {
+            if let Some(t) = via.and_then(|w| {
+                d.transports
+                    .iter()
+                    .find(|t| t.connection.is_wireless() == w)
+                    .cloned()
+            }) {
+                d.primary = t;
+            }
+            d
         });
         let Some(d) = dev else {
             show_toast(
@@ -2451,6 +2596,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let touch_on = Arc::new(AtomicBool::new(ui.get_prefs().touch));
     let gestures_on = Arc::new(AtomicBool::new(ui.get_prefs().gestures));
     ui.set_message("Menyiapkan ZenLink…".into());
+    // Test hook: every settings card starts with its explanation open.
+    if std::env::var_os("ZL_INFO_OPEN").is_some() {
+        ui.global::<UiTest>().set_info_open(true);
+    }
     if std::env::var_os("ZL_OPEN_SETTINGS").is_some() {
         ui.set_settings_open(true);
     }
@@ -2820,6 +2969,14 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         ui.on_android_start(move |i| {
             if let Some(ui) = weak.upgrade() {
+                APP.with_borrow_mut(|a| a.android_via = None);
+                android_start(&ui, i);
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_start_via(move |i, via| {
+            if let Some(ui) = weak.upgrade() {
+                APP.with_borrow_mut(|a| a.android_via = Some(via.as_str() == "wifi"));
                 android_start(&ui, i);
             }
         });
@@ -2892,7 +3049,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 };
                 // Swipe up from the bottom closes either overlay.
                 let close = |input: &Input| input.send(Cmd::Stroke(0.5, 0.97, 0.5, 0.25, 12, 16));
-                let was = APP.with_borrow(|x| x.panel);
+                let was = APP
+                    .with_borrow(|x| x.panel)
+                    .filter(|(_, at)| at.elapsed() < PANEL_TTL)
+                    .map(|(n, _)| n);
                 match was {
                     Some(p) if p == name => {
                         close(&input);
@@ -2900,7 +3060,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                     Some(_) => {
                         close(&input);
-                        APP.with_borrow_mut(|x| x.panel = Some(name));
+                        APP.with_borrow_mut(|x| x.panel = Some((name, Instant::now())));
                         let input = input.clone();
                         slint::Timer::single_shot(Duration::from_millis(550), move || {
                             open(&input, name)
@@ -2908,7 +3068,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                     None => {
                         open(&input, name);
-                        APP.with_borrow_mut(|x| x.panel = Some(name));
+                        APP.with_borrow_mut(|x| x.panel = Some((name, Instant::now())));
                     }
                 }
                 return;
@@ -3046,6 +3206,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 });
             });
+        });
+    }
+    {
+        let api = api.clone();
+        let weak = ui.as_weak();
+        ui.on_save_passcode(move |code| {
+            if let Some(ui) = weak.upgrade() {
+                passcode_query(&ui, &api, Some(code.to_string()));
+            }
         });
     }
     {
@@ -3295,8 +3464,24 @@ fn main() -> Result<(), slint::PlatformError> {
         let clamped = std::cell::Cell::new(false);
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(16), move || {
             let Some(ui) = weak.upgrade() else { return };
-            if !clamped.replace(true) {
+            // The first tick sizes the window for the screen; the settings
+            // slide below waits a tick, else it would resize with the old
+            // height (seen: the window stayed 900 px high).
+            let first = !clamped.replace(true);
+            if first {
                 clamp_to_work_area(&ui);
+            }
+            // Auto unlock, a moment after the picture started.
+            let unlock = APP.with_borrow_mut(|a| {
+                let due = a.unlock_at.is_some_and(|at| Instant::now() >= at);
+                if due {
+                    a.unlock_at = None;
+                }
+                due
+            });
+            if unlock && ui.get_phase().as_str() == "streaming" {
+                input.send(Cmd::Action("wake"));
+                show_toast(&ui, tr_ui(&ui, "Membuka kunci perangkat…", "Unlocking the device…"));
             }
             APP.with_borrow_mut(|a| {
                 if a.view.is_none() {
@@ -3313,6 +3498,9 @@ fn main() -> Result<(), slint::PlatformError> {
                                     // shortcuts work) after a click on it.
                                     let weak = weak.clone();
                                     let _ = slint::invoke_from_event_loop(move || {
+                                        // A click on the picture may close a
+                                        // device overlay: forget it.
+                                        APP.with_borrow_mut(|a| a.panel = None);
                                         if let Some(ui) = weak.upgrade() {
                                             ui.invoke_focus_keys();
                                         }
@@ -3404,6 +3592,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             }
             if let Some(stage) = APP.with_borrow(|a| a.hold_stage) {
+                // Held before the window had a monitor: size it for this screen.
+                let stage = if stage == IDLE_STAGE_W {
+                    idle_stage_w(&ui)
+                } else {
+                    stage
+                };
                 if std::env::var_os("ZL_STATS_LOG").is_some() {
                     log::info!(
                         "slide window={lw:.1} stage_w={:.1} chrome={:.1} held={stage:.1}",
@@ -3413,8 +3607,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 let chrome = ui.get_chrome_w();
                 let target = (stage + chrome).max(MIN_W);
-                let lh = ui.window().size().height as f32 / sf;
-                if (lw - target).abs() > 0.5 && !ui.window().is_maximized() && !is_full() {
+                let mut lh = ui.window().size().height as f32 / sf;
+                if let Some((h, at)) = APP.with_borrow(|a| a.start_h) {
+                    if at.elapsed() < Duration::from_secs(2) {
+                        lh = lh.max(h);
+                    }
+                }
+                if !first && (lw - target).abs() > 0.5 && !ui.window().is_maximized() && !is_full() {
                     let size = LogicalSize::new(target, lh);
                     ui.window().set_size(size);
                     if let Some(wa) = work_area(&ui) {

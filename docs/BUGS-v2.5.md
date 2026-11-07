@@ -261,3 +261,41 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Cause: `serde_json` rejects a leading BOM; `prefs::load` then fell back to the defaults.
 - Fix: `prefs::parse` strips a BOM before parsing.
 - Verification: test `a_file_with_a_byte_order_mark_still_loads`.
+
+### B-37: Android sound crackles on the PC            Status: fixed (unverified)
+- Reported: 2026-11-07 by the owner ("audio ga jernih, pecah-pecah"), TECNO POVA 6 over USB.
+- Cause: the owner's log (`zenlink-next-v25.log`) shows, every 5 s, 1-3 gaps and 54-267 ms of sound dropped (`sound: 2 gaps, 117 ms dropped in 5 s; margin 20.0 ms ...`). Android used the Apple cable buffer settings: a 10 ms margin and chunk drops when the queue passed twice the target. Sound over ADB arrives in bursts next to the video, and the phone's clock drifts from the PC's, so the queue ran dry (gap) and then overflowed (cut) in turn.
+- Fix: `zenlink-audio` smooth mode for Android only: 40 ms kept queued (60 ms over Wi-Fi; scrcpy's own default is 50 ms), drift corrected by playing up to 0.5% faster or slower (linear interpolation, about 8 cents), a hard cut only 150 ms above the target. Apple playback is unchanged.
+- Verification: tests `smooth_mode_absorbs_drift_and_bursts_without_cuts` (120 s simulated, ±0.3% drift, 3-packet bursts: no drops, at most the first start wait) and `plain_mode_cracks_under_the_same_load` (the old mode reproduces the gaps/drops). Unverified: listening on the phone.
+
+### B-38: Android header showed the model code ("TECNO LI7") instead of the device name            Status: fixed (unverified)
+- Cause: when the picture starts, the scrcpy header's name (`ro.product.model`) replaced the list's marketing name.
+- Fix: `android.rs` keeps the list's name; the scrcpy name is only a fallback.
+- Verification: code path; unverified on the device.
+
+### B-39: A phone on USB and Wi-Fi at once: no way to pick the link            Status: fixed (unverified)
+- Fix: the row says "USB + Wi-Fi" and shows two Start buttons (USB, Wi-Fi); the choice is kept for restarts (`android_via`).
+- Verification: builds; unverified on a device.
+
+### B-40: Wi-Fi connect showed no progress; instructions were hard to follow            Status: fixed (verified)
+- Fix: a moving bar and the current step (1/3 reading the address, 2/3 turning on ADB over Wi-Fi, 3/3 connecting; pairing; connecting) under the device list; the Wi-Fi card is now "Option 1 · Scan a QR code" (numbered steps) and "Option 2 · Pairing code or IP address" (collapsed, numbered steps).
+- Verification: screenshot of the card (`ZL_QR_TEST`).
+
+### B-41: Opening the (i) explanations made cards overlap; the pink box clashed            Status: fixed (verified)
+- Cause: wrapped text nested inside another element or layout is measured too short by Slint 1.18, so the card was shorter than its content.
+- Fix: the explanation is a direct, neutral text in the card (with a separator); steps are plain texts.
+- Verification: screenshot with every explanation open (`ZL_INFO_OPEN=1`): no overlap.
+
+### B-42: Default window still too small/narrow            Status: fixed (verified)
+- Fix: first sizing uses 85% of the work-area height and up to 55% of its width; the idle stage next to Settings is 32% of the screen (440-640 px); the settings slide no longer resizes with the old height in the first ticks.
+- Verification: on a 2560x1392 work area the window opens at 1408x1183 (Android) / 1024x1183 (Apple with Settings), was 824x900.
+
+### B-43: iOS Control Center button sometimes did the wrong thing            Status: fixed (unverified)
+- Cause: ZenLink remembered "Control Center is open" forever; if the user closed it on the device, the next press sent the close swipe (up from the bottom), which left the app.
+- Fix: the remembered overlay is forgotten after a click on the picture or 20 s. Alt+Q (Control Center) and Alt+N (Notification Center) now work on iPhone/iPad too.
+- Verification: test `platform_specific_shortcuts`; unverified on an iPhone.
+
+### B-44: Auto unlock with a saved passcode (feature)            Status: fixed (unverified)
+- Request: 2026-11-07 by the owner (Apple mode only, not ZenLink Studio).
+- Fix: Settings › "Auto unlock": save a passcode or password (Windows DPAPI, existing `/api/passcode`), toggle "Unlock when mirroring starts" (sends `wake` 1.5 s after the picture starts, Apple Driver/Hybrid only). Alphanumeric passwords and custom-length codes now type with Shift and Return.
+- Verification: tests `PasscodeTests` (3); unverified on an iPhone.

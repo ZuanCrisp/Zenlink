@@ -7,6 +7,8 @@ Actions:
   toggle-keyboard                      show / hide the on-screen keyboard (Eject)
   lock                                 restore brightness if dimmed, then sleep
   wake                                 wake, swipe up and type the saved passcode
+                                       (a numeric code, or an alphanumeric
+                                       password followed by Return)
   stealth                              dim the device's own screen to 0% / restore
                                        (the mirrored picture stays full quality)
 """
@@ -42,6 +44,31 @@ def char_usage(ch: str) -> tuple[int, bool] | None:
     if ch in _SHIFTED:
         return _PLAIN_CODES[_SHIFTED.index(ch)], True
     return {" ": (0x2C, False), "\n": (0x28, False), "\t": (0x2B, False)}.get(ch)
+
+
+MAX_PASSCODE = 32
+ENTER = 0x28
+
+
+def clean_passcode(raw: str) -> str:
+    """The saved passcode: up to 32 characters ZenLink can type on a US
+    keyboard (iOS numeric codes, or an alphanumeric password)."""
+    return "".join(ch for ch in raw if ch not in "\r\n\t" and char_usage(ch) is not None)[:MAX_PASSCODE]
+
+
+def passcode_keys(code: str) -> list[list[int]]:
+    """HID key reports that type `code` on the lock screen. A 4- or 6-digit
+    code unlocks by itself; any other code needs Return."""
+    reports: list[list[int]] = []
+    for ch in code:
+        mapped = char_usage(ch)
+        if mapped is None:
+            continue
+        usage, shift = mapped
+        reports.append([SHIFT, usage] if shift else [usage])
+    if code and not (code.isdigit() and len(code) in (4, 6)):
+        reports.append([ENTER])
+    return reports
 
 
 def install_buttons() -> None:
@@ -97,15 +124,15 @@ async def run(client: aiohttp.ClientSession, base: str, action: str, text: str =
             await asyncio.sleep(0.025)
             await touch("contact", 32768, int(58000 - 46000 * i / 8))
         await touch("release", 32768, 12000)
-        pin = "".join(ch for ch in passcode if ch.isdigit())
-        if pin:
+        code = clean_passcode(passcode)
+        if code:
             await asyncio.sleep(0.5)
-            for digit in pin:
-                await key([_DIGITS[digit]])
+            for report in passcode_keys(code):
+                await key(report)
                 await asyncio.sleep(0.04)
                 await key([])
                 await asyncio.sleep(0.06)
-        return True, "unlocked" if pin else "woken"
+        return True, "unlocked" if code else "woken"
 
     if action in _CMD_KEYS:
         await key([])

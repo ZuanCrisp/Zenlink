@@ -120,6 +120,11 @@ def build_app(manager: CastManager) -> web.Application:
         await asyncio.to_thread(manager.refresh_drivers, True)
         return web.json_response(result)
 
+    def keyboard_passcode(raw: str) -> str:
+        from zenlink.apple import keyboard
+
+        return keyboard.clean_passcode(raw)
+
     @routes.get("/api/passcode")
     async def passcode_get(_request: web.Request) -> web.Response:
         from zenlink import secret
@@ -131,9 +136,9 @@ def build_app(manager: CastManager) -> web.Application:
         from zenlink import secret
 
         body = await request.json()
-        pin = "".join(ch for ch in str(body.get("passcode") or "") if ch.isdigit())[:16]
-        secret.set_secret("passcode", pin)
-        return web.json_response({"set": bool(pin)})
+        code = keyboard_passcode(str(body.get("passcode") or ""))
+        secret.set_secret("passcode", code)
+        return web.json_response({"set": bool(code)})
 
     @routes.post("/api/ocr")
     async def ocr_capture(request: web.Request) -> web.Response:

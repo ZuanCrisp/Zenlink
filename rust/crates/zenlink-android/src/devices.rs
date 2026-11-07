@@ -89,7 +89,7 @@ pub struct AdbDevice {
     pub usb_port: Option<String>,
 }
 
-fn connection_for(serial: &str) -> Connection {
+pub fn connection_for(serial: &str) -> Connection {
     if let Some(service) = serial.strip_suffix("._adb-tls-connect._tcp") {
         let serialno = service
             .strip_prefix("adb-")

@@ -588,7 +588,10 @@ impl VideoSource for DeviceSource {
         let name = m.device_name.clone();
         self.shared.set(|s| {
             s.phase = Phase::Streaming;
-            if !name.is_empty() {
+            // The list's name (marketing name from ro.product.*) wins; the
+            // scrcpy header only carries ro.product.model ("TECNO LI7" for a
+            // TECNO POVA 6), so it is a fallback.
+            if s.device.is_empty() && !name.is_empty() {
                 s.device = name;
             }
             s.error.clear();
@@ -602,7 +605,8 @@ impl VideoSource for DeviceSource {
         } = m;
         *self.shared.control.lock().unwrap() = control;
         if let Some(a) = audio {
-            play_audio(a, self.shared.clone());
+            let wifi = zenlink_android::devices::connection_for(&self.serial).is_wireless();
+            play_audio(a, self.shared.clone(), wifi);
         }
         Some((
             info,
@@ -691,7 +695,14 @@ pub fn key_input(text: &str, ctrl: bool, shift: bool, alt: bool) -> KeyInput {
 
 /// Plays the audio socket until it closes (stop, unplug). Without a working
 /// output the video goes on alone.
-fn play_audio(mut r: VideoReader<std::net::TcpStream>, shared: Arc<Shared>) {
+///
+/// The sound shares the ADB link with the video and arrives in bursts; the
+/// phone's clock also drifts from the PC's. Measured on a TECNO (USB, raw
+/// PCM): with the Apple cable settings (10 ms margin, chunk drops) there
+/// were 1-3 gaps and up to 267 ms dropped every 5 s, heard as crackling. So
+/// Android keeps 40 ms queued (60 ms over Wi-Fi; scrcpy's own default is 50
+/// ms) and corrects drift by playing up to 0.5% faster or slower.
+fn play_audio(mut r: VideoReader<std::net::TcpStream>, shared: Arc<Shared>, wifi: bool) {
     let _ = std::thread::Builder::new()
         .name("android-audio".into())
         .spawn(move || {
@@ -702,6 +713,8 @@ fn play_audio(mut r: VideoReader<std::net::TcpStream>, shared: Arc<Shared>) {
                     return;
                 }
             };
+            player.set_smooth(true);
+            player.set_jitter_ms(if wifi { 60.0 } else { 40.0 });
             let mut stats_at = Instant::now();
             while !shared.stop.load(Relaxed) {
                 match r.next_packet() {
@@ -1099,7 +1112,7 @@ mod tests {
         let r =
             VideoReader::new(std::net::TcpStream::connect(("127.0.0.1", port)).unwrap()).unwrap();
         let shared = Arc::new(Shared::default());
-        play_audio(r, shared.clone());
+        play_audio(r, shared.clone(), false);
         std::thread::sleep(Duration::from_millis(1300));
         let ms = shared.audio_ms().expect("sound latency reported");
         println!("sound latency {ms} ms");

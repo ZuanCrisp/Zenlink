@@ -755,3 +755,27 @@ class DriverSwitchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PasscodeTests(unittest.TestCase):
+    """Auto unlock (Apple Driver mode): numeric codes and passwords."""
+
+    def test_numeric_codes_unlock_by_themselves(self):
+        from zenlink.apple import keyboard as k
+
+        self.assertEqual(k.passcode_keys("123456"), [[0x1E], [0x1F], [0x20], [0x21], [0x22], [0x23]])
+        self.assertEqual(len(k.passcode_keys("1234")), 4)
+        # Custom numeric length: Return confirms it.
+        self.assertEqual(k.passcode_keys("12345")[-1], [k.ENTER])
+
+    def test_passwords_type_with_shift_and_return(self):
+        from zenlink.apple import keyboard as k
+
+        keys = k.passcode_keys("aB1!")
+        self.assertEqual(keys, [[0x04], [k.SHIFT, 0x05], [0x1E], [k.SHIFT, 0x1E], [k.ENTER]])
+
+    def test_clean_passcode_drops_untypable_characters(self):
+        from zenlink.apple import keyboard as k
+
+        self.assertEqual(k.clean_passcode("12\n34\u00e9"), "1234")
+        self.assertEqual(len(k.clean_passcode("x" * 50)), k.MAX_PASSCODE)
