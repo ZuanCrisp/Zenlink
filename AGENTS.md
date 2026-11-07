@@ -90,7 +90,7 @@ These are shared between builds unless you change them. Fix every one of them in
 | Backend HTTP port | `127.0.0.1:47321` (`zenlink/server.py`, `zenlink-core` `PORT`) | Different default, e.g. **47421**, in both Python and Rust. `ZENLINK_PORT` still overrides. |
 | Rust UI prefs | `%APPDATA%\ZenLink\next-prefs.json` (`prefs.rs`) | `%APPDATA%\ZenLink-Beta\...` (`ZL_PREFS` still overrides) |
 | Installed/portable data | `%LOCALAPPDATA%\ZenLink` (`paths.py`, `main.rs`, `sidecar.rs` unpacks the service to `...\ZenLink\service`) | `%LOCALAPPDATA%\ZenLink-Beta` |
-| Installer identity | `ZenLink.iss` `AppId {6B0E8C1A-5D3F-4E0A-9C2B-2E7A1F5D9A10}`, `AppName=ZenLink`, `{autopf}\ZenLink` | **New AppId GUID**, `AppName=ZenLink Beta`, `{autopf}\ZenLink Beta`, separate shortcuts and uninstall entry |
+| Installer identity | `ZenLink.iss` `AppId {6B0E8C1A-5D3F-4E0A-9C2B-2E7A1F5D9A10}`, `AppName=ZenLink`, `{autopf}\ZenLink` | Beta builds: a new AppId. **v2.5.0 release (owner, 2026-11-07): same AppId, `AppName=ZenLink`, `{autopf}\ZenLink`**, so Setup upgrades v2.2.x in place (`packaging/ZenLink.iss`). Data folder and ports stay separate. |
 | Window / tray names, single-instance mutex, firewall rule name | "ZenLink" | Add a "Beta" suffix so the two do not fight or replace each other |
 | Cargo build dir | `rust\target` | `rust\target` **inside the beta folder** (never point `CARGO_TARGET_DIR` at the stable folder) |
 | ADB server | port 5037 is shared by all adb clients on the PC | Do not kill a foreign adb server blindly. Detect version conflicts and tell the user (see master prompt §16). |
