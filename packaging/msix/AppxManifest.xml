@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Microsoft Store (MSIX) manifest. packaging/build_msix.py fills in
+     {VERSION}. Identity values come from Partner Center > ZenLink >
+     Product identity (Store ID 9N67KCFZSB1T). -->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  xmlns:desktop2="http://schemas.microsoft.com/appx/manifest/desktop/windows10/2"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 desktop desktop2 rescap">
+
+  <Identity
+    Name="ZenvyZenshiro.ZenLink"
+    Publisher="CN=365E20F4-6CFF-40DE-97C2-5F5184E44AA8"
+    Version="{VERSION}"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>ZenLink</DisplayName>
+    <PublisherDisplayName>Zenvy Zenshiro</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+    <Resource Language="id-id" />
+  </Resources>
+
+  <Applications>
+    <Application Id="ZenLink" Executable="ZenLink.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="ZenLink"
+        Description="iPhone, iPad and Android screen mirroring for Windows"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+      </uap:VisualElements>
+      <Extensions>
+        <!-- Off until the user turns it on in Windows Settings > Apps > Startup. -->
+        <uap5:Extension Category="windows.startupTask">
+          <uap5:StartupTask TaskId="ZenLinkStartup" Enabled="false" DisplayName="ZenLink" />
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Extensions>
+    <!-- Inbound rules, added by Windows when the package is installed (no
+         administrator prompt): AirPlay / ZenLink Studio over Wi-Fi (the
+         backend) and Android over Wi-Fi (the bundled adb). -->
+    <desktop2:Extension Category="windows.firewallRules">
+      <desktop2:FirewallRules Executable="ZenLinkService.exe">
+        <desktop2:Rule Direction="in" IPProtocol="TCP" Profile="all" />
+        <desktop2:Rule Direction="in" IPProtocol="UDP" Profile="all" />
+      </desktop2:FirewallRules>
+    </desktop2:Extension>
+    <desktop2:Extension Category="windows.firewallRules">
+      <desktop2:FirewallRules Executable="third_party\platform-tools\adb.exe">
+        <desktop2:Rule Direction="in" IPProtocol="TCP" Profile="all" />
+        <desktop2:Rule Direction="in" IPProtocol="UDP" Profile="all" />
+      </desktop2:FirewallRules>
+    </desktop2:Extension>
+  </Extensions>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

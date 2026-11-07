@@ -1997,11 +1997,17 @@ component SettingsPanel inherits Glass {
                     icon: "\u{E895}";
                     tint-a: #34d399;
                     tint-b: #059669;
-                    info: I18n.t("ZenLink hanya mengunduh setelah Anda menekan Perbarui, langsung dari rilis GitHub resmi, dan memeriksa SHA-256 file sebelum menjalankannya. Pengaturan Anda tetap. Beta dan Stabil adalah dua aplikasi terpisah: pindah kanal memasang edisi lain di sebelahnya.",
+                    info: AppInfo.store ? I18n.t("Versi ini dipasang dari Microsoft Store, jadi Microsoft Store yang mengunduh dan memasang pembaruan. Pengaturan Anda tetap.",
+                        "This copy was installed from the Microsoft Store, so the Microsoft Store downloads and installs updates. Your settings stay.") : I18n.t("ZenLink hanya mengunduh setelah Anda menekan Perbarui, langsung dari rilis GitHub resmi, dan memeriksa SHA-256 file sebelum menjalankannya. Pengaturan Anda tetap. Beta dan Stabil adalah dua aplikasi terpisah: pindah kanal memasang edisi lain di sebelahnya.",
                         "ZenLink downloads only after you press Update, straight from the official GitHub release, and checks the file's SHA-256 before running it. Your settings stay. Beta and Stable are separate apps: switching channel installs the other edition next to this one.");
                     Text { text: "ZenLink v" + AppInfo.version; font-size: 12.5px; font-weight: 700; color: Theme.text; }
-                    Row { label: I18n.t("Cek otomatis saat mulai", "Check at start"); Toggle { checked: prefs.update-check; toggled(v) => { root.prefs.update-check = v; root.changed(root.prefs); } } }
-                    Row {
+                    if AppInfo.store: Text {
+                        text: I18n.t("Versi Microsoft Store: pembaruan dipasang oleh Microsoft Store.", "Microsoft Store edition: updates are installed by the Microsoft Store.");
+                        font-size: 11.5px; color: Theme.text-2; wrap: word-wrap;
+                    }
+                    if AppInfo.store: GlassButton { label: I18n.t("Buka di Microsoft Store", "Open in the Microsoft Store"); clicked => { root.update-action("store"); } }
+                    if !AppInfo.store: Row { label: I18n.t("Cek otomatis saat mulai", "Check at start"); Toggle { checked: prefs.update-check; toggled(v) => { root.prefs.update-check = v; root.changed(root.prefs); } } }
+                    if !AppInfo.store: Row {
                         label: I18n.t("Kanal", "Channel");
                         Seg {
                             width: 150px;
@@ -2034,7 +2040,7 @@ component SettingsPanel inherits Glass {
                         label: (root.upd-switch ? I18n.t("Pasang v", "Install v") : I18n.t("Perbarui ke v", "Update to v")) + root.upd-version;
                         clicked => { root.update-action("install"); }
                     }
-                    HorizontalLayout {
+                    if !AppInfo.store: HorizontalLayout {
                         spacing: 6px;
                         GlassButton { enabled: !root.upd-busy; label: I18n.t("Cek update", "Check for updates"); clicked => { root.update-action("check"); } }
                         if root.upd-version != "": GlassButton { label: I18n.t("Catatan rilis", "Release notes"); clicked => { root.update-action("notes"); } }
@@ -2046,7 +2052,7 @@ component SettingsPanel inherits Glass {
                     icon: "\u{E713}";
                     tint-a: #a1a1aa;
                     tint-b: #52525b;
-                    Row { label: I18n.t("Mulai bersama Windows", "Start with Windows"); Toggle { checked: prefs.start-with-windows; toggled(v) => { root.prefs.start-with-windows = v; root.changed(root.prefs); } } }
+                    if !AppInfo.store: Row { label: I18n.t("Mulai bersama Windows", "Start with Windows"); Toggle { checked: prefs.start-with-windows; toggled(v) => { root.prefs.start-with-windows = v; root.changed(root.prefs); } } }
                     Row { label: I18n.t("Tutup ke tray", "Close to the tray"); Toggle { checked: prefs.close-to-tray; toggled(v) => { root.prefs.close-to-tray = v; root.changed(root.prefs); } } }
                     Row { label: I18n.t("Selalu di atas", "Always on top"); Toggle { checked: prefs.on-top; toggled(v) => { root.prefs.on-top = v; root.changed(root.prefs); } } }
                     Row { label: I18n.t("Statistik di header", "Stats in the header"); Toggle { checked: prefs.stats; toggled(v) => { root.prefs.stats = v; root.changed(root.prefs); } } }
@@ -2255,6 +2261,9 @@ component AppLauncher inherits Rectangle {
 // Shown in Settings › About (set from Cargo's version at start).
 export global AppInfo {
     in property <string> version;
+    // Installed from the Microsoft Store (MSIX): the Store updates ZenLink
+    // and Windows Settings > Apps > Startup controls "start with Windows".
+    in property <bool> store;
 }
 
 export component AppWindow inherits Window {

@@ -29,9 +29,84 @@ pub enum Kind {
     Portable,
     /// A source checkout or portable folder: only point to the release page.
     Source,
+    /// The Microsoft Store package (MSIX): the Store installs updates.
+    Store,
+}
+
+/// The Microsoft Store product (Partner Center Store ID).
+pub const STORE_PRODUCT_ID: &str = "9N67KCFZSB1T";
+
+/// True when this process runs from an MSIX package (the Microsoft Store
+/// edition). An unpackaged exe gets APPMODEL_ERROR_NO_PACKAGE.
+pub fn is_store() -> bool {
+    use std::sync::OnceLock;
+    static STORE: OnceLock<bool> = OnceLock::new();
+    *STORE.get_or_init(|| {
+        let mut len = 0u32;
+        let r = unsafe {
+            windows::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName(&mut len, None)
+        };
+        // ERROR_INSUFFICIENT_BUFFER (122): there is a package name to read.
+        r.0 == 122
+    })
+}
+
+/// Opens ZenLink's page in the Microsoft Store app.
+pub fn open_store_page() {
+    let _ = std::process::Command::new("explorer.exe")
+        .arg(format!(
+            "ms-windows-store://pdp/?productid={STORE_PRODUCT_ID}"
+        ))
+        .spawn();
+}
+
+/// Where the logs really are. A packaged app's new files under
+/// %LOCALAPPDATA% go to the package's private LocalCache, which Explorer
+/// (outside the package) does not see at the usual path.
+pub fn visible_log_dir() -> PathBuf {
+    let dir = zenlink_core::log_dir();
+    if !is_store() || dir.exists() {
+        return dir;
+    }
+    let (Some(local), Some(pfn)) = (std::env::var_os("LOCALAPPDATA"), package_family_name()) else {
+        return dir;
+    };
+    let local = PathBuf::from(local);
+    match dir.strip_prefix(&local) {
+        Ok(rest) => local
+            .join("Packages")
+            .join(pfn)
+            .join("LocalCache")
+            .join("Local")
+            .join(rest),
+        Err(_) => dir,
+    }
+}
+
+fn package_family_name() -> Option<String> {
+    use windows::Win32::Storage::Packaging::Appx::GetCurrentPackageFamilyName;
+    let mut len = 0u32;
+    unsafe {
+        let _ = GetCurrentPackageFamilyName(&mut len, None);
+        if len == 0 {
+            return None;
+        }
+        let mut buf = vec![0u16; len as usize];
+        if GetCurrentPackageFamilyName(&mut len, Some(windows::core::PWSTR(buf.as_mut_ptr()))).0
+            != 0
+        {
+            return None;
+        }
+        Some(String::from_utf16_lossy(
+            &buf[..len.saturating_sub(1) as usize],
+        ))
+    }
 }
 
 pub fn kind() -> Kind {
+    if is_store() {
+        return Kind::Store;
+    }
     let Ok(exe) = std::env::current_exe() else {
         return Kind::Source;
     };
@@ -212,7 +287,7 @@ pub fn asset_for(kind: Kind, r: &Release) -> Option<&Asset> {
     match kind {
         Kind::Installed => r.setup.as_ref(),
         Kind::Portable => r.portable.as_ref(),
-        Kind::Source => None,
+        Kind::Source | Kind::Store => None,
     }
 }
 
@@ -353,6 +428,7 @@ pub fn launch(kind: Kind, file: &Path, replace: bool) -> Result<(), String> {
             c.arg(format!("{REPLACE_ARG}{}", exe.display()));
         }
         Kind::Source => return Err("source checkout".into()),
+        Kind::Store => return Err("the Microsoft Store installs updates".into()),
     }
     c.spawn()
         .map(|_| ())
