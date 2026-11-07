@@ -25,8 +25,17 @@ pub const APP_NAME: &str = "ZenLink";
 /// unpacked backend. The stable build uses "ZenLink"; the beta never touches it.
 pub const DATA_DIR_NAME: &str = "ZenLink-Beta";
 
-/// Log file in %TEMP%. The stable build writes zenlink-next.log.
+/// Window log file, in `log_dir()`. The stable build writes zenlink-next.log.
 pub const LOG_FILE_NAME: &str = "zenlink-v251-beta.log";
+
+/// All logs (window, app windows, backend, crashes):
+/// `%LOCALAPPDATA%\ZenLink-Beta\logs`, %TEMP% when that is unavailable.
+/// The backend (zenlink/paths.py LOG_DIR) uses the same folder.
+pub fn log_dir() -> PathBuf {
+    local_data_dir()
+        .map(|d| d.join("logs"))
+        .unwrap_or_else(std::env::temp_dir)
+}
 
 /// Backend URL. `ZENLINK_PORT` overrides the port (tests, a second instance).
 pub fn base_url() -> String {

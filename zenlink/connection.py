@@ -66,6 +66,60 @@ class ConnectionModeManager:
             json.dump(data, fh, indent=2)
         tmp.replace(self._path)
 
+    def _write(self, data: dict) -> None:
+        tmp = self._path.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+        tmp.replace(self._path)
+
+    # ---- devices seen before (listed even when not connected) and the pick
+
+    def known_devices(self) -> dict:
+        known = self._load().get("appleDevices")
+        return known if isinstance(known, dict) else {}
+
+    def selected_device(self) -> str | None:
+        sel = self._load().get("appleDevice")
+        return sel if isinstance(sel, str) and sel else None
+
+    def remember_device(self, device: dict) -> None:
+        """Keeps id, model and the user's device name of a trusted device."""
+        udid = str(device.get("id") or "")
+        if not udid or udid == "airplay" or not device.get("ready"):
+            return
+        entry = {"name": device.get("name"), "deviceName": device.get("deviceName"),
+                 "family": device.get("family")}
+        with self._lock:
+            data = self._load()
+            known = data.get("appleDevices") if isinstance(data.get("appleDevices"), dict) else {}
+            old = known.get(udid) or {}
+            # Keep a name read earlier when this read had none.
+            merged = {k: entry.get(k) or old.get(k) for k in entry}
+            if old == merged:
+                return
+            known[udid] = merged
+            data["appleDevices"] = known
+            self._write(data)
+
+    def select_device(self, udid: str | None) -> None:
+        with self._lock:
+            data = self._load()
+            if udid:
+                data["appleDevice"] = udid
+            else:
+                data.pop("appleDevice", None)
+            self._write(data)
+
+    def forget_device(self, udid: str) -> None:
+        with self._lock:
+            data = self._load()
+            known = data.get("appleDevices") if isinstance(data.get("appleDevices"), dict) else {}
+            known.pop(udid, None)
+            data["appleDevices"] = known
+            if data.get("appleDevice") == udid:
+                data.pop("appleDevice", None)
+            self._write(data)
+
     def set_link(self, link: str) -> dict:
         """Wired or wireless (Apple Driver mode). Applies to the next cast."""
         if link not in LINKS:

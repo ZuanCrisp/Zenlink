@@ -111,6 +111,10 @@ class CastManager:
         self._pump = None
         self.state = {"phase": "idle", "detail": "", "device": None, "error": None, "rotation": None, "backend": None,
                       "control": None}
+        # iPhones/iPads trusted before (listed even when not connected) and
+        # the one the user picked; Start uses the pick when it is connected.
+        self._known: dict = self.connection.known_devices()
+        self._selected: str | None = self.connection.selected_device()
         threading.Thread(target=self._watch, name="device-watch", daemon=True).start()
 
     # ------------------------------------------------------------ viewers
@@ -138,6 +142,8 @@ class CastManager:
         return {
             **self.state,
             "devices": self._presence.get("devices", []),
+            "known": self._known_list(),
+            "selected": self._selected,
             "service": self._presence.get("service", True),
             "takenOver": self._presence.get("takenOver", False),
             "connection": self.connection.snapshot(),
@@ -145,6 +151,47 @@ class CastManager:
             "capture": self.capture_info(),
             "nativeAudio": self.audio.available,
         }
+
+    def _known_list(self) -> list[dict]:
+        present = {d.get("id") for d in self._presence.get("devices", [])}
+        return [{"id": udid, **info, "present": udid in present} for udid, info in self._known.items()]
+
+    def _remember(self, devices: list[dict]) -> None:
+        for d in devices:
+            udid = d.get("id")
+            if not d.get("ready") or not udid or udid == "airplay":
+                continue
+            old = self._known.get(udid) or {}
+            if old.get("deviceName") == d.get("deviceName") and old.get("name") == d.get("name"):
+                continue
+            try:
+                self.connection.remember_device(d)
+            except OSError:
+                log.debug("could not save the device list", exc_info=True)
+            self._known = self.connection.known_devices()
+
+    def select_device(self, udid: str | None) -> dict:
+        self._selected = udid or None
+        self.connection.select_device(self._selected)
+        self._publish()
+        return self.snapshot()
+
+    def forget_device(self, udid: str) -> dict:
+        self.connection.forget_device(udid)
+        self._known = self.connection.known_devices()
+        if self._selected == udid:
+            self._selected = None
+        self._publish()
+        return self.snapshot()
+
+    def _pick(self, found: list[dict], wanted: str | None) -> dict:
+        """The device to start: the picked one when it is listed, otherwise
+        one that can start now (another may wait for Trust or a driver)."""
+        if wanted:
+            hit = next((d for d in found if d.get("id") == wanted), None)
+            if hit is not None:
+                return hit
+        return next((d for d in found if d.get("ready")), found[0])
 
     def capture_info(self) -> dict | None:
         session = self._session
@@ -256,6 +303,7 @@ class CastManager:
             return
         presence = apple_devices.connected_devices(self.connection.link)
         presence = {**presence, "devices": [self._with_level(d) for d in presence.get("devices", [])]}
+        self._remember(presence.get("devices", []))
         self._auto_wifi(presence.get("devices", []))
         if not presence.get("devices"):
             # Apple's service can't see a device whose driver is wrong for this
@@ -294,15 +342,25 @@ class CastManager:
             return self.snapshot()
         self.refresh_devices()
         found = self._presence.get("devices", [])
+        wanted = str((options or {}).get("device") or "") or None
+        if wanted and wanted != self._selected:
+            self.select_device(wanted)
+        if wanted and not any(d.get("id") == wanted for d in found) and not (
+                mode == "usbdirect" and self.connection.link == "wireless"):
+            info = self._known.get(wanted) or {}
+            name = info.get("deviceName") or info.get("name") or "That device"
+            how = ("Keep it unlocked and on the same Wi-Fi as this PC, or plug in the cable."
+                   if self.connection.link == "wireless" else "Plug it in with the cable, unlock it and tap Trust.")
+            self._set_state("error", error=f"{name} isn't connected. {how}")
+            return self.snapshot()
         if not found:
             msg = ("Your iPhone/iPad is using another app's USB driver (TikTok LIVE Studio). Switch to USB Direct "
                    "or repair the driver in Settings > Connection & Drivers." if self._presence.get("takenOver")
                    else "Connect an iPhone or iPad with a USB cable.")
             self._set_state("error", error=msg)
             return self.snapshot()
-        # A device that can start now goes first (another one may be listed
-        # first while it waits for Trust or for its driver).
-        target = next((d for d in found if d.get("ready")), found[0])
+        # The picked device, else one that can start now.
+        target = self._pick(found, wanted or self._selected)
         need = target.get("need")
         if need in _NEED_MESSAGES:
             self._set_state("error", error=_NEED_MESSAGES[need])

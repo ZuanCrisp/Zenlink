@@ -73,6 +73,16 @@ def build_app(manager: CastManager) -> web.Application:
         await asyncio.to_thread(manager.refresh_devices)
         return web.json_response(manager.snapshot())
 
+    @routes.post("/api/device/select")
+    async def device_select(request: web.Request) -> web.Response:
+        body = await request.json()
+        udid = str(body.get("id") or "")
+        if udid and not re.fullmatch(r"[0-9A-Fa-f-]{8,64}", udid):
+            return web.json_response({"error": "bad id"}, status=400)
+        if body.get("forget"):
+            return web.json_response(await asyncio.to_thread(manager.forget_device, udid))
+        return web.json_response(await asyncio.to_thread(manager.select_device, udid or None))
+
     @routes.post("/api/cast/start")
     async def cast_start(request: web.Request) -> web.Response:
         body = await request.json() if request.can_read_body else {}

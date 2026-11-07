@@ -9,7 +9,7 @@ import sys
 import threading
 
 from zenlink.castmanager import CastManager
-from zenlink.paths import APP_ROOT, DATA_DIR
+from zenlink.paths import APP_ROOT, DATA_DIR, LOG_DIR
 from zenlink.server import HOST, PORT, serve_forever
 from zenlink.window import WindowApi
 
@@ -115,17 +115,38 @@ def _open_rust_window() -> None:
         pass
 
 
+def _version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("zenlink")
+    except Exception:  # noqa: BLE001 - not installed as a package (source checkout, frozen build)
+        try:
+            import tomllib
+
+            with open(APP_ROOT / "pyproject.toml", "rb") as fh:
+                return tomllib.load(fh)["project"]["version"]
+        except Exception:  # noqa: BLE001
+            return "?"
+
+
 def main() -> None:
+    from logging.handlers import RotatingFileHandler
+
+    # logs/zenlink-service.log, 2 MB per file, the last two kept (.1, .2).
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.FileHandler(DATA_DIR / "zenlink.log", encoding="utf-8")],
+        handlers=[RotatingFileHandler(LOG_DIR / "zenlink-service.log", maxBytes=2 << 20, backupCount=2,
+                                      encoding="utf-8")],
         force=True,  # a library import may have configured logging already (empty log otherwise)
     )
+    logging.getLogger("zenlink").info("ZenLink backend %s started (pid %d, Python %s, %s)", _version(), os.getpid(),
+                                      sys.version.split()[0], sys.platform)
     import faulthandler
 
     try:  # a native crash (WebView2, audio driver, decoder) leaves a trace instead of nothing
-        faulthandler.enable(open(DATA_DIR / "crash.log", "a", encoding="utf-8"))  # noqa: SIM115
+        faulthandler.enable(open(LOG_DIR / "crash.log", "a", encoding="utf-8"))  # noqa: SIM115
     except OSError:
         pass
     from zenlink import restart

@@ -24,7 +24,7 @@ use serde_json::{json, Value};
 use slint::winit_030::winit::platform::windows::{BackdropType, WindowAttributesExtWindows};
 use slint::winit_030::winit::window::WindowLevel;
 use slint::winit_030::WinitWindowAccessor;
-use slint::{ComponentHandle, LogicalSize};
+use slint::{ComponentHandle, LogicalSize, Model};
 use windows::Win32::Foundation::HWND;
 
 use zenlink_core::api::Api;
@@ -38,8 +38,9 @@ slint::include_modules!();
 static SIDECAR: OnceLock<Mutex<Option<Sidecar>>> = OnceLock::new();
 static DEMO_T0: OnceLock<Instant> = OnceLock::new();
 
-/// Minimal file logger: %TEMP%\zenlink-v251-beta.log (truncated on start).
-struct FileLog(Mutex<std::fs::File>);
+/// Minimal file logger in `zenlink_core::log_dir()`. Each start begins a new
+/// file; the previous run is kept as `<name>.prev.log` for bug reports.
+struct FileLog(Mutex<std::fs::File>, Instant);
 
 impl log::Log for FileLog {
     fn enabled(&self, m: &log::Metadata) -> bool {
@@ -48,9 +49,10 @@ impl log::Log for FileLog {
     fn log(&self, r: &log::Record) {
         use std::io::Write;
         if self.enabled(r.metadata()) {
+            let t = self.1.elapsed().as_secs_f64();
             let _ = writeln!(
                 self.0.lock().unwrap(),
-                "[{}] {}: {}",
+                "{t:>9.3}s [{}] {}: {}",
                 r.level(),
                 r.target(),
                 r.args()
@@ -60,17 +62,88 @@ impl log::Log for FileLog {
     fn flush(&self) {}
 }
 
+/// Local wall-clock time "YYYY-MM-DD HH:MM:SS" (no date crate needed).
+fn local_time() -> String {
+    use windows::Win32::System::SystemInformation::GetLocalTime;
+    let t = unsafe { GetLocalTime() };
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond
+    )
+}
+
 fn init_log() {
     init_log_named(zenlink_core::LOG_FILE_NAME);
 }
 
 /// App windows log to their own file, so they never truncate the main log.
 fn init_log_named(name: &str) {
-    let path = std::env::temp_dir().join(name);
-    if let Ok(f) = std::fs::File::create(path) {
-        let l: &'static FileLog = Box::leak(Box::new(FileLog(Mutex::new(f))));
+    use std::io::Write;
+    let dir = zenlink_core::log_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join(name);
+    let _ = std::fs::rename(&path, path.with_extension("prev.log"));
+    if let Ok(mut f) = std::fs::File::create(path) {
+        let _ = writeln!(
+            f,
+            "ZenLink {} | started {} | {} | pid {}",
+            env!("CARGO_PKG_VERSION"),
+            local_time(),
+            windows_version(),
+            std::process::id()
+        );
+        let l: &'static FileLog = Box::leak(Box::new(FileLog(Mutex::new(f), Instant::now())));
         let _ = log::set_logger(l).map(|()| log::set_max_level(log::LevelFilter::Info));
     }
+}
+
+/// "Windows build 26200.1234 (25H2)" from the registry, for bug reports.
+fn windows_version() -> String {
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RRF_RT_REG_SZ,
+    };
+    let key = w!("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
+    let text = |name: PCWSTR| -> String {
+        let mut buf = [0u16; 64];
+        let mut len = (buf.len() * 2) as u32;
+        let ok = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                key,
+                name,
+                RRF_RT_REG_SZ,
+                None,
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut len),
+            )
+        }
+        .is_ok();
+        if !ok {
+            return String::new();
+        }
+        let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        String::from_utf16_lossy(&buf[..n])
+    };
+    let mut ubr = 0u32;
+    let mut len = 4u32;
+    let _ = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key,
+            w!("UBR"),
+            RRF_RT_REG_DWORD,
+            None,
+            Some((&mut ubr as *mut u32).cast()),
+            Some(&mut len),
+        )
+    };
+    format!(
+        "Windows build {}.{} ({})",
+        text(w!("CurrentBuild")),
+        ubr,
+        text(w!("DisplayVersion"))
+    )
 }
 
 #[derive(Default)]
@@ -447,6 +520,102 @@ fn tr_backend(ui: &AppWindow, en: &str) -> String {
     en.into()
 }
 
+/// The Apple device list: connected devices first, then devices trusted
+/// before that are not connected now. `current` is the one Start uses.
+fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
+    let tr = |id: &str, en: &str| tr_ui(ui, id, en);
+    let mut rows = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for d in st
+        .get("devices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(id) = str_of(d, &["id"]) else {
+            continue;
+        };
+        if id == "airplay" || !seen.insert(id.to_string()) {
+            continue;
+        }
+        let model = str_of(d, &["name"]).unwrap_or("iPhone/iPad");
+        let title = str_of(d, &["deviceName"]).unwrap_or(model);
+        let wifi = d.get("wifi").and_then(Value::as_bool).unwrap_or(false);
+        let ready = d.get("ready").and_then(Value::as_bool).unwrap_or(false);
+        let need = str_of(d, &["need"]).unwrap_or("");
+        let how = if wifi { "Wi-Fi" } else { "USB" };
+        let status = match need {
+            "" if ready => tr("siap", "ready"),
+            "" | "trust" => tr("buka kunci + Percayai", "unlock + Trust"),
+            "wifi" => tr("Wi-Fi belum diatur", "Wi-Fi not set up"),
+            "mode" => tr("pilih mode", "choose a mode"),
+            "restore" => tr("driver ZenLink Studio", "ZenLink Studio driver"),
+            _ => tr("perlu driver", "needs a driver"),
+        };
+        let os = str_of(d, &["os"])
+            .map(|v| format!(" · iOS {v}"))
+            .unwrap_or_default();
+        let sub = if title == model {
+            format!("{how}{os} · {status}")
+        } else {
+            format!("{model} · {how}{os} · {status}")
+        };
+        rows.push(AppleDev {
+            id: id.into(),
+            title: title.into(),
+            sub: sub.into(),
+            state: if ready && need.is_empty() {
+                "ready"
+            } else {
+                "need"
+            }
+            .into(),
+            wifi,
+            selected: id == current,
+        });
+    }
+    for d in st
+        .get("known")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(id) = str_of(d, &["id"]) else {
+            continue;
+        };
+        if !seen.insert(id.to_string()) {
+            continue;
+        }
+        let model = str_of(d, &["name"]).unwrap_or("iPhone/iPad");
+        let title = str_of(d, &["deviceName"]).unwrap_or(model);
+        let where_ = if ui.get_mode_link().as_str() == "wireless" {
+            tr("tidak terlihat di Wi-Fi", "not seen on Wi-Fi")
+        } else {
+            tr("tidak tersambung", "not connected")
+        };
+        let sub = if title == model {
+            tr(
+                &format!("Tersimpan · {where_}"),
+                &format!("Saved · {where_}"),
+            )
+        } else {
+            tr(
+                &format!("{model} · tersimpan · {where_}"),
+                &format!("{model} · saved · {where_}"),
+            )
+        };
+        rows.push(AppleDev {
+            id: id.into(),
+            title: title.into(),
+            sub: sub.into(),
+            state: "offline".into(),
+            wifi: false,
+            selected: id == str_of(st, &["selected"]).unwrap_or("") && current.is_empty(),
+        });
+    }
+    rows
+}
+
 /// Backend state -> UI. Runs on the UI thread.
 fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     let tr = |id: &str, en: &str| -> String {
@@ -457,14 +626,22 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
         }
     };
     let phase = str_of(st, &["phase"]).unwrap_or("idle").to_string();
-    // The backend starts the first ready device; show that one.
+    // The backend starts the picked device when it is connected, otherwise
+    // the first ready one; show that one.
     let list = st.get("devices").and_then(Value::as_array);
+    let selected = str_of(st, &["selected"]).unwrap_or("");
     let first = list
-        .and_then(|l| {
-            l.iter()
-                .find(|d| d.get("ready").and_then(Value::as_bool).unwrap_or(false))
+        .and_then(|l| l.iter().find(|d| str_of(d, &["id"]) == Some(selected)))
+        .or_else(|| {
+            list.and_then(|l| {
+                l.iter()
+                    .find(|d| d.get("ready").and_then(Value::as_bool).unwrap_or(false))
+            })
         })
         .or_else(|| list.and_then(|l| l.first()));
+    let first_id = first.and_then(|d| str_of(d, &["id"])).unwrap_or("");
+    let rows = apple_rows(ui, st, first_id);
+    ui.set_apple_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
     let device = str_of(st, &["device", "name"])
         .or_else(|| first.and_then(|d| str_of(d, &["name"])))
         .unwrap_or("");
@@ -616,6 +793,12 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
         "apple"
     };
     ui.set_flow_kind(kind.into());
+    // ZenLink Studio over Wi-Fi: the receiver waits for the device to pick it.
+    let receiver = first
+        .and_then(|d| d.get("airplay"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    ui.set_apple_listening(receiver && matches!(phase.as_str(), "connecting" | "activating"));
     ui.set_device_wifi(
         wifi || str_of(st, &["device", "wifi"]).is_some()
             && st["device"]["wifi"].as_bool().unwrap_or(false),
@@ -3152,6 +3335,38 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
     {
+        // Apple device list: pick the device Start uses, or forget a saved one.
+        let weak = ui.as_weak();
+        let api2 = api.clone();
+        ui.on_apple_pick(move |id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let offline = ui
+                .get_apple_devices()
+                .iter()
+                .find(|d| d.id == id)
+                .map(|d| (d.state == "offline", d.title.to_string()));
+            if let Some((true, name)) = offline {
+                let t = tr_ui(
+                    &ui,
+                    &format!("{name} belum tersambung. Colokkan kabel (atau sambungkan ke Wi-Fi yang sama), buka kunci, lalu tekan Mulai."),
+                    &format!("{name} is not connected. Plug in the cable (or join the same Wi-Fi), unlock it, then press Start."),
+                );
+                show_toast(&ui, t);
+            }
+            let a = api2.clone();
+            let id = id.to_string();
+            std::thread::spawn(move || a.post("/api/device/select", &json!({ "id": id })));
+        });
+        let api2 = api.clone();
+        ui.on_apple_forget(move |id| {
+            let a = api2.clone();
+            let id = id.to_string();
+            std::thread::spawn(move || {
+                a.post("/api/device/select", &json!({ "id": id, "forget": true }))
+            });
+        });
+    }
+    {
         // The ready view's button when the device needs something first.
         let weak = ui.as_weak();
         ui.on_need_fix(move || {
@@ -3782,6 +3997,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(ui) = weak.upgrade() {
                     ui.invoke_change_platform();
                 }
+                return;
+            }
+            if a.as_str() == "logs" {
+                // The log folder in Explorer, for bug reports.
+                let dir = zenlink_core::log_dir();
+                let _ = std::fs::create_dir_all(&dir);
+                let _ = std::process::Command::new("explorer.exe").arg(&dir).spawn();
                 return;
             }
             if let Some(ui) = weak.upgrade() {

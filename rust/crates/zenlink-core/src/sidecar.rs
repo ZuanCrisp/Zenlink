@@ -69,6 +69,20 @@ fn command_for(dir: &Path) -> Option<Command> {
     None
 }
 
+/// Why no backend was found, with what to do (shown in the window).
+fn not_found_reason(dir: &Path) -> String {
+    // Source package opened through ZenLink.exe before Start ZenLink.bat
+    // created the Python environment.
+    let source = dir
+        .ancestors()
+        .any(|up| up.join("zenlink").join("__main__.py").is_file());
+    if source {
+        "ZenLink backend not found: the Python environment (.venv) is missing. Open Start ZenLink.bat once; it sets it up.".into()
+    } else {
+        "ZenLink backend not found: ZenLinkService.exe is missing next to ZenLink.exe. Reinstall ZenLink or use Portable.exe.".into()
+    }
+}
+
 impl Sidecar {
     /// Reuse a backend that is already running, otherwise start one and wait
     /// until it answers.
@@ -80,8 +94,8 @@ impl Sidecar {
             Some(p) => Command::new(p),
             None => {
                 let here = std::env::current_exe().map_err(|e| e.to_string())?;
-                command_for(here.parent().unwrap_or(Path::new(".")))
-                    .ok_or("ZenLink backend not found")?
+                let dir = here.parent().unwrap_or(Path::new("."));
+                command_for(dir).ok_or_else(|| not_found_reason(dir))?
             }
         };
         cmd.args([

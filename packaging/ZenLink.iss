@@ -39,6 +39,8 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 MinVersion=10.0.17763
 CloseApplications=yes
+; Setup writes its own log; it is copied to the app's log folder at the end.
+SetupLogging=yes
 VersionInfoCompany=Zenvy Zenshiro
 VersionInfoDescription=ZenLink Setup
 VersionInfoVersion={#AppVersionNum}
@@ -78,9 +80,14 @@ Type: files; Name: "{app}\_sounddevice_data\__init__.py"
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "Start ZenLink.bat,run.bat,Create-Desktop-Shortcut.bat,Uninstall-ZenLink.bat,portable.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Dirs]
+Name: "{localappdata}\ZenLink-Beta\logs"
+
 [Icons]
 Name: "{group}\ZenLink Beta"; Filename: "{app}\ZenLink.exe"
 Name: "{group}\Uninstall ZenLink Beta"; Filename: "{uninstallexe}"
+; The log folder (window, backend, crash and setup logs) for bug reports.
+Name: "{group}\ZenLink Beta logs"; Filename: "{localappdata}\ZenLink-Beta\logs"
 Name: "{autodesktop}\ZenLink Beta"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
 
 [Run]
@@ -168,6 +175,9 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
     RemovePreviousFiles();
+  if CurStep = ssDone then
+    // Keep the setup log next to the app's own logs (best effort).
+    FileCopy(ExpandConstant('{log}'), ExpandConstant('{localappdata}\ZenLink-Beta\logs\setup.log'), False);
 end;
 
 function InitializeSetup(): Boolean;

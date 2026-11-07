@@ -356,5 +356,72 @@ class FrozenBuildTests(unittest.TestCase):
         self.assertTrue(json.loads(out.read_text(encoding="utf-8"))["ok"])
 
 
+class AppleDevicePickTests(unittest.TestCase):
+    """B-53: pick which connected/saved iPhone or iPad Start uses."""
+
+    A = {"id": "00008150-000A", "name": "iPhone 17", "deviceName": "Zenvy", "family": "iPhone",
+         "os": "27.2", "ready": True, "wifi": False}
+    B = {"id": "00008150-000B", "name": "iPad Pro", "deviceName": "Tab", "family": "iPad",
+         "os": "27.2", "ready": True, "wifi": True}
+
+    def make(self):
+        from zenlink.castmanager import CastManager
+        from zenlink.connection import ConnectionModeManager
+
+        with mock.patch("zenlink.castmanager.threading.Thread"):
+            m = CastManager()
+        m.connection = ConnectionModeManager(tmp_settings())
+        m._known, m._selected = {}, None
+        m.connection.choose("apple", False)
+        return m
+
+    def start(self, m, devices, options=None):
+        m._presence = {"devices": [m._with_level(d) for d in devices]}
+        with mock.patch.object(m, "refresh_devices"), mock.patch("zenlink.castmanager.threading.Thread"):
+            m.start(options or {})
+
+    def test_trusted_devices_are_saved_and_listed_when_unplugged(self):
+        m = self.make()
+        m._remember([self.A, {**self.B, "ready": False}])
+        self.assertEqual(list(m._known), [self.A["id"]], "only trusted devices are saved")
+        m._presence = {"devices": []}
+        known = m.snapshot()["known"]
+        self.assertEqual(known[0]["deviceName"], "Zenvy")
+        self.assertFalse(known[0]["present"])
+        # Survives a restart (settings.json).
+        from zenlink.connection import ConnectionModeManager
+        self.assertIn(self.A["id"], ConnectionModeManager(m.connection._path).known_devices())
+
+    def test_start_uses_the_picked_device(self):
+        m = self.make()
+        m.select_device(self.B["id"])
+        self.start(m, [self.A, self.B])
+        self.assertEqual(m.state["device"]["id"], self.B["id"])
+        self.assertTrue(m.state["device"]["wifi"])
+
+    def test_an_explicit_device_that_is_not_connected_says_so(self):
+        m = self.make()
+        m._known = {self.B["id"]: {"name": "iPad Pro", "deviceName": "Tab"}}
+        self.start(m, [self.A], {"device": self.B["id"]})
+        self.assertEqual(m.state["phase"], "error")
+        self.assertIn("Tab isn't connected", m.state["error"])
+        self.assertIsNone(m._session)
+
+    def test_a_saved_pick_that_is_unplugged_falls_back_to_a_ready_device(self):
+        m = self.make()
+        m.select_device(self.B["id"])
+        self.start(m, [self.A])
+        self.assertEqual(m.state["device"]["id"], self.A["id"])
+
+    def test_forget_removes_the_device_and_the_pick(self):
+        m = self.make()
+        m._remember([self.A])
+        m.select_device(self.A["id"])
+        m.forget_device(self.A["id"])
+        self.assertEqual(m._known, {})
+        self.assertIsNone(m._selected)
+        self.assertIsNone(m.connection.selected_device())
+
+
 if __name__ == "__main__":
     unittest.main()

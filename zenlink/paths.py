@@ -32,4 +32,16 @@ else:
     DATA_DIR = APP_ROOT
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# All logs (backend, crashes, and the window's own log from the Rust app):
+# %LOCALAPPDATA%\ZenLink-Beta\logs, also for a source checkout, so a bug
+# report always points at one folder (Settings > About > Open log folder).
+if FROZEN and DATA_DIR == EXE_DIR:
+    LOG_DIR = DATA_DIR / "logs"
+else:
+    LOG_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / DATA_DIR_NAME / "logs"
+try:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    LOG_DIR = DATA_DIR
 UI_DIR = APP_ROOT / "ui"

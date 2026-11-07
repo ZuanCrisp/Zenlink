@@ -130,6 +130,8 @@ component TopBar inherits Rectangle {
     in property <string> need; // the device needs something before Start ("" = ready)
     property <bool> blocked: !live && phase != "connecting" && phase != "activating" && device != "" && need != "";
     property <bool> busy: phase == "connecting" || phase == "activating";
+    // AirPlay receiver on, waiting for the device to pick it.
+    in property <bool> listening;
     height: 46px;
     // Empty header space moves the window; double-click maximises.
     TouchArea {
@@ -184,7 +186,7 @@ component TopBar inherits Rectangle {
             border-width: 1px;
             border-color: Theme.line;
             pillT := Text {
-                text: live ? I18n.t("Mirroring", "Mirroring") : busy ? I18n.t("Menyambung…", "Connecting…") : blocked ? I18n.t("Perlu tindakan", "Action needed") : I18n.t("Siap", "Ready");
+                text: live ? I18n.t("Mirroring", "Mirroring") : listening ? I18n.t("Menunggu perangkat", "Waiting for the device") : busy ? I18n.t("Menyambung…", "Connecting…") : blocked ? I18n.t("Perlu tindakan", "Action needed") : I18n.t("Siap", "Ready");
                 font-size: 11px;
                 font-weight: 600;
                 color: live ? Theme.accent : Theme.text-2;
@@ -315,6 +317,18 @@ component BottomBar inherits Rectangle {
     }
 }
 
+// One iPhone/iPad in the Apple device list: connected now, or trusted
+// before and not connected ("offline").
+export struct AppleDev {
+    id: string,
+    title: string,
+    sub: string,
+    // "ready" | "need" | "offline"
+    state: string,
+    wifi: bool,
+    selected: bool,
+}
+
 // One step of the connect card (like v2: done / active / todo / failed).
 component FlowStep inherits Rectangle {
     in property <string> title;
@@ -380,6 +394,13 @@ component Placeholder inherits Rectangle {
     // switchable right here like in Settings > Connection & driver.
     in property <string> mode;
     in property <string> link: "wired";
+    // Connected and saved devices; a click picks the one Start uses.
+    in property <[AppleDev]> devices;
+    // AirPlay receiver on (ZenLink Studio Wi-Fi): waiting for the device.
+    in property <bool> listening;
+    callback pick(string);
+    callback forget(string);
+    callback stop();
     callback start();
     callback dismiss();
     callback fix();
@@ -458,7 +479,7 @@ component Placeholder inherits Rectangle {
                 background: device == "" ? Theme.text-3.with-alpha(0.5) : root.tone;
             }
         }
-        if device != "": HorizontalLayout {
+        if device != "" && devices.length == 0 && !listening: HorizontalLayout {
             alignment: center;
             Rectangle {
                 height: 28px;
@@ -482,7 +503,8 @@ component Placeholder inherits Rectangle {
             }
         }
         Text {
-            text: device == "" ? I18n.t("Colokkan iPhone atau iPad", "Plug in an iPhone or iPad") : need != "" ? root.need-title : I18n.t(device + " siap", device + " ready");
+            text: listening ? I18n.t("Menunggu iPhone / iPad", "Waiting for the iPhone / iPad")
+                : device == "" ? I18n.t("Colokkan iPhone atau iPad", "Plug in an iPhone or iPad") : need != "" ? root.need-title : I18n.t(device + " siap", device + " ready");
             font-size: 20px;
             font-weight: 700;
             color: Theme.text;
@@ -490,6 +512,7 @@ component Placeholder inherits Rectangle {
         }
         Text {
             text: message != "" ? message
+                : listening ? I18n.t("Di iPhone/iPad: buka Pusat Kontrol → Pencerminan Layar → pilih ZenLinkStudioBeta. PC dan perangkat harus di jaringan yang sama.", "On the iPhone/iPad: open Control Center → Screen Mirroring → pick ZenLinkStudioBeta. The PC and the device must be on the same network.")
                 : device != "" && need != "" ? root.need-hint
                 : device == "" && air && mode == "usbdirect" ? I18n.t("Di iPhone/iPad: Pusat Kontrol → Pencerminan Layar → ZenLinkStudioBeta.", "On the iPhone/iPad: Control Center → Screen Mirroring → ZenLinkStudioBeta.")
                 : device == "" && air ? I18n.t("Wi-Fi: PC dan perangkat di jaringan yang sama. Pertama kali, tekan Atur Wi-Fi di Pengaturan dengan kabel tersambung.", "Wi-Fi: the PC and the device on the same network. The first time, press Set up Wi-Fi in Settings with the cable in.")
@@ -499,6 +522,65 @@ component Placeholder inherits Rectangle {
             color: message != "" ? #ff8a80 : Theme.text-2;
             horizontal-alignment: center;
             wrap: word-wrap;
+        }
+        // Devices: connected ones and the ones trusted before.
+        if devices.length > 0 && !listening: HorizontalLayout {
+            alignment: center;
+            VerticalLayout {
+                width: min(root.width - 48px, 360px);
+                spacing: 6px;
+                for d in devices: Rectangle {
+                    height: 44px;
+                    border-radius: 12px;
+                    background: d.selected ? (Theme.dark ? #ffffff14 : #ffffffd0) : devTa.has-hover ? (Theme.dark ? #ffffff0c : #ffffffa0) : (Theme.dark ? #ffffff06 : #ffffff70);
+                    border-width: 1px;
+                    border-color: d.selected ? Theme.accent.with-alpha(0.7) : Theme.line;
+                    animate background, border-color { duration: 160ms; }
+                    devTa := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.pick(d.id); }
+                    }
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 8px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 8px;
+                                height: 8px;
+                                border-radius: 4px;
+                                background: d.state == "ready" ? Theme.ok : d.state == "need" ? Theme.warn : Theme.text-3.with-alpha(0.6);
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            spacing: 1px;
+                            Text { text: d.title; font-size: 12.5px; font-weight: 600; color: d.state == "offline" ? Theme.text-2 : Theme.text; overflow: elide; }
+                            Text { text: d.sub; font-size: 11px; color: Theme.text-3; overflow: elide; }
+                        }
+                        if d.selected: VerticalLayout {
+                            alignment: center;
+                            Text { text: "\u{E73E}"; font-family: Theme.icons; font-size: 12px; color: Theme.accent; }
+                        }
+                        if d.state == "offline": VerticalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 26px;
+                                height: 26px;
+                                border-radius: 13px;
+                                background: forgetTa.has-hover ? (Theme.dark ? #ffffff1a : #0000001a) : transparent;
+                                Text { text: "\u{E711}"; font-family: Theme.icons; font-size: 10px; color: Theme.text-3; horizontal-alignment: center; vertical-alignment: center; }
+                                forgetTa := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => { root.forget(d.id); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         // Mode and Cable / Wi-Fi, the same choices as Settings > Connection & driver.
         if device == "" || need == "": HorizontalLayout {
@@ -520,11 +602,15 @@ component Placeholder inherits Rectangle {
                 changed(v) => { root.set-link(v); }
             }
         }
-        if device == "": HorizontalLayout {
+        if listening: HorizontalLayout {
+            alignment: center;
+            GlassButton { icon: "\u{E71A}"; label: I18n.t("Berhenti menunggu", "Stop waiting"); clicked => { root.stop(); } }
+        }
+        if device == "" && !listening: HorizontalLayout {
             alignment: center;
             GlassButton { primary: true; icon: "\u{E768}"; label: I18n.t("Mulai", "Start"); clicked => { root.start(); } }
         }
-        if device != "": HorizontalLayout {
+        if device != "" && !listening: HorizontalLayout {
             alignment: center;
             if need == "" || need == "trust": GlassButton { primary: true; icon: "\u{E768}"; label: need == "" ? I18n.t("Mulai mirroring", "Start mirroring") : I18n.t("Coba lagi", "Try again"); clicked => { root.start(); } }
             if need != "" && need != "trust": GlassButton {
@@ -2029,6 +2115,15 @@ component SettingsPanel inherits Glass {
                         font-weight: 700;
                         color: Theme.text;
                     }
+                    HorizontalLayout {
+                        alignment: start;
+                        GlassButton {
+                            icon: "\u{E8B7}";
+                            label: I18n.t("Buka folder log", "Open log folder");
+                            tip: I18n.t("Log ZenLink untuk laporan bug (%LOCALAPPDATA%\\ZenLink-Beta\\logs)", "ZenLink logs for bug reports (%LOCALAPPDATA%\\ZenLink-Beta\\logs)");
+                            clicked => { root.driver-action("logs"); }
+                        }
+                    }
                     Text {
                         text: I18n.t("© 2026 Zenvy Zenshiro · GPL-3.0-or-later · tanpa garansi.", "© 2026 Zenvy Zenshiro · GPL-3.0-or-later · no warranty.");
                         font-size: 11px;
@@ -2196,6 +2291,11 @@ export component AppWindow inherits Window {
     in property <string> device-need;
     callback flow-dismiss();
     callback need-fix();
+    // Apple device list (connected + trusted before) and the AirPlay wait.
+    in property <[AppleDev]> apple-devices;
+    in property <bool> apple-listening;
+    callback apple-pick(string);
+    callback apple-forget(string);
     in property <bool> drv-restore;
     in property <bool> drv-bind;
     in property <bool> drv-filter;
@@ -2365,6 +2465,7 @@ export component AppWindow inherits Window {
                 phase: root.screen == "apple" ? root.phase : root.on-android ? root.android-phase : "idle";
                 link: root.screen == "apple" ? root.link : root.on-android ? root.android-link : "";
                 need: root.screen == "apple" ? root.device-need : "";
+                listening: root.screen == "apple" && root.apple-listening;
                 stats: root.prefs.stats ? root.stats-line : "";
                 settings-open: root.settings-open;
                 muted: root.muted;
@@ -2448,6 +2549,11 @@ export component AppWindow inherits Window {
                             set-link(l) => { root.set-link(l); }
                             change-mode => { root.driver-action("mode"); }
                             fix => { root.need-fix(); }
+                            devices: root.apple-devices;
+                            listening: root.apple-listening;
+                            pick(id) => { root.apple-pick(id); }
+                            forget(id) => { root.apple-forget(id); }
+                            stop => { root.stop-cast(); }
                             start => { root.start-cast(); }
                             dismiss => { root.flow-dismiss(); }
                         }
