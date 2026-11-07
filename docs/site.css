@@ -520,3 +520,20 @@ html.lite .a-dim { background: rgba(6, 14, 12, .72); }
 html.lite .switcher { background: rgba(0, 0, 0, .6); }
 html.lite .a-recents { background: rgba(8, 16, 14, .7); }
 html.lite [data-off], html.lite [data-off] * { animation-play-state: paused !important; }
+/* Software rendering repaints every animated pixel on the CPU, so in lite the
+   decoration stands still: the turning light behind the page (a 140vmax layer
+   with a 90px blur) is not drawn, the blobs keep their place, the fixed body
+   gradient scrolls with the page instead of repainting it on every scroll
+   step, and the looping effects (shine, bob, lens, gradient text) stop. Hover,
+   clicks, reveals and the device demo still animate. */
+html.lite body { background-attachment: scroll, scroll; }
+html.lite .aurora::before { display: none; }
+html.lite .aurora i,
+html.lite .wordmark .zl span,
+html.lite .v25, html.lite .v25::before, html.lite .v25 b,
+html.lite .v25 em,
+html.lite .cluster .d,
+html.lite .cluster .lens,
+html.lite .parrow { animation: none !important; will-change: auto; }
+html.lite .cluster .d.away { filter: brightness(.5) saturate(.75); }
+html.lite .btn-star .st { filter: none; }
