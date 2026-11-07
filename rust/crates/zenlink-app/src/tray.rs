@@ -28,9 +28,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_OVERLAPPED,
 };
 
-const CLASS: PCWSTR = w!("ZenLinkTrayV25");
+const CLASS: PCWSTR = w!("ZenLinkTrayV251Beta");
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
-const RUN_VALUE: PCWSTR = w!("ZenLink");
+const RUN_VALUE: PCWSTR = w!("ZenLink Beta");
 /// Command-line flag of the "Start with Windows" entry.
 pub const BACKGROUND_ARG: &str = "--background";
 const WM_TRAY: u32 = WM_APP + 0x51;
@@ -138,7 +138,7 @@ fn notify(op: windows::Win32::UI::Shell::NOTIFY_ICON_MESSAGE) -> bool {
         hIcon: app_icon(),
         ..Default::default()
     };
-    for (d, s) in nid.szTip.iter_mut().zip("ZenLink".encode_utf16()) {
+    for (d, s) in nid.szTip.iter_mut().zip("ZenLink Beta".encode_utf16()) {
         *d = s;
     }
     unsafe { Shell_NotifyIconW(op, &nid).as_bool() }

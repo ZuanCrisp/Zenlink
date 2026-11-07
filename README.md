@@ -114,7 +114,7 @@ The same list is in **Settings › Keyboard shortcuts**. Click the picture first
 
 ### Option 1B: Portable (one .exe, no installation, no Python)
 1. Download **`ZenLink-vX.Y.Z-Portable.exe`** from [**Releases**](../../releases/latest) and put it anywhere.
-2. Double-click it. The first start takes a few seconds (it unpacks the Apple backend and `adb`); data is kept in `%LOCALAPPDATA%\ZenLink-Next`.
+2. Double-click it. The first start takes a few seconds (it unpacks the Apple backend and `adb`); data is kept in `%LOCALAPPDATA%\ZenLink-Beta`.
 
 ### Option 2: Run from Source
 ```powershell
@@ -167,7 +167,7 @@ Android ─ adb (Google) + scrcpy server ─────────────
 
 - The passcode for `Alt+U` is encrypted with Windows DPAPI for your account only; remove it any time in Settings.
 - **Installer version**: uninstall from **Windows Settings → Apps**.
-- **Portable exe**: delete the `.exe` and the `%LOCALAPPDATA%\ZenLink-Next` folder.
+- **Portable exe**: delete the `.exe` and the `%LOCALAPPDATA%\ZenLink-Beta` folder.
 - **Source**: run **`Uninstall-ZenLink.bat`** — it closes ZenLink, deletes its settings, passcode and logs, removes the shortcuts and can delete the folder.
 - If you used ZenLink Studio over the cable, press **Restore Apple driver** in Settings first so Apple apps see the device again.
 

@@ -18,7 +18,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[cfg(feature = "embedded-backend")]
 static EMBEDDED: &[u8] = include_bytes!(env!("ZENLINK_BACKEND_EXE"));
 
-/// Unpack the packed backend to %LOCALAPPDATA%\ZenLink-Next\service once per
+/// Unpack the packed backend to %LOCALAPPDATA%\ZenLink-Beta\service once per
 /// version, and return its path.
 #[cfg(feature = "embedded-backend")]
 fn unpack_embedded() -> Option<PathBuf> {

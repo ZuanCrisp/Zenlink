@@ -61,7 +61,7 @@ ICON = APP_ROOT / "assets" / "zenlink.ico"
 def _app_id() -> None:
     """Own taskbar group (and icon) instead of python's."""
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ZenLink.Next")
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ZenLink.Beta251")
     except Exception:
         pass
 

@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
 
 # v2.5: 7100, so it can run next to the stable v2.2.31 (7000). The port is
 # advertised in the mDNS records, so iOS follows it.
-AIRPLAY_PORT = 7100
+AIRPLAY_PORT = 7200
 MODEL = "AppleTV3,2"
 SOURCE_VERSION = "220.68"
 # Apple TV 3 mirroring with legacy pairing; bit 42 (SupportsScreenMultiCodec)
@@ -683,7 +683,7 @@ class _AudioDecoder:
 
 
 def receiver_name() -> str:
-    return "ZenLinkStudio"
+    return "ZenLinkStudioBeta"
 
 
 __all__ = ["AirPlayReceiver", "receiver_name", "AIRPLAY_PORT"]

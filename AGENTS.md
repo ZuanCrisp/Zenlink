@@ -1,4 +1,4 @@
-# AGENTS.md — ZenLink v2.5 Beta (Android + iOS, Rust-first)
+# AGENTS.md — ZenLink v2.5.1 Beta (Android + iOS, Rust-first)
 
 Read this whole file before you do anything. It is the operating manual for this folder.
 The full Android feature specification is in `docs/ANDROID_MASTER_PROMPT.md`. It is part of these instructions: read it completely too.
@@ -9,7 +9,7 @@ Owner: **Zenvy Zenshiro** (https://github.com/zenvyzenshiro). Repository: https:
 
 ## 0. Start-up checklist (do these in order, every new session)
 
-1. Run `pwd` / `Get-Location`. Confirm that you are in `E:\Zenlink V.2.5 Beta`. If you are not, stop and `cd` there.
+1. Run `pwd` / `Get-Location`. Confirm that you are in `E:\Zenlink v.2.5.1 Beta`. If you are not, stop and `cd` there.
 2. Read `lanjutan.md` in this folder if it exists. It is your checkpoint from earlier sessions. Continue from its "Next" list.
 3. Read `docs/ROADMAP.md`. It sets the phase order, the gates and how to use sub-agents. Work **one phase at a time**. Then read `docs/ANDROID_MASTER_PROMPT.md`, and `docs/BUGS-v2.5.md` once it exists.
 4. If the `caveman` skill is installed, invoke it and use it for chat replies. Persisted files (code, comments, commits, docs) stay in plain full English.
@@ -22,14 +22,15 @@ Reply to the user in **concise Indonesian**. Write code, comments, commits and d
 
 ## 1. ISOLATED DEVELOPMENT DIRECTORY — MANDATORY
 
-Develop ZenLink v2.5 Beta **only** in:
+Develop ZenLink v2.5.1 Beta **only** in:
 
-`E:\Zenlink V.2.5 Beta`
+`E:\Zenlink v.2.5.1 Beta` (branch `v2.5.1-beta`, cloned on 2026-11-07 from `E:\Zenlink v.2.5 Beta` at the v2.5.0 release commit 5900f11)
 
-Stable versions that must never be changed:
+Released versions that must never be changed from here:
 
 | Folder | What it is | Rule |
 | :--- | :--- | :--- |
+| `E:\Zenlink v.2.5 Beta` | Source of the released v2.5.0 (branch `android-v2.5-beta`, tag `v2.5.0`). | **Read and copy only.** Never modify, build, clean, delete or `git` write there. Hotfixes for v2.5.0 only when the user asks. |
 | `E:\ZenLink v2.2.31` | Current stable, released as v2.2.31. The folder was renamed from `E:\ZenLink v2.2.3`, so treat any instruction about "v2.2.3" as meaning this folder. | **Read and copy only.** Never modify, build, clean, delete or `git` write there. |
 | `E:\ZenLink` | Old v2.2 | Never touch. |
 
@@ -37,18 +38,18 @@ Strict requirements:
 
 - Create the development directory if it does not exist.
 - Copy the project from `E:\ZenLink v2.2.31` into it with the bootstrap in §2.
-- Do all Rust reconstruction, Android integration, testing and builds only inside `E:\Zenlink V.2.5 Beta`.
-- Never modify, overwrite, delete or clean files inside `E:\ZenLink v2.2.31` or `E:\ZenLink`.
+- Do all Rust reconstruction, Android integration, testing and builds only inside `E:\Zenlink v.2.5.1 Beta`.
+- Never modify, overwrite, delete or clean files inside `E:\Zenlink v.2.5 Beta`, `E:\ZenLink v2.2.31` or `E:\ZenLink`.
 - Keep build outputs, caches, configurations, logs and release artifacts separate. See §3.
 - Do not change the stable installation, its settings or its USB driver configuration during development.
-- Before every destructive command (`Remove-Item`, `rm -rf`, `git clean`, `git reset --hard`, `cargo clean`) and before every build, print the working directory. Check that the absolute target path starts with `E:\Zenlink V.2.5 Beta`.
-- The stable v2.2.31 must always stay a fully working rollback version.
+- Before every destructive command (`Remove-Item`, `rm -rf`, `git clean`, `git reset --hard`, `cargo clean`) and before every build, print the working directory. Check that the absolute target path starts with `E:\Zenlink v.2.5.1 Beta`.
+- The released v2.5.0 and the stable v2.2.31 must always stay fully working rollback versions.
 
-The goal is complete isolation: v2.5 Beta development must never damage or replace v2.2.31.
+The goal is complete isolation: v2.5.1 Beta development must never damage or replace v2.5.0 or v2.2.31.
 
 ---
 
-## 2. Bootstrap (one time)
+## 2. Bootstrap (one time; done for v2.5.1 on 2026-11-07, kept as history)
 
 Use a git clone, not a file copy. It brings full history and a separate `.git`, and it leaves out ignored junk such as `.venv`, `build`, `release`, `rust/target*`, logs and personal settings.
 
@@ -83,7 +84,20 @@ Do not change git config permanently. `gh` and `api.github.com` usually work nor
 
 ## 3. Isolation of runtime resources (stable and beta must not collide)
 
-These are shared between builds unless you change them. Fix every one of them in the beta **before** running it next to the stable app:
+**v2.5.1 beta (done 2026-11-07, `tests/test_next_isolation.py`).** It runs next to an installed v2.5.0 and a v2.2.31 Portable.exe:
+
+| Resource | v2.2.31 | v2.5.0 (released) | v2.5.1 beta |
+| :--- | :--- | :--- | :--- |
+| Backend / local stream / AirPlay ports | 47321 / 47322 / 7000 | 47421 / 47422 / 7100 | **47521 / 47522 / 7200** |
+| Data and prefs folder (`%APPDATA%`, `%LOCALAPPDATA%`) | `ZenLink` | `ZenLink-Next` | **`ZenLink-Beta`** |
+| Log in `%TEMP%` | `zenlink-next.log` | `zenlink-next-v25.log` | **`zenlink-v251-beta.log`** |
+| AirPlay name | ZenLink | ZenLinkStudio | **ZenLinkStudioBeta** |
+| Window title, tray class, autostart value | ZenLink | ZenLink, `ZenLinkTrayV25`, `ZenLink` | **ZenLink Beta, `ZenLinkTrayV251Beta`, `ZenLink Beta`** |
+| Installer | AppId `{6B0E8C1A-…}`, `{autopf}\ZenLink` | same AppId (upgrades v2.2.x) | **AppId `{9C4F2B71-3E8A-4D16-B5C0-7A2E91F4D3B8}`, `AppName=ZenLink Beta`, `{autopf}\ZenLink Beta`** |
+
+**Before the final v2.5.1 release** (only when the user asks): restore the v2.5.0 installer identity (AppId `{6B0E8C1A-5D3F-4E0A-9C2B-2E7A1F5D9A10}`, `AppName=ZenLink`, `{autopf}\ZenLink`, autostart value `ZenLink`, AirPlay name `ZenLinkStudio`, window title `ZenLink`), so Setup upgrades v2.5.0 in place. Decide with the user whether the data folder moves back to `ZenLink-Next` (keeps v2.5.0 settings) or migrates.
+
+The original v2.5 rules, still valid for every resource:
 
 | Resource | Stable uses | Beta must use |
 | :--- | :--- | :--- |
@@ -96,7 +110,7 @@ These are shared between builds unless you change them. Fix every one of them in
 | ADB server | port 5037 is shared by all adb clients on the PC | Do not kill a foreign adb server blindly. Detect version conflicts and tell the user (see master prompt §16). |
 | USB drivers (Apple / libusb0) | system-wide | Never install, remove or switch drivers without asking the user first |
 
-Add tests where practical: default port, prefs path and data dir all contain "Beta"/47421.
+Add tests where practical: default port, prefs path and data dir all contain "Beta"/47521.
 
 ---
 
@@ -203,8 +217,8 @@ Many users ask for a Mac version. The v2.5 work is Windows-first, but **new code
 - Do not disable Android security restrictions (master prompt §11, §19).
 - Never claim a number you did not measure. Never mark a test passed when no device was available. Write "unverified".
 - Commit only the files you need. Never commit `lanjutan.md`, logs, `settings.json`, `devices.json`, secrets or build outputs.
-- **Releases:** never publish, overwrite or delete a GitHub release or tag without explicit user approval in chat. A beta release must be a **pre-release** (`gh release create v2.5.0-beta.N --prerelease`) and must never be marked "latest". Do not touch the v2.2.31 release.
-- Do not push to `main` without approval. Push only to the `android-v2.5-beta` branch.
+- **Releases:** never publish, overwrite or delete a GitHub release or tag without explicit user approval in chat. A beta release must be a **pre-release** (`gh release create v2.5.1-beta.N --prerelease`) and must never be marked "latest". Do not touch the v2.2.31 or v2.5.0 releases.
+- Do not push to `main` without approval. Push only to the `v2.5.1-beta` branch.
 - Commit identity: `Zenvy Zenshiro <85529012+zenvyzenshiro@users.noreply.github.com>`. End every commit message with:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
 - Release notes never start with a "## ZenLink vX" heading. Assets per release: `Setup.exe`, `Portable.exe`, `Portable-Source.zip`.
@@ -379,7 +393,22 @@ A fresh session must be able to continue from it alone. It is listed in `.git/in
 - `pytest` passes.
 - The app builds, and the beta runs **side by side** with the stable v2.2.31 without touching its port, settings or install.
 - `docs/BUGS-v2.5.md` is updated, and every claim in it has evidence or is marked unverified.
-- The commit is on `android-v2.5-beta`. `lanjutan.md` is updated.
+- The commit is on `v2.5.1-beta`. `lanjutan.md` is updated.
 - The report to the user (Indonesian, short) uses: Status → Evidence → Changes → Blockers → Next.
 
 A release happens only when the user asks. It is a beta **pre-release**, built in the beta folder, with 3 assets, and `latest` is never moved.
+
+---
+
+## 10. v2.5.1 scope (agreed with the user on 2026-11-07)
+
+Ideas taken from comparing ZenLink with TwinDesk (GPL-3.0, Electron/Kotlin). Take ideas only, write the code in Rust; no code copied. Each item goes through the normal bug/feature rules, and device results stay "unverified" until the user tests.
+
+1. **Android apps in their own window.** scrcpy `--new-display` + `--start-app` (Android 11+ for app windows). A list of installed apps, each opened as its own ZenLink window. Check the pinned scrcpy version's docs first.
+2. **Drag and drop files onto the window.**
+   - Android: an `.apk` installs (`adb install`), other files go to `/sdcard/Download/` (`adb push`). Show progress and the result.
+   - iPhone/iPad (Apple Driver mode only: needs lockdown/usbmux): files go to an app that has File Sharing (house_arrest/AFC), for example VLC or Documents. Photos into the camera roll are not possible this way. ZenLink Studio mode has no data channel (libusb0 replaces Apple's driver).
+3. **Phone camera as a webcam.** Android only: scrcpy `--video-source=camera` (Android 12+), shown in ZenLink and, on Windows 11, exposed as a virtual camera (`MFCreateVirtualCamera`; Windows 10 falls back to OBS capture). iPhone needs an app on the phone, so it is out of scope.
+4. **Phone as a microphone.** Android only: scrcpy `--audio-source=mic` (Android 11+), played to a PC output or a virtual audio device. iPhone: not possible without an app on the phone.
+
+Not taken: connection/latency badge (user said no), KVM/shared mouse, calls and SMS, Mesh, ReZume (need a companion app or do not fit "small, light, fast").

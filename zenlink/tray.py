@@ -51,7 +51,7 @@ class Tray:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit ZenLink", self._quit),
         )
-        self.icon = pystray.Icon("ZenLinkNext", image, "ZenLink", menu)
+        self.icon = pystray.Icon("ZenLinkBeta251", image, "ZenLink Beta", menu)
 
         def run() -> None:
             try:

@@ -1,4 +1,4 @@
-//! Settings, saved as JSON in %APPDATA%\ZenLink-Next\next-prefs.json.
+//! Settings, saved as JSON in %APPDATA%\ZenLink-Beta\next-prefs.json.
 //! The stable v2.2.31 keeps %APPDATA%\ZenLink; the beta never touches it.
 
 use serde_json::{json, Value};
