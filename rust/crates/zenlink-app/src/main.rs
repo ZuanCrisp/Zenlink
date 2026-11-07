@@ -2,6 +2,7 @@
 //! ZenLink (v2.5, generation "Next"): Rust shell (ADR-0001 Stage 1).
 
 mod android;
+mod appwin;
 mod backdrop;
 mod devprofiles;
 mod dots;
@@ -58,7 +59,12 @@ impl log::Log for FileLog {
 }
 
 fn init_log() {
-    let path = std::env::temp_dir().join(zenlink_core::LOG_FILE_NAME);
+    init_log_named(zenlink_core::LOG_FILE_NAME);
+}
+
+/// App windows log to their own file, so they never truncate the main log.
+fn init_log_named(name: &str) {
+    let path = std::env::temp_dir().join(name);
     if let Ok(f) = std::fs::File::create(path) {
         let l: &'static FileLog = Box::leak(Box::new(FileLog(Mutex::new(f))));
         let _ = log::set_logger(l).map(|()| log::set_max_level(log::LevelFilter::Info));
@@ -145,6 +151,11 @@ struct App {
     android_pending: Option<Box<dyn zenlink_core::source::VideoSource>>,
     /// Devices the Android workspace shows, in row order.
     android_list: Vec<zenlink_android::discovery::AndroidDevice>,
+    /// App windows (v2.5.1): the device whose apps the picker shows, its
+    /// apps (cached per device key) and the rows shown after the filter.
+    apps_device: Option<zenlink_android::discovery::AndroidDevice>,
+    apps_cache: std::collections::HashMap<String, Vec<zenlink_android::apps::DeviceApp>>,
+    apps_shown: Vec<zenlink_android::apps::DeviceApp>,
     /// ZL_ANDROID_FIXTURE: started once when the Android workspace opens.
     fixture_started: bool,
     /// Per-device Android settings (phase A5), loaded on first use.
@@ -1404,6 +1415,8 @@ fn show_android(
                 title: d.name.display.clone().into(),
                 sub: sub.join(" · ").into(),
                 ok: d.readiness == Readiness::Ready,
+                apps: d.readiness == Readiness::Ready
+                    && d.sdk.unwrap_or(0) >= zenlink_android::apps::MIN_SDK_NEW_DISPLAY,
                 both: d.readiness == Readiness::Ready && on_usb && on_wifi,
                 wifi: d.readiness == Readiness::Ready
                     && d.primary.connection == Connection::Usb
@@ -1462,6 +1475,7 @@ fn android_options(p: &Prefs, audio_supported: bool) -> zenlink_android::mirror:
         encoder: None,
         audio: audio_supported && p.audio_out.as_str() == "pc",
         control: true,
+        new_display: None,
     }
 }
 
@@ -1784,6 +1798,173 @@ fn android_key(p: &Prefs) -> String {
         p.android_codec,
         p.android_encoder
     )
+}
+
+/// Log of the app windows (`--android-app`), next to the main log.
+const APP_LOG_FILE_NAME: &str = "zenlink-v251-beta-apps.log";
+
+/// App picker rows for `filter` (name or package, any case), at most 80.
+fn apps_matching<'a>(
+    all: &'a [zenlink_android::apps::DeviceApp],
+    filter: &str,
+) -> Vec<&'a zenlink_android::apps::DeviceApp> {
+    let f = filter.trim().to_lowercase();
+    all.iter()
+        .filter(|a| f.is_empty() || a.name.to_lowercase().contains(&f) || a.package.contains(&f))
+        .take(80)
+        .collect()
+}
+
+/// Shows the picker's rows for `filter`.
+fn apps_show(ui: &AppWindow, filter: &str) {
+    let rows = APP.with_borrow_mut(|a| {
+        let key = a.apps_device.as_ref().map(|d| d.id.key.clone())?;
+        let all = a.apps_cache.get(&key)?;
+        a.apps_shown = apps_matching(all, filter).into_iter().cloned().collect();
+        Some((a.apps_shown.clone(), all.len()))
+    });
+    let Some((shown, total)) = rows else { return };
+    let model: Vec<AppRow> = shown
+        .iter()
+        .map(|a| AppRow {
+            name: a.name.clone().into(),
+            sub: if a.system {
+                format!("{} · {}", a.package, tr_ui(ui, "sistem", "system"))
+            } else {
+                a.package.clone()
+            }
+            .into(),
+        })
+        .collect();
+    let status = if total == 0 {
+        tr_ui(
+            ui,
+            "HP tidak memberi daftar app.",
+            "The phone listed no apps.",
+        )
+    } else if shown.is_empty() {
+        tr_ui(ui, "Tidak ada app yang cocok.", "No app matches.")
+    } else if shown.len() < total {
+        tr_ui(
+            ui,
+            &format!("{} dari {total} app. Ketik untuk mencari.", shown.len()),
+            &format!("{} of {total} apps. Type to search.", shown.len()),
+        )
+    } else {
+        tr_ui(ui, &format!("{total} app."), &format!("{total} apps."))
+    };
+    ui.set_android_apps_status(status.into());
+    ui.set_android_apps(std::rc::Rc::new(slint::VecModel::from(model)).into());
+}
+
+/// Opens the app picker for list entry `index` and reads its apps (once per
+/// device; about a second or two on the phone).
+fn apps_open_device(ui: &AppWindow, index: i32) {
+    let Some(d) = APP.with_borrow(|a| a.android_list.get(index.max(0) as usize).cloned()) else {
+        return;
+    };
+    ui.set_android_apps_title(
+        tr_ui(
+            ui,
+            &format!("Aplikasi di {}", d.name.display),
+            &format!("Apps on {}", d.name.display),
+        )
+        .into(),
+    );
+    ui.set_android_apps_open(true);
+    let cached = APP.with_borrow_mut(|a| {
+        a.apps_device = Some(d.clone());
+        a.apps_cache.contains_key(&d.id.key)
+    });
+    if cached {
+        ui.set_android_apps_busy(false);
+        apps_show(ui, "");
+        return;
+    }
+    let server = match scrcpy_server() {
+        Ok(s) => s,
+        Err(e) => {
+            ui.set_android_apps_status(e.into());
+            return;
+        }
+    };
+    ui.set_android_apps_busy(true);
+    ui.set_android_apps(std::rc::Rc::new(slint::VecModel::<AppRow>::default()).into());
+    ui.set_android_apps_status(
+        tr_ui(ui, "Membaca daftar app di HP…", "Reading the phone's apps…").into(),
+    );
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let client = zenlink_android::adb::AdbClient::default();
+        let got = zenlink_android::apps::query(&client, &d.target(), &server);
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_android_apps_busy(false);
+            match got {
+                Ok(list) => {
+                    log::info!("android: {} apps on {}", list.len(), d.name.display);
+                    APP.with_borrow_mut(|a| {
+                        a.apps_cache.insert(
+                            d.id.key.clone(),
+                            zenlink_android::apps::sorted_for_picker(list),
+                        );
+                    });
+                    apps_show(&ui, "");
+                }
+                Err(e) => {
+                    log::warn!("android: app list failed: {e}");
+                    ui.set_android_apps_status(
+                        tr_ui(
+                            &ui,
+                            &format!("Daftar app tidak terbaca: {e}"),
+                            &format!("Could not read the apps: {e}"),
+                        )
+                        .into(),
+                    );
+                }
+            }
+        });
+    });
+}
+
+/// Opens picker row `index` in its own window.
+fn apps_launch(ui: &AppWindow, index: i32) {
+    let Some((d, app)) = APP.with_borrow(|a| {
+        Some((
+            a.apps_device.clone()?,
+            a.apps_shown.get(index.max(0) as usize)?.clone(),
+        ))
+    }) else {
+        return;
+    };
+    let args = appwin::AppArgs {
+        serial: d.primary.serial.clone(),
+        transport_id: d.primary.transport_id,
+        package: app.package.clone(),
+        name: app.name.clone(),
+        device: d.name.display.clone(),
+    };
+    match appwin::spawn(&args) {
+        Ok(()) => show_toast(
+            ui,
+            tr_ui(
+                ui,
+                &format!("Membuka {}…", app.name),
+                &format!("Opening {}…", app.name),
+            ),
+        ),
+        Err(e) => {
+            log::warn!("android: app window failed: {e}");
+            show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    &format!("Jendela app gagal dibuka: {e}"),
+                    &format!("The app window did not open: {e}"),
+                ),
+            );
+        }
+    }
 }
 
 fn scrcpy_server() -> Result<Arc<Vec<u8>>, String> {
@@ -2547,6 +2728,17 @@ fn close_requested(ui: &AppWindow) {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    // v2.5.1: `ZenLink.exe --android-app …` is one Android app in its own
+    // window (no backend, no tray, no single-instance check).
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some(appwin::ARG) {
+        init_log_named(APP_LOG_FILE_NAME);
+        let Some(a) = appwin::AppArgs::parse(&args) else {
+            log::warn!("app window: bad arguments {args:?}");
+            return Ok(());
+        };
+        return appwin::run(a);
+    }
     // Tests run with their own prefs file (ZL_PREFS) and may run next to the
     // user's ZenLink; everyone else gets one ZenLink per user: a second start
     // shows the running one (also when it is hidden in the tray).
@@ -2995,6 +3187,32 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_android_stop(move || {
             if let Some(ui) = weak.upgrade() {
                 android_stop(&ui);
+            }
+        });
+    }
+    {
+        let weak = ui.as_weak();
+        ui.on_android_apps_device(move |i| {
+            if let Some(ui) = weak.upgrade() {
+                apps_open_device(&ui, i);
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_apps_filter(move |s| {
+            if let Some(ui) = weak.upgrade() {
+                apps_show(&ui, s.as_str());
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_app_open(move |i| {
+            if let Some(ui) = weak.upgrade() {
+                apps_launch(&ui, i);
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_apps_close(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_android_apps_open(false);
             }
         });
     }

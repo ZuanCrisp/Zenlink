@@ -219,6 +219,39 @@ pub struct VideoOptions {
     pub audio: bool,
     /// Control socket (touch, keys, clipboard from the PC).
     pub control: bool,
+    /// Mirror a new virtual display instead of the device screen
+    /// (`new_display`, Android 10+). Apps are started on it with
+    /// `Control::StartApp`; it is destroyed with its apps when the session ends.
+    pub new_display: Option<NewDisplay>,
+}
+
+/// A virtual display's size and density; 0 = the server's default
+/// (the main display's size and density).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NewDisplay {
+    pub width: u32,
+    pub height: u32,
+    pub dpi: u32,
+    /// Resizable with `Control::ResizeDisplay` (`flex_display`), e.g. to
+    /// follow the window. Not with `max_size` cropping.
+    pub flex: bool,
+}
+
+impl NewDisplay {
+    /// The `new_display` value: `WxH/dpi`, `WxH`, `/dpi` or empty
+    /// (`Options.parseNewDisplay`).
+    pub fn arg(&self) -> String {
+        let size = if self.width > 0 && self.height > 0 {
+            format!("{}x{}", self.width, self.height)
+        } else {
+            String::new()
+        };
+        if self.dpi > 0 {
+            format!("{size}/{}", self.dpi)
+        } else {
+            size
+        }
+    }
 }
 
 impl Default for VideoOptions {
@@ -231,6 +264,7 @@ impl Default for VideoOptions {
             encoder: None,
             audio: false,
             control: false,
+            new_display: None,
         }
     }
 }
@@ -278,6 +312,13 @@ pub fn server_command(scid: u32, tunnel_forward: bool, o: &VideoOptions) -> Stri
     }
     if o.max_fps > 0 {
         cmd.push_str(&format!(" max_fps={}", o.max_fps));
+    }
+    if let Some(d) = &o.new_display {
+        // Digits, 'x' and '/' only: safe in the shell command.
+        cmd.push_str(&format!(" new_display={}", d.arg()));
+        if d.flex {
+            cmd.push_str(" flex_display=true");
+        }
     }
     cmd
 }
@@ -877,6 +918,7 @@ mod tests {
                 encoder: None,
                 audio: false,
                 control: true,
+                new_display: None,
             },
         );
         assert!(
@@ -885,6 +927,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn new_display_in_the_server_command() {
+        let mut o = VideoOptions {
+            new_display: Some(NewDisplay {
+                width: 1280,
+                height: 720,
+                dpi: 240,
+                flex: true,
+            }),
+            ..VideoOptions::default()
+        };
+        let cmd = server_command(1, false, &o);
+        assert!(
+            cmd.ends_with(" new_display=1280x720/240 flex_display=true"),
+            "{cmd}"
+        );
+        o.new_display = Some(NewDisplay::default());
+        assert!(server_command(1, false, &o).ends_with(" new_display="));
+        o.new_display = Some(NewDisplay {
+            dpi: 160,
+            ..NewDisplay::default()
+        });
+        assert!(server_command(1, false, &o).ends_with(" new_display=/160"));
+        o.new_display = Some(NewDisplay {
+            width: 800,
+            height: 600,
+            ..NewDisplay::default()
+        });
+        assert!(server_command(1, false, &o).ends_with(" new_display=800x600"));
+        assert!(!server_command(1, false, &VideoOptions::default()).contains("new_display"));
+    }
     #[test]
     fn encoder_name_is_passed_only_when_safe() {
         let mut o = VideoOptions {

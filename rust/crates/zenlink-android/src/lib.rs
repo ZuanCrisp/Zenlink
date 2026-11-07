@@ -12,10 +12,12 @@
 //! - [`encoders`]: Smart Encoder Detection and the bounded start plan (phase A5).
 //! - [`profiles`]: video profiles and per-device settings (phase A5).
 //! - [`wireless`]: Android over Wi-Fi: tcpip from USB, Android 11+ pairing (phase A6).
+//! - [`apps`]: installed apps (`list_apps`), for app windows on a virtual display (v2.5.1).
 //!
 //! Everything here is portable Rust; only [`adb::start_server`] touches the platform.
 
 pub mod adb;
+pub mod apps;
 pub mod control;
 pub mod devices;
 pub mod discovery;

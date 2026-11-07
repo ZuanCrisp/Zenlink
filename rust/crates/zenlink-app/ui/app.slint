@@ -5,6 +5,8 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme, I18n } from "theme.slint";
 import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip, Tip, UiTest } from "widgets.slint";
+// v2.5.1: an Android app in its own window (ZenLink.exe --android-app).
+export { AppWin } from "appwin.slint";
 
 export { Theme, I18n, UiTest }
 
@@ -1110,6 +1112,14 @@ export struct AndroidRow {
     wifi: bool,
     // Connected over USB and Wi-Fi at once: the user picks the link.
     both: bool,
+    // Android 10+: its apps can open in their own windows (virtual display).
+    apps: bool,
+}
+
+// One installed app in the app picker.
+export struct AppRow {
+    name: string,
+    sub: string,
 }
 
 // One numbered instruction step: a plain wrapped Text (nested layouts
@@ -1142,6 +1152,7 @@ component Field inherits Rectangle {
     in-out property <string> text <=> ti.text;
     in property <InputType> input-type: InputType.text;
     callback accepted();
+    callback edited(string);
     height: 32px;
     horizontal-stretch: 1;
     border-radius: 10px;
@@ -1169,6 +1180,7 @@ component Field inherits Rectangle {
         color: Theme.text;
         selection-background-color: Theme.accent-soft;
         accepted => { root.accepted(); }
+        edited => { root.edited(self.text); }
     }
 }
 
@@ -1273,6 +1285,16 @@ component AndroidHome inherits Rectangle {
     callback wifi-qr();
     callback wifi-qr-cancel();
     property <bool> wifi-open: false;
+    // v2.5.1 app windows: the picker for one device's apps.
+    in property <bool> apps-open;
+    in property <bool> apps-busy;
+    in property <string> apps-title;
+    in property <string> apps-status;
+    in property <[AppRow]> apps;
+    callback apps-device(int);
+    callback apps-filter(string);
+    callback app-open(int);
+    callback apps-close();
     Glass {
         width: min(parent.width - 32px, 460px);
         height: min(parent.height - 32px, acol.preferred-height + 2px);
@@ -1321,6 +1343,16 @@ component AndroidHome inherits Rectangle {
                             clicked => { root.wifi-device(i); }
                         }
                     }
+                    if d.apps && root.phase != "connecting": VerticalLayout {
+                        alignment: center;
+                        GlassButton {
+                            icon: "\u{E71D}";
+                            label: I18n.t("Aplikasi", "Apps");
+                            active: root.apps-open;
+                            tip: I18n.t("Buka app HP di jendelanya sendiri (layar virtual)", "Open a phone app in its own window (virtual display)");
+                            clicked => { root.apps-device(i); }
+                        }
+                    }
                     if d.ok && !d.both && root.phase != "connecting": VerticalLayout {
                         alignment: center;
                         GlassButton {
@@ -1348,6 +1380,47 @@ component AndroidHome inherits Rectangle {
                             label: "Wi-Fi";
                             tip: I18n.t("Mulai lewat Wi-Fi (kabel boleh dicabut)", "Start over Wi-Fi (you can unplug the cable)");
                             clicked => { root.start-device-via(i, "wifi"); }
+                        }
+                    }
+                }
+                if root.apps-open: Card {
+                    VerticalLayout {
+                        spacing: 8px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: root.apps-title; font-size: 12.5px; font-weight: 650; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+                            GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup", "Close"); clicked => { root.apps-close(); } }
+                        }
+                        Text {
+                            text: I18n.t("Tiap app terbuka di jendela sendiri dan berjalan di layar virtual HP, jadi layar HP bebas dipakai. Suara app tetap di HP.", "Each app opens in its own window and runs on a virtual display of the phone, so the phone's own screen stays free. The app's sound stays on the phone.");
+                            font-size: 11px;
+                            color: Theme.text-2;
+                            wrap: word-wrap;
+                        }
+                        if !root.apps-busy: Field {
+                            placeholder: I18n.t("Cari app…", "Search apps…");
+                            edited(s) => { root.apps-filter(s); }
+                        }
+                        if root.apps-busy: BusyBar { }
+                        if root.apps-status != "": Text { text: root.apps-status; font-size: 11.5px; color: root.apps-busy ? Theme.accent : Theme.text-2; wrap: word-wrap; }
+                        for a[i] in root.apps: Rectangle {
+                            height: 38px;
+                            border-radius: 10px;
+                            background: ata.has-hover ? Theme.fill-hover : transparent;
+                            animate background { duration: 150ms; easing: ease-out; }
+                            ata := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.app-open(i); } }
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    horizontal-stretch: 1;
+                                    Text { text: a.name; font-size: 12.5px; font-weight: 600; color: Theme.text; overflow: elide; }
+                                    Text { text: a.sub; font-size: 10.5px; color: Theme.text-3; overflow: elide; }
+                                }
+                                Text { text: "\u{E8A7}"; font-family: Theme.icons; font-size: 13px; color: Theme.text-3; vertical-alignment: center; }
+                            }
                         }
                     }
                 }
@@ -2062,6 +2135,15 @@ export component AppWindow inherits Window {
     in property <string> android-qr-status;
     callback android-wifi-qr();
     callback android-wifi-qr-cancel();
+    in property <bool> android-apps-open;
+    in property <bool> android-apps-busy;
+    in property <string> android-apps-title;
+    in property <string> android-apps-status;
+    in property <[AppRow]> android-apps;
+    callback android-apps-device(int);
+    callback android-apps-filter(string);
+    callback android-app-open(int);
+    callback android-apps-close();
     callback android-stop();
     callback android-restart();
     property <bool> on-android: root.screen == "android";
@@ -2218,6 +2300,15 @@ export component AppWindow inherits Window {
                             qr-status: root.android-qr-status;
                             wifi-qr => { root.android-wifi-qr(); }
                             wifi-qr-cancel => { root.android-wifi-qr-cancel(); }
+                            apps-open: root.android-apps-open;
+                            apps-busy: root.android-apps-busy;
+                            apps-title: root.android-apps-title;
+                            apps-status: root.android-apps-status;
+                            apps: root.android-apps;
+                            apps-device(i) => { root.android-apps-device(i); }
+                            apps-filter(s) => { root.android-apps-filter(s); }
+                            app-open(i) => { root.android-app-open(i); }
+                            apps-close => { root.android-apps-close(); }
                         }
                         if root.screen == "apple" && root.phase != "streaming": Placeholder {
                             phase: root.phase;

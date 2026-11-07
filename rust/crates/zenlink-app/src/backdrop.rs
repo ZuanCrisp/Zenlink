@@ -68,6 +68,14 @@ fn set_accent(hwnd: HWND, state: u32, tint: u32) -> bool {
 /// `thick` (0..1): 0 = fully clear (no blur at all, the desktop shows as
 /// is), higher = Windows Acrylic blur with a stronger tint.
 /// `round`: Windows 11 rounded corners (off in full screen / maximised).
+/// Dark or light system title bar (app windows keep the Windows frame).
+pub fn dark_title_bar(hwnd: HWND, dark: bool) {
+    let d = BOOL::from(dark);
+    unsafe {
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &d as *const _ as _, 4);
+    }
+}
+
 pub fn apply(hwnd: HWND, mode: Backdrop, dark: bool, thick: f32, round: bool) -> bool {
     unsafe {
         let d = BOOL::from(dark);

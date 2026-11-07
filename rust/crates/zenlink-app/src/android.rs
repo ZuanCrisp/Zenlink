@@ -434,6 +434,9 @@ pub struct DeviceSource {
     known: Option<Vec<Encoder>>,
     plan: Vec<Attempt>,
     step: usize,
+    /// App windows (v2.5.1): the package started on the new virtual display
+    /// after every (re)connect; the display closes with its apps.
+    pub start_app: Option<String>,
 }
 
 impl DeviceSource {
@@ -468,6 +471,7 @@ impl DeviceSource {
             known: smart.known,
             plan: Vec::new(),
             step: 0,
+            start_app: None,
         }
     }
 
@@ -604,6 +608,10 @@ impl VideoSource for DeviceSource {
             ..
         } = m;
         *self.shared.control.lock().unwrap() = control;
+        if let Some(pkg) = &self.start_app {
+            // The server waits up to a second for the virtual display's id.
+            self.shared.send(&[Control::StartApp(pkg.clone())]);
+        }
         if let Some(a) = audio {
             let wifi = zenlink_android::devices::connection_for(&self.serial).is_wireless();
             play_audio(a, self.shared.clone(), wifi);

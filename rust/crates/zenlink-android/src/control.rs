@@ -18,6 +18,8 @@ pub const TYPE_COLLAPSE_PANELS: u8 = 7;
 pub const TYPE_SET_CLIPBOARD: u8 = 9;
 pub const TYPE_SET_DISPLAY_POWER: u8 = 10;
 pub const TYPE_ROTATE_DEVICE: u8 = 11;
+pub const TYPE_START_APP: u8 = 16;
+pub const TYPE_RESIZE_DISPLAY: u8 = 21;
 
 /// `KeyEvent.ACTION_*` and `MotionEvent.ACTION_*`.
 pub const ACTION_DOWN: u8 = 0;
@@ -32,6 +34,8 @@ pub const POINTER_ID_GENERIC_FINGER: i64 = -2;
 pub const TEXT_MAX_BYTES: usize = 300;
 /// Clipboard text limit (`CLIPBOARD_TEXT_MAX_LENGTH`: 256 KiB minus the header).
 pub const CLIPBOARD_MAX_BYTES: usize = (1 << 18) - 14;
+/// `START_APP` carries its name with a 1-byte length (`parseString(1)`).
+pub const APP_NAME_MAX_BYTES: usize = 255;
 
 /// Android key codes ZenLink uses (`KeyEvent.KEYCODE_*`).
 pub mod keycode {
@@ -119,6 +123,14 @@ pub enum Control {
     /// Turns the device screen off (false) or on while mirroring goes on.
     SetDisplayPower(bool),
     RotateDevice,
+    /// Starts an app by package name on the mirrored display (the new
+    /// virtual display when there is one). A `+` prefix force-stops it first.
+    StartApp(String),
+    /// New size for a flex virtual display (`flex_display=true`), in pixels.
+    ResizeDisplay {
+        width: u16,
+        height: u16,
+    },
 }
 
 /// `sc_float_to_u16fp`: 1.0 maps to 0xffff.
@@ -226,6 +238,17 @@ impl Control {
                 w.push(u8::from(*on));
             }
             Control::RotateDevice => w.push(TYPE_ROTATE_DEVICE),
+            Control::StartApp(name) => {
+                let name = cut(name, APP_NAME_MAX_BYTES);
+                w.push(TYPE_START_APP);
+                w.push(name.len() as u8);
+                w.extend_from_slice(name.as_bytes());
+            }
+            Control::ResizeDisplay { width, height } => {
+                w.push(TYPE_RESIZE_DISPLAY);
+                w.extend_from_slice(&width.to_be_bytes());
+                w.extend_from_slice(&height.to_be_bytes());
+            }
         }
         w
     }
@@ -347,6 +370,25 @@ mod tests {
         let tap = Control::key_tap(keycode::HOME, 0);
         assert_eq!(tap[0].encode()[1], ACTION_DOWN);
         assert_eq!(tap[1].encode()[1], ACTION_UP);
+    }
+
+    #[test]
+    fn start_app_and_resize_layout() {
+        assert_eq!(
+            Control::StartApp("org.videolan.vlc".into()).encode(),
+            [&[16u8, 16][..], b"org.videolan.vlc"].concat()
+        );
+        let long = Control::StartApp("a.".repeat(200)).encode();
+        assert_eq!(long[1], 255, "1-byte length");
+        assert_eq!(long.len(), 2 + 255);
+        assert_eq!(
+            Control::ResizeDisplay {
+                width: 1280,
+                height: 720
+            }
+            .encode(),
+            [21, 0x05, 0x00, 0x02, 0xd0]
+        );
     }
 
     #[test]
