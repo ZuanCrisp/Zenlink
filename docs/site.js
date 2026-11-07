@@ -245,3 +245,41 @@
   setInterval(() => { if (!document.hidden) load(); }, 5 * 60 * 1000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - loadedAt > 60 * 1000) load(); });
 })();
+
+// Headings keep the line count they were written for (one line, or one per
+// <br>) in both languages and at every width: when the text would wrap, the
+// font shrinks just enough to fit, down to 80% of its normal size. Past that
+// the heading wraps onto balanced lines instead of getting tiny.
+(() => {
+  const SEL = ".hook, h2";
+  const lines = (el) => {
+    const lh = parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize) * 1.1;
+    return Math.round(el.offsetHeight / lh);
+  };
+  const phone = matchMedia("(max-width: 760px)");
+  function fit() {
+    document.querySelectorAll(SEL).forEach((el) => {
+      el.style.fontSize = "";
+      // Phones keep one heading size everywhere and wrap onto balanced lines.
+      if (phone.matches || !el.offsetHeight) return;
+      const want = el.querySelectorAll("br").length + 1;
+      if (lines(el) <= want) return;
+      const base = parseFloat(getComputedStyle(el).fontSize);
+      let lo = base * 0.8, hi = base;
+      el.style.fontSize = lo + "px";
+      if (lines(el) > want) { el.style.fontSize = ""; return; }
+      for (let i = 0; i < 8; i++) {
+        const mid = (lo + hi) / 2;
+        el.style.fontSize = mid + "px";
+        if (lines(el) <= want) lo = mid; else hi = mid;
+      }
+      el.style.fontSize = Math.floor(lo * 10) / 10 + "px";
+    });
+  }
+  let queued = false;
+  const later = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; fit(); }); } };
+  addEventListener("resize", later);
+  document.addEventListener("zenlink:lang", later);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(later);
+  later();
+})();
