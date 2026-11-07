@@ -1,7 +1,7 @@
 //! In-app update (v2.5.1): HTTPS through WinHTTP, SHA-256 through BCrypt
 //! (both part of Windows, no extra crates), and the three ways to install.
 //!
-//! Nothing is downloaded until the user clicks "Update" (AGENTS.md 3c). A
+//! Nothing is downloaded until the user clicks "Update". A
 //! file is only run after its SHA-256 matches the digest GitHub publishes for
 //! the release asset; [`zenlink_core::update`] already refused assets from
 //! anywhere but this repository's release downloads.
