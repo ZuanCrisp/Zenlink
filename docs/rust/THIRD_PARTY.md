@@ -1,4 +1,4 @@
-# Third-party references (ZenLink Next)
+# Third-party references (ZenLink)
 
 Motion constants and Liquid Glass optics are adapted from these projects.
 No code is copied verbatim; values and formulas are re-implemented.

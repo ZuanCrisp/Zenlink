@@ -35,7 +35,11 @@ class PrerequisiteTests(unittest.TestCase):
         # The user tests manually with Start ZenLink.bat: it must run the current code.
         bat = _bat()
         self.assertIn("call :build_next", _section(bat, ":launch"))
-        self.assertIn("cargo build --release -p zenlink-app", _section(bat, ":build_next"))
+        build = _section(bat, ":build_next")
+        self.assertIn(r"rust\tools\build-window.ps1", build)
+        # The helper runs cargo with a progress title (elapsed / estimate).
+        ps = (ROOT / "rust" / "tools" / "build-window.ps1").read_text(encoding="utf-8")
+        self.assertRegex(ps, r"build.+--release.+-p.+zenlink-app")
 
     def test_start_script_loads_machine_only_settings(self):
         # A3: e.g. ANDROID_HOME for the user's SDK, kept out of the repository.

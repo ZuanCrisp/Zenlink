@@ -6,7 +6,7 @@
 ### ✨ What's new
 
 - **🤖 Android, no app on the phone.** Android 5.0+ over USB with the official scrcpy server (v5.0.1) and Google's official `adb` (37.0.1), both included. Picture, sound (Android 11+), mouse and keyboard control, clipboard, Back / Home / Recent Apps.
-- **📶 Android over Wi-Fi.** One click from a USB connection, or Android 11+ Wireless debugging pairing with a 6-digit code.
+- **📶 Android over Wi-Fi.** One click from a USB connection, or Android 11+ Wireless debugging: scan the QR code ZenLink shows (no typing), or enter a 6-digit pairing code.
 - **🧠 Smart Encoder Detection.** H.264 by default; H.265 only when the phone and Windows both handle it, with automatic fallback. Video profiles (Low Latency, Balanced, High Quality, Streaming, Custom) and settings per device.
 - **🪟 Native Rust window.** Media Foundation hardware decoding into Direct3D 11, one frame per refresh, Liquid Glass UI. No WebView2, no Visual C++ runtime.
 - **🎬 OBS.** Game Capture of the ZenLink window is smoother and keeps working through rotation.

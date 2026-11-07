@@ -12,6 +12,13 @@
 //!   `host:connect:<ip>:<port>` (the address on the Wireless debugging
 //!   screen) connects.
 //!
+//! - **QR code** (Android 11+): ZenLink shows a QR code
+//!   `WIFI:T:ADB;S:<name>;P:<password>;;` (the format Android Studio uses).
+//!   The phone scans it under Wireless debugging › Pair device with QR code
+//!   and then announces `_adb-tls-pairing._tcp` with that name over mDNS.
+//!   The ADB server lists it (`host:mdns:services`); ZenLink pairs with the
+//!   password, then connects to the phone's `_adb-tls-connect._tcp` service.
+//!
 //! The device keeps the same stable identity over Wi-Fi (hardware serial,
 //! `identity.rs`), so its settings follow it. No secret is stored by
 //! ZenLink: the pairing key lives in the ADB server's own key store.
@@ -87,7 +94,90 @@ pub fn wlan_ip(ip_output: &str) -> Option<String> {
     })
 }
 
+/// mDNS service type the phone announces after scanning the QR code.
+pub const PAIRING_SERVICE: &str = "_adb-tls-pairing";
+/// mDNS service type of a phone that accepts wireless debugging connections.
+pub const CONNECT_SERVICE: &str = "_adb-tls-connect";
+
+/// One line of `host:mdns:services`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MdnsService {
+    pub name: String,
+    pub kind: String,
+    pub host: String,
+    pub port: u16,
+}
+
+/// Parses `host:mdns:services`: one service per line,
+/// `<instance>\t<service type>\t<ipv4>:<port>` (AOSP adb,
+/// `mdns_list_discovered_services`).
+pub fn parse_mdns_services(text: &str) -> Vec<MdnsService> {
+    text.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let (name, kind, addr) = (f.next()?, f.next()?, f.next()?);
+            let (host, port) = parse_endpoint(addr)?;
+            Some(MdnsService {
+                name: name.trim().to_string(),
+                kind: kind.trim().to_string(),
+                host,
+                port,
+            })
+        })
+        .collect()
+}
+
+/// The pairing service the phone announced for our QR `name`.
+pub fn find_pairing<'a>(list: &'a [MdnsService], name: &str) -> Option<&'a MdnsService> {
+    list.iter()
+        .find(|s| s.name == name && s.kind.starts_with(PAIRING_SERVICE))
+}
+
+/// The phone's connect service, found by its address (the instance name
+/// differs from the pairing one).
+pub fn find_connect<'a>(list: &'a [MdnsService], host: &str) -> Option<&'a MdnsService> {
+    list.iter()
+        .find(|s| s.host == host && s.kind.starts_with(CONNECT_SERVICE))
+}
+
+/// Text of the pairing QR code.
+pub fn qr_payload(name: &str, password: &str) -> String {
+    format!("WIFI:T:ADB;S:{name};P:{password};;")
+}
+
+/// A random token of letters and digits for the QR name and password. It
+/// lives for one pairing attempt (about two minutes) on the local network.
+pub fn random_token(len: usize) -> String {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    const A: &[u8] = b"abcdefghijkmnpqrstuvwxyz23456789";
+    let mut out = String::with_capacity(len);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut h = RandomState::new().build_hasher();
+    h.write_u128(nanos);
+    let mut x = h.finish();
+    for i in 0..len {
+        if i % 10 == 0 {
+            let mut h = RandomState::new().build_hasher();
+            h.write_u64(x ^ i as u64);
+            x = h.finish();
+        }
+        out.push(A[(x % A.len() as u64) as usize] as char);
+        x /= A.len() as u64;
+    }
+    out
+}
+
 impl AdbClient {
+    /// Services the ADB server found over mDNS (`adb mdns services`).
+    pub fn mdns_services(&self) -> Result<Vec<MdnsService>, AdbError> {
+        let out = self.host_query("host:mdns:services")?;
+        Ok(parse_mdns_services(&String::from_utf8_lossy(&out)))
+    }
+
     /// `adb connect host:port`.
     pub fn connect_device(&self, host: &str, port: u16) -> Result<Reply, AdbError> {
         // A connect to an unreachable address takes the server several seconds.
@@ -124,6 +214,34 @@ impl AdbClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mdns_list_and_qr_pairing_lookup() {
+        let text = "adb-R58N1-AbCd\t_adb-tls-connect._tcp\t192.168.1.20:41234\n\
+                    zenlink-x7k2p9\t_adb-tls-pairing._tcp.\t192.168.1.20:37099\n\
+                    junk line\n";
+        let list = parse_mdns_services(text);
+        assert_eq!(list.len(), 2);
+        let p = find_pairing(&list, "zenlink-x7k2p9").unwrap();
+        assert_eq!((p.host.as_str(), p.port), ("192.168.1.20", 37099));
+        assert!(find_pairing(&list, "other").is_none());
+        let c = find_connect(&list, &p.host).unwrap();
+        assert_eq!(c.port, 41234);
+        assert!(parse_mdns_services("").is_empty());
+    }
+
+    #[test]
+    fn qr_text_and_tokens() {
+        assert_eq!(
+            qr_payload("zenlink-ab", "pw12"),
+            "WIFI:T:ADB;S:zenlink-ab;P:pw12;;"
+        );
+        let a = random_token(12);
+        let b = random_token(12);
+        assert_eq!(a.len(), 12);
+        assert!(a.bytes().all(|c| c.is_ascii_alphanumeric()));
+        assert_ne!(a, b);
+    }
 
     #[test]
     fn endpoints_are_parsed_and_checked() {

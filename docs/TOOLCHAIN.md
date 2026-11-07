@@ -1,4 +1,4 @@
-# Build toolchain (ZenLink Next)
+# Build toolchain (ZenLink)
 
 Tools already on the PC are used first (AGENTS.md §3d-2). Anything new goes to `E:\DevTools`.
 

@@ -13,7 +13,7 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 ### B-1: "Hanya perangkat / Device only" sound (ZenLink Studio, cable)            Status: open
 - Reported: 2026-11-06, carried over from v2.2.31 (AGENTS.md §7 item 1).
 - Cause: n/a. The session sends HPA0 after the first frame (`zenlink/usbdirect`).
-- Fix: n/a: the code path is unchanged from v2.2.31; only a device check is left.
+- Fix: n/a: the code path is unchanged from v2.2.31; only a device check is left. Re-read on 2026-11-07: "Hanya perangkat" in the Rust window posts `/api/audio {"enabled": false}` (`main.rs` audio body); `castmanager.set_audio` calls `session.set_audio_to_pc(False)` and stops the PC sound; a session started that way still finishes the known-good handshake with HPA1, then sends HPA0 on the first frame (`session.py`). No defect found in code.
 - Verification: unverified: needs an iPhone on the ZenLink Studio cable path, "Device only" selected; check that the sound plays on the phone and not on the PC.
 
 ### B-2: OBS portrait/landscape with Android rotation            Status: fixed (unverified)
@@ -234,3 +234,24 @@ measurement, or the user's confirmation on a named device). Otherwise it is
 - Reported: 2026-11-07, build output (also in v2.2.31).
 - Fix: `AppWindow.maximized` renamed `is-maximized` (`app.slint`, `main.rs`).
 - Verification: `cargo build` / `cargo clippy` print no warnings.
+
+### B-32: Toasts and tooltips hidden behind the picture            Status: fixed (verified)
+- Reported: 2026-11-07 by the owner (screenshot: the "Ingat: Alt+R…" toast cut by the video; a Quick Settings tooltip clipped).
+- Cause: the picture is a child window (D3D11 swap chain, needed for OBS and frame pacing). A child window always covers what the parent window (Slint) draws in its area.
+- Fix: `VideoView::set_holes` cuts the toast and tooltip rectangles out of the picture's window region (`SetWindowRgn`, rounded rect minus holes); `main.rs` passes the rectangles each frame tick, only changed regions are applied. OBS still captures the full swap chain (the region only affects what Windows shows).
+- Verification: screenshot with the recorded Android fixture and a test toast (`ZL_TOAST_TEST`): the toast shows over the playing picture.
+
+### B-33: The window opened too small            Status: fixed (verified)
+- Reported: 2026-11-07 by the owner.
+- Fix: the first fit uses up to 85% of the work-area height (was smaller), `clamp_to_work_area` keeps at least 85%; a size the user picked is still remembered.
+- Verification: test start on the owner's PC opened at 824×900 (screenshot).
+
+### B-34: Shortcuts: Space removed, sound needs Alt+M            Status: fixed (verified)
+- Reported: 2026-11-07 by the owner: Space for start/stop must go; sound on/off must be a combination, not plain M.
+- Fix: `shortcuts.rs` never maps a plain key (all keys go to the phone or iPad); `Alt+M` toggles the PC sound on both platforms and shows a toast; Space start/stop removed; the in-app list, README and swipe tips updated (swipe from the left edge = back).
+- Verification: test `plain_keys_are_never_shortcuts_and_alt_m_mutes`.
+
+### B-35: Android Wi-Fi pairing needed typing an address and a code            Status: fixed (unverified)
+- Reported: 2026-11-07 by the owner: "bisa sambungkan dengan QR, biar simple".
+- Fix: "Pair with QR" in the Wi-Fi card shows `WIFI:T:ADB;S:zenlink-<random>;P:<random>;;` (the Android Studio format). ZenLink polls the ADB server's mDNS list (`host:mdns:services`) for `_adb-tls-pairing` with that name, pairs with the password, then connects to the phone's `_adb-tls-connect` service at the same IP. Gives up after 2 minutes; Cancel stops it. The code pairing stays.
+- Verification: tests `mdns_list_and_qr_pairing_lookup`, `qr_text_and_tokens`; the QR shown in the app (`ZL_QR_TEST`) decodes with zxing-cpp to the expected text. Unverified: an Android 11+ phone scanning it on the same Wi-Fi.

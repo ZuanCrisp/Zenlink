@@ -13,7 +13,7 @@ mod tray;
 mod usbphones;
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -151,14 +151,18 @@ fn is_full() -> bool {
 }
 
 /// Physical bounds of the monitor the window is on.
-/// The first time the window is on screen: keep the default size inside
-/// the monitor's work area (small or high-DPI laptop screens).
+/// The first time the window is on screen: 85% of the work area's height
+/// (the owner found the old 900 px start too small on large screens), kept
+/// inside the work area on small or high-DPI laptop screens.
 fn clamp_to_work_area(ui: &AppWindow) {
     let Some((wx, wy, ww, wh)) = work_area(ui) else {
         return;
     };
     let cur = ui.window().size().to_logical(ui.window().scale_factor());
-    let (w, h) = (cur.width.min(ww * 0.95), cur.height.min(wh * 0.95));
+    let (w, h) = (
+        cur.width.min(ww * 0.95),
+        cur.height.max(wh * 0.85).min(wh * 0.95),
+    );
     if (w, h) != (cur.width, cur.height) {
         let size = LogicalSize::new(w, h);
         ui.window().set_size(size);
@@ -654,8 +658,9 @@ fn default_fit(ui: &AppWindow, shown: (u32, u32)) -> Option<(f32, f32)> {
     let chrome_w = ui.get_chrome_w() + 2.0 * PIC_INSET;
     let chrome_h = ui.get_chrome_h() + 2.0 * PIC_INSET;
     let aspect = shown.0 as f32 / shown.1.max(1) as f32;
-    let max_h = wh * 0.62 - chrome_h;
-    let max_w = ww * 0.46 - chrome_w;
+    // The window takes up to 85% of the screen's height (was 62%: too small).
+    let max_h = wh * 0.85 - chrome_h;
+    let max_w = ww * 0.6 - chrome_w;
     let (mut sw, mut sh) = (max_h * aspect, max_h);
     if sw > max_w {
         sw = max_w;
@@ -1301,11 +1306,25 @@ fn show_android(
         .collect();
     ui.set_android_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
     APP.with_borrow_mut(|a| a.android_list = list.to_vec());
+    // Test hook: show the QR pairing card (no phone needed to see it).
+    static QR_TEST: AtomicBool = AtomicBool::new(false);
+    if std::env::var_os("ZL_QR_TEST").is_some() && !QR_TEST.swap(true, Relaxed) {
+        android_wifi_qr(ui);
+    }
     // Test hook: play a recorded scrcpy stream as soon as the workspace shows.
     let fixture = std::env::var_os("ZL_ANDROID_FIXTURE").is_some();
     if fixture && !APP.with_borrow(|a| a.fixture_started) {
         APP.with_borrow_mut(|a| a.fixture_started = true);
         android_start(ui, -1);
+        // Test hook: a toast over the playing picture (the picture must not hide it).
+        if let Some(t) = std::env::var_os("ZL_TOAST_TEST") {
+            let (w, t) = (ui.as_weak(), t.to_string_lossy().into_owned());
+            slint::Timer::single_shot(Duration::from_secs(4), move || {
+                if let Some(ui) = w.upgrade() {
+                    show_toast(&ui, t);
+                }
+            });
+        }
     }
 }
 
@@ -1834,6 +1853,164 @@ fn android_wifi_pair(ui: &AppWindow, addr: String, code: String) {
     });
 }
 
+/// Current QR pairing attempt; a new attempt or Cancel bumps it and the
+/// old poll thread stops.
+static QR_RUN: AtomicU64 = AtomicU64::new(0);
+
+/// Black-on-white QR code with a 4-module quiet zone, 6 px per module.
+fn qr_image(qr: &qrcodegen::QrCode) -> slint::Image {
+    const SCALE: usize = 6;
+    const QUIET: i32 = 4;
+    let n = (qr.size() + QUIET * 2) as usize;
+    let side = n * SCALE;
+    let mut buf = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(side as u32, side as u32);
+    let px = buf.make_mut_slice();
+    for (i, p) in px.iter_mut().enumerate() {
+        let (x, y) = ((i % side) / SCALE, (i / side) / SCALE);
+        let dark = qr.get_module(x as i32 - QUIET, y as i32 - QUIET);
+        let v = if dark { 0 } else { 255 };
+        *p = slint::Rgba8Pixel {
+            r: v,
+            g: v,
+            b: v,
+            a: 255,
+        };
+    }
+    slint::Image::from_rgba8(buf)
+}
+
+/// "Pair with QR" (Android 11+): show `WIFI:T:ADB;S:<name>;P:<password>;;`,
+/// wait until the phone that scanned it announces `_adb-tls-pairing` with
+/// that name over mDNS, pair with the password, then connect to the
+/// phone's `_adb-tls-connect` service. Gives up after two minutes.
+fn android_wifi_qr(ui: &AppWindow) {
+    use zenlink_android::adb::AdbClient;
+    use zenlink_android::wireless::{find_connect, find_pairing, qr_payload, random_token, Reply};
+    let run = QR_RUN.fetch_add(1, Relaxed) + 1;
+    let name = format!("zenlink-{}", random_token(8));
+    let password = random_token(10);
+    let Ok(qr) =
+        qrcodegen::QrCode::encode_text(&qr_payload(&name, &password), qrcodegen::QrCodeEcc::Medium)
+    else {
+        return;
+    };
+    ui.set_android_qr(qr_image(&qr));
+    ui.set_android_qr_status(
+        tr_ui(
+            ui,
+            "Menunggu HP memindai…",
+            "Waiting for the phone to scan…",
+        )
+        .into(),
+    );
+    ui.set_android_qr_on(true);
+    let weak = ui.as_weak();
+    // Status line (and a toast when the attempt ends) for this attempt only.
+    let report = move |id: &'static str, en: &'static str, detail: String, end: bool| {
+        let weak = weak.clone();
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if QR_RUN.load(Relaxed) != run {
+                return;
+            }
+            let tail = if detail.is_empty() {
+                String::new()
+            } else {
+                format!(" ({detail})")
+            };
+            let msg = format!("{}{tail}", tr_ui(&ui, id, en));
+            if end {
+                ui.set_android_qr_on(false);
+                show_toast(&ui, msg);
+            } else {
+                ui.set_android_qr_status(msg.into());
+            }
+        });
+    };
+    std::thread::spawn(move || {
+        let c = AdbClient::default();
+        let live = || QR_RUN.load(Relaxed) == run;
+        let t0 = Instant::now();
+        let mut last_err = String::new();
+        let found = loop {
+            if !live() {
+                return;
+            }
+            if t0.elapsed() > Duration::from_secs(120) {
+                break None;
+            }
+            match c.mdns_services() {
+                Ok(list) => {
+                    if let Some(s) = find_pairing(&list, &name) {
+                        break Some(s.clone());
+                    }
+                }
+                Err(e) => last_err = e.to_string(),
+            }
+            std::thread::sleep(Duration::from_millis(800));
+        };
+        let Some(svc) = found else {
+            report(
+                "QR tidak dipindai dalam 2 menit. Coba lagi, atau pakai kode pairing",
+                "The QR code was not scanned within 2 minutes. Try again, or use a pairing code",
+                last_err,
+                true,
+            );
+            return;
+        };
+        report(
+            "HP ditemukan, pairing…",
+            "Phone found, pairing…",
+            String::new(),
+            false,
+        );
+        match c.pair(&svc.host, svc.port, &password) {
+            Ok(Reply::Ok(_)) => {}
+            Ok(Reply::Failed(m)) => return report("Pairing gagal", "Pairing failed", m, true),
+            Err(e) => return report("Pairing gagal", "Pairing failed", e.to_string(), true),
+        }
+        report(
+            "Pairing berhasil, menyambung…",
+            "Paired, connecting…",
+            String::new(),
+            false,
+        );
+        // The connect service may be announced a moment after pairing.
+        let t1 = Instant::now();
+        while live() && t1.elapsed() < Duration::from_secs(30) {
+            if let Ok(list) = c.mdns_services() {
+                if let Some(s) = find_connect(&list, &svc.host) {
+                    match c.connect_device(&s.host, s.port) {
+                        Ok(Reply::Ok(_)) => {
+                            return report(
+                                "Tersambung lewat Wi-Fi",
+                                "Connected over Wi-Fi",
+                                format!("{}:{}", s.host, s.port),
+                                true,
+                            )
+                        }
+                        Ok(Reply::Failed(m)) => {
+                            return report("Sambung gagal", "Connect failed", m, true)
+                        }
+                        Err(e) => {
+                            return report("Sambung gagal", "Connect failed", e.to_string(), true)
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(800));
+        }
+        if live() {
+            report(
+                "Pairing berhasil. Isi alamat di layar Wireless debugging lalu tekan Sambung",
+                "Paired. Enter the address on the Wireless debugging screen and press Connect",
+                String::new(),
+                true,
+            );
+        }
+    });
+}
+
 fn android_start(ui: &AppWindow, index: i32) {
     use zenlink_android::devices::Connection;
     use zenlink_android::discovery::Readiness;
@@ -2021,20 +2198,23 @@ fn run_shortcut(
         );
     };
     match s {
-        Shortcut::StartStop => {
-            if android_screen {
-                if APP.with_borrow(|a| a.android.is_some()) {
-                    ui.invoke_android_stop();
-                } else {
-                    ui.invoke_android_start(-1);
-                }
-            } else if apple_live {
-                ui.invoke_stop_cast();
+        Shortcut::Mute => {
+            ui.invoke_action("mute".into());
+            let msg = if ui.get_muted() {
+                tr_ui(
+                    ui,
+                    "Suara di PC: mati (Alt+M)",
+                    "Sound on the PC: off (Alt+M)",
+                )
             } else {
-                ui.invoke_start_cast();
-            }
+                tr_ui(
+                    ui,
+                    "Suara di PC: nyala (Alt+M)",
+                    "Sound on the PC: on (Alt+M)",
+                )
+            };
+            show_toast(ui, msg);
         }
-        Shortcut::Mute => ui.invoke_action("mute".into()),
         Shortcut::Settings => {
             let open = !ui.get_settings_open();
             ui.set_settings_open(open);
@@ -2620,6 +2800,19 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_android_wifi_pair(move |addr, code| {
             if let Some(ui) = weak.upgrade() {
                 android_wifi_pair(&ui, addr.to_string(), code.to_string());
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_wifi_qr(move || {
+            if let Some(ui) = weak.upgrade() {
+                android_wifi_qr(&ui);
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_wifi_qr_cancel(move || {
+            QR_RUN.fetch_add(1, Relaxed);
+            if let Some(ui) = weak.upgrade() {
+                ui.set_android_qr_on(false);
             }
         });
     }
@@ -3284,6 +3477,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     y += (h - ph) / 2.0;
                     (w, h) = (pw, ph);
                 }
+                // Toast and tooltip stay visible over the picture.
+                let mut holes = Vec::new();
+                let px = |v: f32| (v * sf).round() as i32;
+                if ui.get_tip_on() {
+                    holes.push((px(ui.get_tip_x()), px(ui.get_tip_y()), px(ui.get_tip_w()), px(ui.get_tip_h())));
+                }
+                if !ui.get_toast().is_empty() {
+                    // 36 px high, rising 16 px into place above the dock.
+                    let (ww, wh) = (ui.window().size().to_logical(sf).width, ui.window().size().to_logical(sf).height);
+                    let tw = ui.get_toast_w();
+                    holes.push((px((ww - tw) / 2.0), px(wh - 104.0), px(tw), px(52.0)));
+                }
+                v.set_holes(&holes);
                 v.set_bounds(x.round() as i32, y.round() as i32, w.round() as i32, h.round() as i32, streaming, ((22.0 - PIC_INSET) * sf).round() as i32);
                 let shown = v.shown_size();
                 if a.fit_prefs.is_none() {

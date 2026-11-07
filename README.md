@@ -46,9 +46,9 @@
 
 | Feature | Description |
 | :--- | :--- |
-| **🤖 Android (new in v2.5)** | Android 5.0+ over USB, or Wi-Fi (one click from a USB connection, or Android 11+ wireless debugging with a pairing code). Picture, sound (Android 11+), mouse/keyboard control, clipboard, real device names, per-device settings, video profiles and Smart Encoder Detection (H.264 by default; H.265 only when the phone and Windows both decode it, with automatic fallback). Uses Google's official `adb` and the official scrcpy server, both bundled. |
+| **🤖 Android (new in v2.5)** | Android 5.0+ over USB, or Wi-Fi (one click from a USB connection, or Android 11+ wireless debugging: scan a QR code shown by ZenLink, or enter a pairing code). Picture, sound (Android 11+), mouse/keyboard control, clipboard, real device names, per-device settings, video profiles and Smart Encoder Detection (H.264 by default; H.265 only when the phone and Windows both decode it, with automatic fallback). Uses Google's official `adb` and the official scrcpy server, both bundled. |
 | **🔌 Two Apple connection modes** | Choose before anything connects: **Apple Driver** (Apple's own driver, full control) or **ZenLink Studio** (for live streaming, like TikTok LIVE Studio). Each offers **Kabel** or **Nirkabel (Wi-Fi)**. "Remember my choice" skips the question next time. |
-| **📡 ZenLink Studio over Wi-Fi (AirPlay)** | ZenLink is an AirPlay receiver: on the iPhone/iPad open **Control Center → Screen Mirroring → ZenLinkStudioNext**. No driver, no cable. The device's own stream is passed through untouched (HEVC or H.264, up to its native resolution); the how-to is shown on screen. |
+| **📡 ZenLink Studio over Wi-Fi (AirPlay)** | ZenLink is an AirPlay receiver: on the iPhone/iPad open **Control Center → Screen Mirroring → ZenLinkStudio**. No driver, no cable. The device's own stream is passed through untouched (HEVC or H.264, up to its native resolution); the how-to is shown on screen. |
 | **🎥 ZenLink Studio over the cable** | QuickTime capture over USB in H.264 at the device's full native resolution and high bitrate (measured 2360×1640 on iPad 11th gen, 12–30 Mbps, up to ~56 fps). Picture and sound only. |
 | **📶 Apple Driver over Wi-Fi** | Plug the device in once in Apple mode and ZenLink sets up Wi-Fi by itself; afterwards choose **Nirkabel**. ZenLink finds the device on the network itself, even where Windows gets no Bonjour replies. |
 | **📊 Live stats** | Measured decode and display FPS next to the device name (switchable in Settings). |
@@ -70,7 +70,7 @@ The same list is in **Settings › Keyboard shortcuts**. Click the picture first
 
 | Shortcut | Action | Platform |
 | :---: | :--- | :--- |
-| **`Space`** · **`M`** | Start / stop mirroring · sound on the PC on / off | both |
+| **`Alt + M`** | Sound on the PC on / off | both |
 | **`F11`** · **`Esc`** · **`Ctrl + ,`** | Full screen · leave full screen · Settings | both |
 | **`Alt + H`** | Rotate the view (Auto, 90°, 180°, 270°, 0°) | both |
 | **`Alt + ←`** | Back | both |

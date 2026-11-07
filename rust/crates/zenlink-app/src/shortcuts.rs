@@ -4,16 +4,14 @@
 //! window has the set the README and Settings list. Pure logic: `route`
 //! decides, `main.rs` performs. F11 / Esc (full screen) stay in Slint.
 //!
-//! Rule from the classic UI: while the PC keyboard types on a live device,
-//! plain keys (Space, M, G...) go to the device; only Alt / Ctrl shortcuts
-//! stay with the app.
+//! Every app shortcut uses Alt or Ctrl (owner, 2026-11-07): plain keys
+//! (Space, M...) always go to the device, so typing never stops the
+//! mirroring or mutes the sound by accident.
 
 /// What a key press does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shortcut {
-    /// Space: start / stop mirroring.
-    StartStop,
-    /// M: sound on the PC on / off.
+    /// Alt+M: sound on the PC on / off.
     Mute,
     /// Ctrl+, : open / close Settings.
     Settings,
@@ -55,6 +53,7 @@ pub fn route(
     if alt && !ctrl {
         return match (lower, android) {
             ('h', _) => Some(Shortcut::Rotate),
+            ('m', _) => Some(Shortcut::Mute),
             ('c', _) => Some(Shortcut::CopyText),
             (LEFT, _) => Some(Shortcut::Back),
             ('l', _) => Some(Shortcut::Lock),
@@ -90,14 +89,8 @@ pub fn route(
         }
         return None;
     }
-    if ctrl || alt || typing {
-        return None;
-    }
-    match lower {
-        ' ' => Some(Shortcut::StartStop),
-        'm' => Some(Shortcut::Mute),
-        _ => None,
-    }
+    let _ = typing; // plain keys are never shortcuts
+    None
 }
 
 /// HID keyboard usage (and whether Shift is needed) for a typed character,
@@ -210,17 +203,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plain_keys_are_app_shortcuts_only_when_not_typing() {
-        assert_eq!(
-            route(false, " ", false, false, false, false),
-            Some(Shortcut::StartStop)
-        );
-        assert_eq!(
-            route(true, "m", false, false, false, false),
-            Some(Shortcut::Mute)
-        );
-        assert_eq!(route(true, " ", false, false, false, true), None);
-        assert_eq!(route(false, "m", false, false, false, true), None);
+    fn plain_keys_are_never_shortcuts_and_alt_m_mutes() {
+        for typing in [false, true] {
+            for android in [false, true] {
+                assert_eq!(route(android, " ", false, false, false, typing), None);
+                assert_eq!(route(android, "m", false, false, false, typing), None);
+                assert_eq!(
+                    route(android, "m", false, false, true, typing),
+                    Some(Shortcut::Mute)
+                );
+                assert_eq!(
+                    route(android, "M", false, true, true, typing),
+                    Some(Shortcut::Mute)
+                );
+            }
+        }
     }
 
     #[test]

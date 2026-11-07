@@ -138,7 +138,13 @@ pub struct VideoView {
     decode: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
     meter: Mutex<RateMeter>,
     bounds: Mutex<Option<Bounds>>,
+    /// Parent-window rectangles (x, y, w, h) the picture leaves open, so
+    /// the window's toast and tooltips drawn there stay visible.
+    holes: Mutex<Vec<Hole>>,
 }
+
+/// A rectangle in the parent window's client pixels: x, y, width, height.
+pub type Hole = (i32, i32, i32, i32);
 
 /// Last `set_bounds`: x, y, width, height, visible, corner radius.
 type Bounds = (i32, i32, i32, i32, bool, i32);
@@ -389,6 +395,7 @@ impl VideoView {
             decode: None,
             meter,
             bounds: Mutex::new(None),
+            holes: Mutex::new(Vec::new()),
         })
     }
 
@@ -430,14 +437,13 @@ impl VideoView {
         let size_changed = last
             .map(|l| (l.2, l.3, l.5) != (key.2, key.3, key.5))
             .unwrap_or(true);
+        let moved = last.map(|l| (l.0, l.1) != (x, y)).unwrap_or(true);
         *last = Some(key);
+        let holes = self.holes.lock().unwrap().clone();
         unsafe {
-            use windows::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn};
             let hwnd = HWND(self.inner.hwnd as _);
-            if size_changed {
-                // The system owns the region after SetWindowRgn.
-                let rgn = CreateRoundRectRgn(0, 0, key.2 + 1, key.3 + 1, radius * 2, radius * 2);
-                SetWindowRgn(hwnd, Some(rgn), true);
+            if size_changed || (moved && !holes.is_empty()) {
+                apply_region(hwnd, key, &holes);
             }
             let flags = if visible {
                 SWP_SHOWWINDOW
@@ -457,6 +463,24 @@ impl VideoView {
         drop(last);
         if size_changed && visible {
             self.wait_resized();
+        }
+    }
+
+    /// Leaves `holes` (parent client pixels) open in the picture, e.g. a
+    /// toast or a tooltip of the window that overlaps it. The picture is a
+    /// child window: without a hole it covers what the window draws there.
+    /// OBS still captures the full picture (the region only affects what
+    /// Windows shows). Does nothing when nothing changed.
+    pub fn set_holes(&self, holes: &[Hole]) {
+        let mut h = self.holes.lock().unwrap();
+        if h.as_slice() == holes {
+            return;
+        }
+        *h = holes.to_vec();
+        let holes = h.clone();
+        drop(h);
+        if let Some(key) = *self.bounds.lock().unwrap() {
+            unsafe { apply_region(HWND(self.inner.hwnd as _), key, &holes) };
         }
     }
 
@@ -1183,4 +1207,26 @@ fn render_session(inner: &Inner) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Rounded rectangle of the view minus the holes (converted to the view's
+/// own coordinates). The system owns the region after SetWindowRgn.
+unsafe fn apply_region(hwnd: HWND, key: Bounds, holes: &[Hole]) {
+    use windows::Win32::Graphics::Gdi::{
+        CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_DIFF,
+    };
+    let (x, y, w, h, _, radius) = key;
+    unsafe {
+        let rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, radius * 2, radius * 2);
+        for &(hx, hy, hw, hh) in holes {
+            let (l, t) = (hx - x, hy - y);
+            if hw <= 0 || hh <= 0 || l >= w || t >= h || l + hw <= 0 || t + hh <= 0 {
+                continue;
+            }
+            let cut = CreateRectRgn(l, t, l + hw, t + hh);
+            CombineRgn(Some(rgn), Some(rgn), Some(cut), RGN_DIFF);
+            let _ = DeleteObject(cut.into());
+        }
+        SetWindowRgn(hwnd, Some(rgn), true);
+    }
 }

@@ -1,4 +1,4 @@
-# Third-party components bundled with ZenLink Next
+# Third-party components bundled with ZenLink
 
 Design references for the Rust window are listed in `docs/rust/THIRD_PARTY.md`.
 
