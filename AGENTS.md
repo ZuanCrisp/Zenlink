@@ -9,7 +9,7 @@ Owner: **Zenvy Zenshiro** (https://github.com/zenvyzenshiro). Repository: https:
 
 ## 0. Start-up checklist (do these in order, every new session)
 
-1. Run `pwd` / `Get-Location`. Confirm that you are in `E:\Zenlink v.2.5.1 Beta`. If you are not, stop and `cd` there.
+1. Run `pwd` / `Get-Location`. Confirm that you are in `E:\ZenLink v2.5.1`. If you are not, stop and `cd` there.
 2. Read `lanjutan.md` in this folder if it exists. It is your checkpoint from earlier sessions. Continue from its "Next" list.
 3. Read `docs/ROADMAP.md`. It sets the phase order, the gates and how to use sub-agents. Work **one phase at a time**. Then read `docs/ANDROID_MASTER_PROMPT.md`, and `docs/BUGS-v2.5.md` once it exists.
 4. If the `caveman` skill is installed, invoke it and use it for chat replies. Persisted files (code, comments, commits, docs) stay in plain full English.
@@ -24,7 +24,7 @@ Reply to the user in **concise Indonesian**. Write code, comments, commits and d
 
 Develop ZenLink v2.5.1 Beta **only** in:
 
-`E:\Zenlink v.2.5.1 Beta` (branch `v2.5.1-beta`, cloned on 2026-11-07 from `E:\Zenlink v.2.5 Beta` at the v2.5.0 release commit 5900f11)
+`E:\ZenLink v2.5.1` (branch `v2.5.1-beta`, cloned on 2026-11-07 from `E:\Zenlink v.2.5 Beta` at the v2.5.0 release commit 5900f11)
 
 Released versions that must never be changed from here:
 
@@ -38,11 +38,11 @@ Strict requirements:
 
 - Create the development directory if it does not exist.
 - Copy the project from `E:\ZenLink v2.2.31` into it with the bootstrap in §2.
-- Do all Rust reconstruction, Android integration, testing and builds only inside `E:\Zenlink v.2.5.1 Beta`.
+- Do all Rust reconstruction, Android integration, testing and builds only inside `E:\ZenLink v2.5.1`.
 - Never modify, overwrite, delete or clean files inside `E:\Zenlink v.2.5 Beta`, `E:\ZenLink v2.2.31` or `E:\ZenLink`.
 - Keep build outputs, caches, configurations, logs and release artifacts separate. See §3.
 - Do not change the stable installation, its settings or its USB driver configuration during development.
-- Before every destructive command (`Remove-Item`, `rm -rf`, `git clean`, `git reset --hard`, `cargo clean`) and before every build, print the working directory. Check that the absolute target path starts with `E:\Zenlink v.2.5.1 Beta`.
+- Before every destructive command (`Remove-Item`, `rm -rf`, `git clean`, `git reset --hard`, `cargo clean`) and before every build, print the working directory. Check that the absolute target path starts with `E:\ZenLink v2.5.1`.
 - The released v2.5.0 and the stable v2.2.31 must always stay fully working rollback versions.
 
 The goal is complete isolation: v2.5.1 Beta development must never damage or replace v2.5.0 or v2.2.31.
@@ -221,7 +221,7 @@ Many users ask for a Mac version. The v2.5 work is Windows-first, but **new code
 - Do not push to `main` without approval. Push only to the `v2.5.1-beta` branch.
 - Commit identity: `Zenvy Zenshiro <85529012+zenvyzenshiro@users.noreply.github.com>`. End every commit message with:
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
-- Release notes never start with a "## ZenLink vX" heading. Assets per release: `Setup.exe`, `Portable.exe`, `Portable-Source.zip`.
+- Release notes never start with a "## ZenLink vX" heading. Assets per release: `Setup.exe`, `Portable.exe`, `Manual.zip` (named `Portable-Source.zip` up to v2.5.0).
 
 ---
 

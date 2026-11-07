@@ -4,7 +4,7 @@
 
     ZenLink-v<ver>-Portable.exe           one ZenLink.exe, nothing to install (no Python)
     ZenLink-v<ver>-Setup.exe              installer (Inno Setup 6, if installed)
-    ZenLink-v<ver>-Portable-Source.zip    source + Start ZenLink.bat (sets up Python and adb on first run)
+    ZenLink-v<ver>-Manual.zip             manual install: ZenLink.exe + source + Start ZenLink.bat (sets up Python and adb on first run)
 
   ZenLink.exe is the Rust window (rust\). The Python backend is built as
   ZenLinkService.exe; ZenLink.exe starts it headless. Needs cargo (rustup).
@@ -241,7 +241,7 @@ if ($iscc) {
 } else {
     Write-Warning "Inno Setup 6 not found: skipping Setup.exe (winget install JRSoftware.InnoSetup)."
 }
-$srcZip = Join-Path $release "ZenLink-v$Version-Portable-Source.zip"
+$srcZip = Join-Path $release "ZenLink-v$Version-Manual.zip"
 git archive --format=zip --prefix="ZenLink-v$Version/" -o $srcZip HEAD
 # Ready-built ZenLink.exe next to Start ZenLink.bat (no Rust toolchain needed).
 # adb is not packed: Start ZenLink.bat downloads Google's official copy

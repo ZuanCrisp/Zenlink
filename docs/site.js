@@ -209,7 +209,7 @@
         if (!latest) return;
         document.querySelectorAll(".ver").forEach((el) => { el.textContent = latest.tag_name.replace(/^v/, ""); });
         const pick = (re) => latest.assets.find((a) => re.test(a.name));
-        const setup = pick(/Setup\.exe$/i), portable = pick(/Portable\.exe$/i), source = pick(/Source\.zip$/i);
+        const setup = pick(/Setup\.exe$/i), portable = pick(/Portable\.exe$/i), source = pick(/(Source|Manual)\.zip$/i);
         // Sizes: the latest release next to v2.2.31, struck through.
         const mb = (n) => `${(n / 1048576).toFixed(1)} MB`;
         const old = releases.find((r) => r.tag_name === "v2.2.31");
@@ -234,7 +234,10 @@
           }
         }
         if (portable) document.getElementById("f-portable").href = portable.browser_download_url;
-        if (source) document.getElementById("f-source").href = source.browser_download_url;
+        if (source) {
+          document.getElementById("f-source").href = source.browser_download_url;
+          document.querySelectorAll(".size-z").forEach((el) => { el.textContent = mb(source.size); });
+        }
       })
       .catch(() => {});
   }

@@ -306,7 +306,8 @@ kbd {
 .dl { margin-top: 10px; padding: 46px 34px; text-align: center; overflow: hidden; }
 .dl .logo { width: 88px; height: 88px; border-radius: 24px; box-shadow: 0 20px 50px -14px rgba(255, 79, 163, .6); }
 .dl h2 { margin-top: 18px; }
-.dlbtns { margin: 30px auto 0; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 760px; text-align: left; }
+.dlbtns { margin: 30px auto 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; max-width: 1080px; text-align: left; }
+.dlopt { grid-template-rows: auto auto 1fr; }
 .dlopt { padding: 22px; border-radius: 22px; background: var(--chip); border: 1px solid var(--edge); display: grid; gap: 8px; }
 .dlopt .btn { width: 100%; }
 .dlopt b { font-size: 14px; }
@@ -377,6 +378,7 @@ footer .bar { padding: 22px 26px; display: flex; flex-wrap: wrap; gap: 14px 24px
   .cluster { height: 420px; transform: scale(.72); transform-origin: top center; margin-bottom: -110px; }
   .cell, .cell.w6, .cell.w8 { grid-column: span 12; }
   .modes, .two, .news, .dlbtns, .warn { grid-template-columns: 1fr; }
+  .dlbtns { max-width: 520px; }
   .warn > div:last-child { grid-column: auto; }
 }
 @media (prefers-reduced-motion: reduce) {

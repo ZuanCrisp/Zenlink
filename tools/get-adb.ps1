@@ -1,5 +1,5 @@
 # Downloads Google's official Android platform-tools (adb) for the
-# Portable-Source package, so the source zip does not have to carry them.
+# Manual.zip package, so the source zip does not have to carry them.
 #
 # Only these files are kept, unmodified, in third_party\platform-tools:
 # adb.exe, AdbWinApi.dll, AdbWinUsbApi.dll, NOTICE.txt.

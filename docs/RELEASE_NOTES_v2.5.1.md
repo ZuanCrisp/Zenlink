@@ -21,4 +21,4 @@
 - Sending files to an iPhone / iPad and Apple over Wi-Fi are not yet confirmed on a device.
 - Windows may show SmartScreen: the files are not code-signed yet.
 
-**Assets:** `Setup.exe` (installer), `Portable.exe` (no install), `Portable-Source.zip` (source package; run `Start ZenLink.bat`).
+**Assets:** `Setup.exe` (installer), `Portable.exe` (no install), `Manual.zip` (manual install with the source code; extract and run `Start ZenLink.bat`).

@@ -10,7 +10,7 @@ third_party/** -text
 # Recorded scrcpy video streams (test fixtures).
 *.scrcpy binary
 
-# Portable-Source.zip (git archive) stays small: no website, no agent notes,
+# Manual.zip (git archive) stays small: no website, no agent notes,
 # no scrcpy server (it is built into ZenLink.exe; for a Rust build get it from
 # the scrcpy v5.0.1 release, docs/android/SCRCPY.md). adb is downloaded by
 # Start ZenLink.bat (tools/get-adb.ps1).

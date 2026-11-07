@@ -1,4 +1,4 @@
-"""The Portable-Source package downloads what it does not carry, at the same
+"""The Manual (source) package downloads what it does not carry, at the same
 versions as the release build (Start ZenLink.bat, tools/get-adb.ps1,
 requirements.lock)."""
 
