@@ -540,9 +540,13 @@ html.lite .parrow { animation: none !important; will-change: auto; }
 html.lite .cluster .d.away { filter: brightness(.5) saturate(.75); }
 html.lite .btn-star .st { filter: none; }
 
-/* Hero: support button (Sociabuzz), the quiet third action */
-.btn-love .hrt { color: var(--pink); filter: drop-shadow(0 0 6px rgba(255, 79, 163, .55)); transform-origin: 50% 60%; animation: beat 2.4s var(--ease) infinite; }
-.btn-love:hover { border-color: color-mix(in srgb, var(--pink) 55%, var(--edge)); background: color-mix(in srgb, var(--pink) 14%, var(--glass-2)); }
+/* Hero: Donate (Sociabuzz), its own warm colour next to the pink Download */
+.btn-love {
+  color: #fff; border: 0; background: linear-gradient(135deg, #ffb547, #ff7a45 45%, #ff4d6d);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .45), inset 0 -2px 6px rgba(120, 30, 0, .25), 0 12px 30px -10px rgba(255, 110, 70, .6);
+}
+.btn-love:hover { transform: translateY(-2px); background: linear-gradient(135deg, #ffc061, #ff8552 45%, #ff5a78); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .5), 0 18px 40px -10px rgba(255, 110, 70, .75); }
+.btn-love .hrt { color: #fff; filter: drop-shadow(0 0 5px rgba(255, 255, 255, .6)); transform-origin: 50% 60%; animation: beat 2.4s var(--ease) infinite; }
 .btn-love:hover .hrt { animation-duration: .9s; }
 @keyframes beat { 0%, 60%, 100% { transform: scale(1); } 15% { transform: scale(1.22); } 30% { transform: scale(.94); } 45% { transform: scale(1.1); } }
 html.lite .btn-love .hrt { animation: none; filter: none; }
