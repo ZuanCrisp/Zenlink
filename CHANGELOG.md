@@ -5,6 +5,11 @@ Full notes for each version are on the [Releases](https://github.com/zenvyzenshi
 ## 2.5.11
 
 ### Added
+- **Device menu:** a ☰ button next to Settings opens a menu on the left with Home and every Android phone and iPhone / iPad, each with a status dot. The selected device has **Screen** and **Files** panels that open beside the menu.
+- **Home without pop-ups:** pick Android or iPhone / iPad, the connection mode and the driver right in the main area.
+- **Phone file manager (Android):** browse the phone, copy to the PC, delete, new folder, drop files to upload into the open folder.
+- **Several phones at once:** pop a phone out into its own window, and **Join** it back into the main window.
+- While mirroring, the area around the picture keeps the glass look instead of black.
 - **Sound route per mode:** Windows only, device only, or both. Apple Driver mode turns the device volume down for "Windows only" (iPad volume buttons follow the orientation); Android 13+ can play on both at once; ZenLink Studio plays on Windows or the device.
 - **Unlock again when the screen locks** (Apple Driver mode, opt-in): when the device locks while mirroring, ZenLink wakes it and enters the saved passcode. On iPad it no longer depends on the orientation.
 - **Install adb from the app:** Android needs Google's adb; ZenLink downloads the official platform-tools (about 8 MB, SHA-256 checked) with a progress bar, once. Setup.exe and Portable.exe are smaller because they no longer carry adb.
@@ -12,6 +17,7 @@ Full notes for each version are on the [Releases](https://github.com/zenvyzenshi
 - **Collapsible settings cards** and a 5-step beginner flow in the README.
 
 ### Fixed
+- **Apple Driver mode with Windows Smart App Control** ([#2](https://github.com/zenvyzenshiro/zenlink/issues/2)): the connection stopped at "Secure connection" with "DLL load failed while importing lzss" because Smart App Control blocked an unsigned helper module. ZenLink no longer ships or loads that module (a built-in Python version replaces it). Other unsigned files may still be blocked until the releases are code-signed.
 - After switching the connection mode or driver, ZenLink asks to restart instead of switching silently.
 - A restart of the service no longer opens a console window.
 - ZenLink Studio explains "driver installed but not attached yet: unplug and plug in again" instead of asking to install the driver.
