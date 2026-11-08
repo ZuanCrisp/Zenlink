@@ -49,7 +49,7 @@
 >   - [**libusb-win32**](https://sourceforge.net/projects/libusb-win32/) by **Stephan Meyer & Travis Lee Robinson** (driver GPL, library LGPL) — the libusb0 driver bundled in `drivers/libusb-win32` (unmodified, signed binaries; source at the link).
 >   - [**libwdi / Zadig**](https://github.com/pbatard/libwdi) by **Pete Batard** (LGPL / GPL) — the driver-package approach ZenLink follows; Zadig itself is not bundled.
 >   - [**scrcpy**](https://github.com/Genymobile/scrcpy) by **Genymobile & Romain Vimont** (Apache-2.0) — the official scrcpy server (v5.0.1, unmodified) runs on the Android phone; ZenLink's Android client is its own Rust code.
->   - **Android SDK Platform-Tools `adb`** by **Google** (Android Open Source Project, Apache-2.0; `NOTICE.txt` included) — bundled unmodified and Google-signed, see [ZenshiroDev/docs/THIRD_PARTY.md](ZenshiroDev/docs/THIRD_PARTY.md).
+>   - **Android SDK Platform-Tools `adb`** by **Google** (Android Open Source Project, Apache-2.0; `NOTICE.txt` included) — not bundled: ZenLink downloads Google's official, unmodified zip on request (SHA-256 checked), see [ZenshiroDev/docs/THIRD_PARTY.md](ZenshiroDev/docs/THIRD_PARTY.md).
 >   - [**UxPlay**](https://github.com/FDH2/UxPlay) by **F. Duncanh** and [**RPiPlay / shairplay**](https://github.com/FD-/RPiPlay) (GPL-3.0) — the AirPlay mirroring protocol reference. ZenLink's AirPlay receiver is written in Python; the **playfair** FairPlay code in `native/playfair` is used unmodified (GPL-3.0).
 
 ---
@@ -58,7 +58,7 @@
 
 | Feature | Description |
 | :--- | :--- |
-| **🤖 Android (new in v2.5)** | Android 5.0+ over USB, or Wi-Fi (one click from a USB connection, or Android 11+ wireless debugging: scan a QR code shown by ZenLink, or enter a pairing code). Picture, sound (Android 11+), mouse/keyboard control, clipboard, real device names, per-device settings, video profiles and Smart Encoder Detection (H.264 by default; H.265 only when the phone and Windows both decode it, with automatic fallback). Uses Google's official `adb` and the official scrcpy server, both bundled. |
+| **🤖 Android (new in v2.5)** | Android 5.0+ over USB, or Wi-Fi (one click from a USB connection, or Android 11+ wireless debugging: scan a QR code shown by ZenLink, or enter a pairing code). Picture, sound (Android 11+), mouse/keyboard control, clipboard, real device names, per-device settings, video profiles and Smart Encoder Detection (H.264 by default; H.265 only when the phone and Windows both decode it, with automatic fallback). Uses Google's official `adb` (downloaded by ZenLink on first use, about 8 MB) and the official scrcpy server (bundled). |
 | **📱 Device picker (new in v2.5.1)** | The Apple screen lists every connected iPhone / iPad (USB or Wi-Fi, iOS version, status) and the ones you used before; click one to choose what Start mirrors. |
 | **🧩 Android apps launcher (new in v2.5.1)** | **Apps** in the dock: a searchable grid of the phone's apps. Open one on the phone's screen or, on Android 10+, in its own window. |
 | **📂 Drop files on the window (new in v2.5.1)** | Android: an `.apk` is installed, other files go to Download. iPhone / iPad (Apple Driver): files land in an app with File Sharing (VLC, Documents …). |
@@ -100,12 +100,24 @@ The same list is in **Settings › Keyboard shortcuts**. Click the picture first
 
 ---
 
+## 🧭 First time? The flow in 5 steps (Pertama kali? Alurnya)
+
+1. **Install and open ZenLink** (Setup.exe is easiest, see Quick Start below). The app follows your Windows language: Bahasa Indonesia if Windows lists it, English otherwise; switch any time in Settings.
+2. **Pick your device type** on the welcome screen: **iPhone / iPad** or **Android Smartphone / Tablet**, then press **Lanjut / Continue**.
+3. **Prepare the device once:**
+   - *iPhone / iPad:* plug in the cable and tap **Trust This Computer**. For touch control (Apple Driver mode, iOS 17+), turn on **Developer Mode** (Settings → Privacy & Security). Without it, use **ZenLink Studio** (picture and sound).
+   - *Android:* turn on **USB debugging** (Settings › About phone › tap Build number 7×, then Developer options › USB debugging), plug in the cable and tap **Allow** on the phone. The first time, ZenLink asks to **Install adb** (Google's official tool) and shows a progress bar.
+4. **Press "Mulai mirroring / Start mirroring".** The device's screen appears; click and type on it to control it (Apple Driver mode and Android).
+5. **Optional:** choose where the sound plays (Windows, device or both), switch to Wi-Fi so you can unplug the cable, save a passcode for auto unlock, or add the window to OBS. Each settings card opens and closes with its header.
+
+Stuck? Every screen says what is missing (driver, Developer Mode, USB debugging) and how to fix it. Logs: `%LOCALAPPDATA%\ZenLink-Next\logs`.
+
 ## 📦 Quick Start
 
 ### 📋 Requirements (Persyaratan)
 
 - **Windows 10 (1809+) or Windows 11, 64-bit.** No WebView2 and no Visual C++ runtime needed. Windows "N" editions need Microsoft's free Media Feature Pack (ZenLink tells you and opens the page).
-- **Android:** Android 5.0+ with **USB debugging** on (Settings › About phone › tap Build number 7×, then Developer options › USB debugging), a data cable, and **Allow** on the phone. Sound needs Android 11+. ZenLink brings its own `adb`; some phones (for example Samsung) need the maker's USB driver, which Windows Update usually installs.
+- **Android:** Android 5.0+ with **USB debugging** on (Settings › About phone › tap Build number 7×, then Developer options › USB debugging), a data cable, and **Allow** on the phone. Sound needs Android 11+. ZenLink downloads Google's official `adb` the first time you pick Android (one click, about 8 MB); some phones (for example Samsung) need the maker's USB driver, which Windows Update usually installs.
 - **iPhone / iPad: Apple Devices** (Microsoft Store) or iTunes, for Apple's USB driver and Apple Mobile Device Service.
 - **Apple Driver mode** needs **iOS 17 or newer** with **Developer Mode** on: connect the cable, tap **Trust This Computer**, then **Settings → Privacy & Security → Developer Mode → On** and restart. *(If the toggle is missing, opening a screen-mirroring tool once — e.g. 3uTools → Realtime Screen — makes it appear.)* On iOS 17–26 it runs **Hybrid Control** (see the matrix below).
 - **ZenLink Studio** works without Developer Mode (cable or AirPlay). AirPlay needs the PC and the device on the same network; the installer (or the first run of `Start ZenLink.bat`) offers to allow ZenLink through Windows Firewall.
@@ -130,7 +142,7 @@ The same list is in **Settings › Keyboard shortcuts**. Click the picture first
 
 ### Option 1B: Portable (one .exe, no installation, no Python)
 1. Download **`ZenLink-vX.Y.Z-Portable.exe`** from [**Releases**](../../releases/latest) and put it anywhere.
-2. Double-click it. The first start takes a few seconds (it unpacks the Apple backend and `adb`); data is kept in `%LOCALAPPDATA%\ZenLink-Next`.
+2. Double-click it. The first start takes a few seconds (it unpacks the Apple backend); data is kept in `%LOCALAPPDATA%\ZenLink-Next`.
 
 ### Option 2: Manual (source code, no git)
 Download **`ZenLink-vX.Y.Z-Manual.zip`** from [**Releases**](../../releases/latest), extract it and run **`Start ZenLink.bat`** (same first-run setup as below).
@@ -141,11 +153,11 @@ git clone https://github.com/zenvyzenshiro/zenlink.git
 cd zenlink
 .\"Start ZenLink.bat"
 ```
-The first run sets everything up: it installs Python 3.13 with winget if needed, creates the environment and installs `apps/desktop/backend/requirements.txt`, offers Apple Devices (for Apple Driver mode) and the firewall permission for AirPlay. For Android it offers to download Google's official `adb` (platform-tools 37.0.1, about 8 MB, checksum and Google signature checked), unless an Android SDK is already there (`ANDROID_HOME`). Setup.exe and Portable.exe bundle `adb`. Later runs open straight away. **`ZenshiroDev\tooling\windows\scripts\run.bat`** starts ZenLink with a visible console log. Settings of a source checkout are kept in `data\` (ignored by git).
+The first run sets everything up: it installs Python 3.13 with winget if needed, creates the environment and installs `apps/desktop/backend/requirements.txt`, offers Apple Devices (for Apple Driver mode) and the firewall permission for AirPlay. For Android it offers to download Google's official `adb` (platform-tools 37.0.1, about 8 MB, checksum and Google signature checked), unless an Android SDK is already there (`ANDROID_HOME`). Setup.exe and Portable.exe download it inside the app ("Install adb") the first time Android is chosen. Later runs open straight away. **`ZenshiroDev\tooling\windows\scripts\run.bat`** starts ZenLink with a visible console log. Settings of a source checkout are kept in `data\` (ignored by git).
 
 Tests: `.venv\Scripts\python -m unittest discover -s apps/desktop/backend/tests -t apps/desktop/backend` and `cargo test --workspace` (no device needed; `apps\desktop\backend\tests\airplay_sim.py` simulates an iPhone mirroring over AirPlay).
 
-To build the release files yourself: `powershell -ExecutionPolicy Bypass -File .\build_portable_release.ps1 -PlatformTools <Android SDK>\platform-tools` (Rust, PyInstaller, Inno Setup 6 for the installer). Everything it builds goes to `out\`.
+To build the release files yourself: `powershell -ExecutionPolicy Bypass -File .\build_portable_release.ps1` (Rust, PyInstaller, Inno Setup 6 for the installer). Everything it builds goes to `out\`.
 
 ### Repository layout
 

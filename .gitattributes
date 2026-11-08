@@ -13,7 +13,7 @@ ZenshiroDev/resources/third_party/** -text
 # Manual.zip (git archive) stays small: no website,
 # no scrcpy server (it is built into ZenLink.exe; for a Rust build get it from
 # the scrcpy v5.0.1 release, ZenshiroDev/docs/android/SCRCPY.md). adb is downloaded by
-# Start ZenLink.bat (ZenshiroDev/tooling/windows/tools/get-adb.ps1).
+# ZenLink itself on request (apps/desktop/src/android.rs install_adb).
 docs/index.html export-ignore
 docs/site.css export-ignore
 docs/site.js export-ignore

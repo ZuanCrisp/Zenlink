@@ -22,7 +22,7 @@ allow-airplay.cmd
 ZenshiroDev/resources/windows/native/playfair/*.obj
 crash.log
 
-# adb downloaded by Start ZenLink.bat (ZenshiroDev/tooling/windows/tools/get-adb.ps1)
+# adb downloaded by hand (ZenshiroDev/tooling/windows/tools/get-adb.ps1)
 ZenshiroDev/resources/third_party/platform-tools/
 .no-adb
 

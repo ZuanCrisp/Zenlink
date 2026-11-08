@@ -1,6 +1,6 @@
 """The Manual (source) package downloads what it does not carry, at the same
-versions as the release build (Start ZenLink.bat, ZenshiroDev/tooling/windows/tools/get-adb.ps1,
-requirements.lock)."""
+versions as the release build (Start ZenLink.bat, the in-app adb installer,
+ZenshiroDev/tooling/windows/tools/get-adb.ps1, requirements.lock)."""
 
 import re
 from pathlib import Path
@@ -25,11 +25,17 @@ def test_adb_pin_is_the_same_everywhere():
     notices = (ROOT / "ZenshiroDev" / "docs" / "THIRD_PARTY.md").read_text(encoding="utf-8")
     assert f"platform-tools_r{rev}-win.zip" in notices
     assert sha in notices
+    # ZenLink.exe downloads the same zip on request (adb is not bundled).
+    android = (ROOT / "apps" / "desktop" / "src" / "android.rs").read_text(encoding="utf-8")
+    assert f"platform-tools_r{rev}-win.zip" in android
+    assert sha in android
 
 
-def test_bat_passes_the_pin_to_the_download():
+def test_bat_pins_python_and_does_not_prompt_for_adb():
     text = (ROOT / "Start ZenLink.bat").read_text(encoding="utf-8")
-    assert '-Revision "%ZL_ADB_REV%" -Sha256 "%ZL_ADB_SHA256%"' in text
+    # adb comes from the in-app "Install adb" button; a Y/N prompt here blocked the start.
+    assert "get-adb.ps1\" -Revision" not in text
+    assert "Download it from Google now?" not in text
     assert r'-c "%~dp0apps\desktop\backend\requirements.lock"' in text
 
 

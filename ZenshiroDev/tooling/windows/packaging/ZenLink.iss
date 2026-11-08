@@ -96,9 +96,9 @@ Name: "{autodesktop}\ZenLink"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
 
 [Run]
 ; AirPlay (ZenLink Studio over Wi-Fi): the iPhone/iPad must reach ZenLink. Inbound allow, local subnet only.
-; The bundled adb gets the same rule in the same elevated command (one UAC prompt), so Windows
-; does not show its own firewall prompt for adb.exe (Android over Wi-Fi).
-Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rule name=""ZenLink (AirPlay)"" program=""{app}\ZenLinkService.exe"" & netsh advfirewall firewall add rule name=""ZenLink (AirPlay)"" dir=in action=allow program=""{app}\ZenLinkService.exe"" enable=yes profile=any remoteip=localsubnet & netsh advfirewall firewall delete rule name=""ZenLink (ADB)"" program=""{app}\third_party\platform-tools\adb.exe"" & netsh advfirewall firewall add rule name=""ZenLink (ADB)"" dir=in action=allow program=""{app}\third_party\platform-tools\adb.exe"" enable=yes profile=any remoteip=localsubnet"; Flags: runhidden shellexec waituntilterminated; Verb: runas; Tasks: firewall
+; adb is no longer bundled (ZenLink downloads it on request); the same elevated command removes
+; the "ZenLink (ADB)" rule that earlier versions added.
+Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rule name=""ZenLink (AirPlay)"" program=""{app}\ZenLinkService.exe"" & netsh advfirewall firewall add rule name=""ZenLink (AirPlay)"" dir=in action=allow program=""{app}\ZenLinkService.exe"" enable=yes profile=any remoteip=localsubnet & netsh advfirewall firewall delete rule name=""ZenLink (ADB)"" program=""{app}\third_party\platform-tools\adb.exe"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; Tasks: firewall
 ; Apple Driver mode needs Apple Mobile Device Service (Apple Devices or iTunes).
 Filename: "ms-windows-store://pdp/?ProductId=9NP83LWLPZ9K"; Description: "Install Apple Devices from the Microsoft Store (needed for Apple Driver mode)"; Flags: postinstall shellexec skipifsilent unchecked; Check: not AppleServiceInstalled
 Filename: "{app}\ZenLink.exe"; Description: "{cm:LaunchProgram,ZenLink}"; Flags: nowait postinstall skipifsilent

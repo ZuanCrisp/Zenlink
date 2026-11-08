@@ -36,6 +36,9 @@ Listener = Callable[[str], None]
 # iOS 17-26 therefore run Hybrid Control (AirPlay picture + CoreDevice HID
 # input, zenlink/apple/hybrid.py); iOS 16 and older have no CoreDevice tunnel.
 APPLE_MIN_IOS = capability.NATIVE_MIN_IOS
+AUDIO_ROUTES = ("pc", "device", "both")
+VOLUME_STEPS = 20  # more than enough presses to go from full volume to 0
+IPAD_SWAPPED_VOLUME = {270}  # iPad rotations where volume up/down swap (verified: 270)
 
 
 def _ios_too_old(version: str | None) -> bool:
@@ -108,6 +111,15 @@ class CastManager:
         self.driver_busy = False  # a consented driver change is running
         self.audio = NativeAudio()
         self.audio_enabled = True   # "Play sound on this PC"
+        # Where the sound plays: "pc" (Windows only), "device" or "both".
+        self.audio_route = "pc"
+        self._device_quiet = False  # ZenLink turned the device volume down
+        self._volume_lock = threading.Lock()
+        self._volume_ready_at = 0.0
+        # Unlock again when the device locks while mirroring (saved passcode).
+        self.unlock_on_lock = False
+        self._unlocked_at = 0.0
+        self._unlocking = False
         self._pump = None
         self.state = {"phase": "idle", "detail": "", "device": None, "error": None, "rotation": None, "backend": None,
                       "control": None}
@@ -372,8 +384,10 @@ class CastManager:
         if not target.get("ready"):
             self._set_state("error", error="Unlock the device and tap Trust, then try again.")
             return self.snapshot()
-        self.state["device"] = {"id": target["id"], "name": target["name"], "wifi": bool(target.get("wifi"))}
+        self.state["device"] = {"id": target["id"], "name": target["name"], "wifi": bool(target.get("wifi")),
+                                "family": target.get("family")}
         self.state["rotation"] = None
+        self._device_quiet = False
 
         if mode == "usbdirect" and target.get("airplay"):
             from zenlink.airplay.session import AirPlaySession
@@ -403,7 +417,7 @@ class CastManager:
                 mode = "hybrid"
             else:
                 session = apple_session.AppleCastSession(target["id"], self._on_session_state, options,
-                                                         self._on_rotation)
+                                                         self._on_rotation, self._on_locked)
         self.state["control"] = (session.control if mode == "hybrid"
                                  else capability.verified("native", video=False, control=False) if mode == "apple"
                                  else capability.verified("mirroring", video=False, control=False))
@@ -446,6 +460,8 @@ class CastManager:
     def stop(self) -> dict:
         session = self._session
         if session is not None:
+            self._restore_device_volume()
+        if session is not None:
             import traceback
 
             caller = " | ".join(line.strip().replace(chr(10), " ") for line in traceback.format_stack(limit=6)[:-1])
@@ -482,6 +498,35 @@ class CastManager:
         if self.state.get("control") != control:
             self.state["control"] = control
             self._publish()
+
+    def _on_locked(self) -> None:
+        """The device locked while mirroring: wake it and enter the saved
+        passcode. Locks reported while an unlock runs, or within 3 s after it,
+        are ignored, so a wrong passcode cannot loop."""
+        if not self.unlock_on_lock or self.state.get("phase") != "streaming":
+            return
+        if self._unlocking or time.monotonic() - self._unlocked_at < 3:
+            return
+        self._unlocking = True
+        threading.Thread(target=self._unlock_now, name="auto-unlock", daemon=True).start()
+
+    def _unlock_now(self) -> None:
+        import urllib.request
+
+        from zenlink import server
+
+        time.sleep(0.8)  # let the lock finish first
+        req = urllib.request.Request(f"http://127.0.0.1:{server.PORT}/api/keyboard/action",
+                                     data=json.dumps({"action": "wake"}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                log.info("auto unlock after lock: %s", r.read()[:120])
+        except OSError as error:
+            log.info("auto unlock after lock failed: %s", error)
+        finally:
+            self._unlocked_at = time.monotonic()
+            self._unlocking = False
 
     def _on_rotation(self, rotation: int | None) -> None:
         if self.state.get("rotation") != rotation:
@@ -524,7 +569,10 @@ class CastManager:
                 self.hub.audio_sink = None
             self.audio.stop()
 
-    def set_audio(self, enabled=None, volume=None, muted=None) -> dict:
+    def set_audio(self, enabled=None, volume=None, muted=None, route=None) -> dict:
+        if route in AUDIO_ROUTES:
+            self.audio_route = route
+            enabled = route != "device"
         if volume is not None:
             self.audio.volume = max(0.0, min(1.0, float(volume)))
         if muted is not None:
@@ -536,6 +584,8 @@ class CastManager:
             mover = getattr(self._session, "set_audio_to_pc", None)
             if mover is not None:
                 mover(self.audio_enabled)
+        if route in AUDIO_ROUTES:
+            self._apply_device_volume()
             if not self.audio_enabled:
                 self._stop_sound()
             elif self.state.get("phase") == "streaming":
@@ -547,9 +597,93 @@ class CastManager:
         # connecting / activating / streaming.
         if phase in ("waiting", "handshake"):
             phase = "activating"
+        if phase == "streaming":
+            # The picture is running now. Native control goes through the same
+            # DisplayService session as the picture; ZenLink Studio has none.
+            # Hybrid reports its own result (_on_control).
+            control = self.state.get("control") or {}
+            if control.get("level") == "native" and not control.get("video"):
+                self.state["control"] = capability.verified("native", video=True, control=True)
+            elif control.get("level") == "mirroring" and not control.get("video"):
+                self.state["control"] = capability.verified("mirroring", video=True, control=False)
         self._set_state(phase, detail)
         if phase == "streaming":
             self._start_sound()
+            # Presses sent while the stream is still settling are dropped, also
+            # those of the app's own route push that arrives right now.
+            self._volume_ready_at = time.monotonic() + 3.0
+            self._apply_device_volume()
+
+    # ------------------------------------------------------------ device volume
+
+    def _apply_device_volume(self, delay: float = 0.0) -> None:
+        """Runs in the background: each press takes ~0.4 s, and right after
+        the stream starts the device needs a moment before it accepts buttons."""
+        threading.Thread(target=self._apply_device_volume_now, args=(delay,), name="device-volume",
+                         daemon=True).start()
+
+    def _apply_device_volume_now(self, delay: float = 0.0) -> None:
+        """Apple Driver mode sends a copy of the device's sound: the device keeps
+        playing it. "Windows only" turns the device volume down to 0 (the copy
+        sent to the PC does not follow the device volume); leaving it brings
+        the volume back to half (the old level cannot be read)."""
+        if self._backend != "apple" or self.state.get("phase") != "streaming":
+            return
+        with self._volume_lock:
+            time.sleep(max(delay, self._volume_ready_at - time.monotonic(), 0.0))
+            if self.state.get("phase") != "streaming":
+                return
+            quiet = self.audio_route == "pc"
+            if quiet and not self._device_quiet:
+                if self._press_volume("down", VOLUME_STEPS):
+                    self._device_quiet = True
+                    log.info("audio: device volume down (Windows only)")
+            elif not quiet:
+                self._restore_device_volume()
+
+    def _restore_device_volume(self) -> None:
+        if not self._device_quiet or self._backend != "apple":
+            return
+        if self._press_volume("up", VOLUME_STEPS // 2):
+            log.info("audio: device volume back to half")
+        self._device_quiet = False
+
+    def _press_volume(self, direction: str, times: int) -> bool:
+        """Volume buttons through the DisplayService session. iPadOS swaps the
+        two buttons in some orientations (tested: 270)."""
+        import urllib.request
+
+        from zenlink.apple import session as apple_session
+
+        family = str((self.state.get("device") or {}).get("family") or "")
+        swap = family == "iPad" and self.state.get("rotation") in IPAD_SWAPPED_VOLUME
+        name = "volume-down" if (direction == "down") != swap else "volume-up"
+        url = f"http://{apple_session.STREAM_HOST}:{apple_session.STREAM_PORT}/button"
+        body = json.dumps({"name": name, "state": "press"}).encode()
+
+        def press() -> None:
+            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                r.read()
+
+        # The first press waits until the stream accepts buttons (up to ~15 s).
+        for attempt in range(6):
+            try:
+                press()
+                break
+            except OSError as error:
+                if attempt == 5 or self.state.get("phase") != "streaming":
+                    log.info("audio: device volume %s failed: %s", direction, error)
+                    return False
+                time.sleep(2.0)
+        try:
+            for _ in range(times - 1):
+                time.sleep(0.08)
+                press()
+            return True
+        except OSError as error:
+            log.info("audio: device volume %s failed: %s", direction, error)
+            return False
 
     # ------------------------------------------------------------ connection mode
 

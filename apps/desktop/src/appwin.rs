@@ -159,7 +159,7 @@ fn start_session(ui: &AppWin, a: &AppArgs) {
     let (_, _, w, h) = picture_rect(ui);
     let size = display_size(w, h);
     let p = prefs::load();
-    let mut o = crate::android_options(&p, false);
+    let mut o = crate::android_options(&p, false, None);
     o.audio = false;
     o.max_size = 0; // the display already has the window's size
     o.new_display = Some(NewDisplay {

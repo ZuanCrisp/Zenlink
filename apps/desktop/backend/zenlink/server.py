@@ -175,10 +175,17 @@ def build_app(manager: CastManager) -> web.Application:
 
             passcode = secret.get_secret("passcode") if body.get("action") == "wake" else ""
             ok, message = await keyboard.run(request.app[CLIENT_KEY], UPSTREAM, str(body.get("action")),
-                                             str(body.get("text") or ""), passcode)
+                                             str(body.get("text") or ""), passcode,
+                                             str((manager.state.get("device") or {}).get("family") or ""))
         except (aiohttp.ClientError, RuntimeError) as error:
             ok, message = False, f"The device didn't take the shortcut ({error})."
         return web.json_response({"ok": ok, "message": message}, status=200 if ok else 502)
+
+    @routes.post("/api/unlock-on-lock")
+    async def unlock_on_lock(request: web.Request) -> web.Response:
+        body = await request.json()
+        manager.unlock_on_lock = bool(body.get("enabled"))
+        return web.json_response({"enabled": manager.unlock_on_lock})
 
     @routes.get("/api/audio")
     async def audio_get(_request: web.Request) -> web.Response:
@@ -187,7 +194,8 @@ def build_app(manager: CastManager) -> web.Application:
     @routes.post("/api/audio")
     async def audio_set(request: web.Request) -> web.Response:
         body = await request.json()
-        stats = await asyncio.to_thread(manager.set_audio, body.get("enabled"), body.get("volume"), body.get("muted"))
+        stats = await asyncio.to_thread(manager.set_audio, body.get("enabled"), body.get("volume"), body.get("muted"),
+                                        body.get("route"))
         return web.json_response(stats)
 
     # Files to an iPhone/iPad (v2.5.1): Apple Driver mode only (usbmux).

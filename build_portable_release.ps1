@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Builds the ZenLink release files into out\release\ (work folders: out\build, out\dist):
 
@@ -15,10 +15,6 @@
 #>
 param(
     [string]$Version = "",
-    # Folder with Google's platform-tools (adb.exe, AdbWinApi.dll,
-    # AdbWinUsbApi.dll, NOTICE.txt). Default: ANDROID_HOME / ANDROID_SDK_ROOT /
-    # Android Studio's SDK folder.
-    [string]$PlatformTools = "",
     # Output folder. Default: $env:ZENLINK_OUT_DIR, else out\ in the repository root.
     [string]$Out = ""
 )
@@ -33,33 +29,15 @@ if (-not $Version) {
 $py = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { throw "Run Start ZenLink.bat once first (it creates .venv)." }
 
-# Android (B-28): every package carries Google's official adb, unmodified.
-# The build stops when it is missing or not validly signed by Google.
-$adbFiles = "adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll", "NOTICE.txt"
-if (-not $PlatformTools) {
-    $PlatformTools = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, (Join-Path $env:LOCALAPPDATA "Android\Sdk")) |
-        Where-Object { $_ } | ForEach-Object { Join-Path $_ "platform-tools" } |
-        Where-Object { Test-Path (Join-Path $_ "adb.exe") } | Select-Object -First 1
-}
-if (-not $PlatformTools) { throw "Google platform-tools not found: pass -PlatformTools <folder> or set ANDROID_HOME." }
-foreach ($f in $adbFiles) {
-    $p = Join-Path $PlatformTools $f
-    if (-not (Test-Path $p)) { throw "Missing $p" }
-    if ($f -ne "NOTICE.txt") {
-        $sig = Get-AuthenticodeSignature $p
-        if ($sig.Status -ne "Valid" -or $sig.SignerCertificate.Subject -notmatch "CN=Google LLC") {
-            throw "$p is not validly signed by Google ($($sig.Status))"
-        }
-    }
-}
-$adbRev = (Select-String -Path (Join-Path $PlatformTools "source.properties") -Pattern '^Pkg.Revision=(.+)$').Matches[0].Groups[1].Value
-Write-Host "    platform-tools $adbRev from $PlatformTools" -ForegroundColor Green
-# The source package downloads the revision pinned in Start ZenLink.bat; every
-# package must carry the same adb.
+# Android: no package carries adb. ZenLink downloads Google's official
+# platform-tools zip on request (apps\desktop\src\android.rs ADB_ZIP_*), and
+# Start ZenLink.bat does the same for source mode (ZL_ADB_REV/ZL_ADB_SHA256).
+# Both pins must name the same zip.
 $pinRev = (Select-String -Path "Start ZenLink.bat" -Pattern '^set "ZL_ADB_REV=(.+)"$').Matches[0].Groups[1].Value
-if ($adbRev -ne $pinRev) { throw "platform-tools $adbRev differs from ZL_ADB_REV=$pinRev in Start ZenLink.bat." }
-foreach ($f in $adbFiles) {
-    Write-Host ("    {0,-18} {1}" -f $f, (Get-FileHash (Join-Path $PlatformTools $f) -Algorithm SHA256).Hash)
+$pinSha = (Select-String -Path "Start ZenLink.bat" -Pattern '^set "ZL_ADB_SHA256=(.+)"$').Matches[0].Groups[1].Value
+$rs = Get-Content -Raw apps\desktop\src\android.rs
+if ($rs -notmatch [regex]::Escape("platform-tools_r$pinRev-win.zip") -or $rs -notmatch [regex]::Escape($pinSha)) {
+    throw "adb pin in apps\desktop\src\android.rs differs from Start ZenLink.bat (r$pinRev)."
 }
 
 # Every build output goes to out\ (ignored by git), or to -Out / ZENLINK_OUT_DIR.
@@ -202,11 +180,8 @@ Copy-Item "Uninstall-ZenLink.bat" $app
 foreach ($f in "run.bat", "Create-Desktop-Shortcut.bat") {
     Copy-Item (Join-Path "ZenshiroDev\tooling\windows\scripts" $f) $app
 }
-# Android: adb next to ZenLink.exe (found by find_adb); the scrcpy server is
-# built into ZenLink.exe, its licence ships beside it.
-$adbDest = Join-Path $app "third_party\platform-tools"
-New-Item -ItemType Directory -Force $adbDest | Out-Null
-foreach ($f in $adbFiles) { Copy-Item (Join-Path $PlatformTools $f) $adbDest }
+# Android: the scrcpy server is built into ZenLink.exe, its licence ships
+# beside it. adb is downloaded by ZenLink on request (not packaged).
 $scrcpyDest = Join-Path $app "third_party\scrcpy"
 New-Item -ItemType Directory -Force $scrcpyDest | Out-Null
 Copy-Item "ZenshiroDev\resources\third_party\scrcpy\LICENSE" $scrcpyDest
@@ -237,9 +212,8 @@ Test-FrozenExe $service
 # The Rust ZenLink.exe with that backend packed inside (unpacked to
 # %LOCALAPPDATA%\ZenLink-Next\service on start).
 $env:ZENLINK_BACKEND_EXE = $service
-$env:ZENLINK_ADB_DIR = (Resolve-Path $PlatformTools).Path
 & cargo build --release --manifest-path Cargo.toml -p zenlink-app --features embedded-backend --target-dir (Join-Path $build "rust-portable")
-Remove-Item Env:ZENLINK_BACKEND_EXE, Env:ZENLINK_ADB_DIR
+Remove-Item Env:ZENLINK_BACKEND_EXE
 if ($LASTEXITCODE) { throw "cargo (portable) failed" }
 Copy-Item (Join-Path $build "rust-portable\release\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
 

@@ -34,24 +34,27 @@
     applyTheme(pref);
   });
 
-  // --- language: Indonesian by default, remembered per browser --------------
+  // --- language: Indonesian when the browser lists Indonesian, else English;
+  // a language picked on the page is remembered per browser ------------------
   const KEY = "zenlink.site.lang";
   const shownVal = new Map();
   const fmt = (n) => n.toLocaleString(root.lang === "en" ? "en-US" : "id-ID");
-  function setLang(lang) {
+  function setLang(lang, remember) {
     root.lang = lang;
     document.querySelectorAll("[data-id]").forEach((el) => { el.innerHTML = el.dataset[lang] ?? el.dataset.id; });
     document.querySelectorAll("[data-ph-id]").forEach((el) => { el.placeholder = lang === "en" ? el.dataset.phEn : el.dataset.phId; });
     document.querySelectorAll(".lang button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lang === lang)));
-    try { localStorage.setItem(KEY, lang); } catch (_) {}
+    if (remember) { try { localStorage.setItem(KEY, lang); } catch (_) {} }
     document.querySelectorAll(".dl-total").forEach((el) => { if (shownVal.has(el)) el.textContent = fmt(shownVal.get(el)); });
     applyTheme(pref);
     document.dispatchEvent(new Event("zenlink:lang"));
   }
-  document.querySelectorAll(".lang button").forEach((b) => b.addEventListener("click", () => setLang(b.dataset.lang)));
-  let saved = "id";
-  try { saved = localStorage.getItem(KEY) || "id"; } catch (_) {}
-  setLang(saved);
+  document.querySelectorAll(".lang button").forEach((b) => b.addEventListener("click", () => setLang(b.dataset.lang, true)));
+  const browser = (navigator.languages && navigator.languages.length ? navigator.languages : [navigator.language || ""])
+    .some((l) => /^(id|in)(-|$)/i.test(l)) ? "id" : "en";
+  let saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (_) {}
+  setLang(saved === "id" || saved === "en" ? saved : browser, false);
 
   // --- glass: the highlight follows the pointer -------------------------------
   let pending = null, queued = false;

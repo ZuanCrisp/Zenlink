@@ -16,13 +16,78 @@ fn path() -> Option<std::path::PathBuf> {
     Some(dir.join("next-prefs.json"))
 }
 
+/// Indonesian when Windows lists Indonesian among the user's languages (or
+/// uses an Indonesian locale), English otherwise. Only the first-run default:
+/// a language picked in the app is saved and wins.
+pub fn system_lang() -> &'static str {
+    lang_from(&windows_languages())
+}
+
+fn lang_from(tags: &[String]) -> &'static str {
+    let indonesian = tags.iter().any(|t| {
+        let t = t.to_ascii_lowercase();
+        t == "id" || t.starts_with("id-") || t == "in" || t.starts_with("in-")
+    });
+    if indonesian {
+        "id"
+    } else {
+        "en"
+    }
+}
+
+/// Language tags from HKCU\Control Panel\International: the user's
+/// language list ("User Profile\Languages") and the regional format.
+fn windows_languages() -> Vec<String> {
+    use windows::core::w;
+    use windows::Win32::System::Registry::{
+        RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_MULTI_SZ, RRF_RT_REG_SZ,
+    };
+
+    let mut out = Vec::new();
+    for (key, value, kind) in [
+        (
+            w!(r"Control Panel\International\User Profile"),
+            w!("Languages"),
+            RRF_RT_REG_MULTI_SZ,
+        ),
+        (
+            w!(r"Control Panel\International"),
+            w!("LocaleName"),
+            RRF_RT_REG_SZ,
+        ),
+    ] {
+        let mut buf = vec![0u16; 2048];
+        let mut size = (buf.len() * 2) as u32;
+        let ok = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                key,
+                value,
+                kind,
+                None,
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut size),
+            )
+        };
+        if ok.is_ok() {
+            buf.truncate(size as usize / 2);
+            out.extend(
+                buf.split(|&c| c == 0)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from_utf16_lossy),
+            );
+        }
+    }
+    out
+}
+
 pub fn defaults() -> Prefs {
     Prefs {
         theme: "dark".into(),
         glass_on: true,
         glass: 30.0,
         lens: true,
-        lang: "id".into(),
+        lang: system_lang().into(),
         fit: "contain".into(),
         fit_window: true,
         rotation: "auto".into(),
@@ -40,6 +105,7 @@ pub fn defaults() -> Prefs {
         start_with_windows: false,
         close_to_tray: false,
         auto_unlock: false,
+        unlock_on_lock: false,
         on_top: false,
         stats: false,
         dots: true,
@@ -113,7 +179,7 @@ pub fn from_value(v: &Value) -> Prefs {
     f("cropT", &mut p.crop_t, 0.0, 400.0);
     f("cropR", &mut p.crop_r, 0.0, 400.0);
     f("cropB", &mut p.crop_b, 0.0, 400.0);
-    s("audioOut", &mut p.audio_out, &["pc", "device"]);
+    s("audioOut", &mut p.audio_out, &["pc", "device", "both"]);
     f("volume", &mut p.volume, 0.0, 100.0);
     b("lipSync", &mut p.lip_sync);
     s(
@@ -128,6 +194,7 @@ pub fn from_value(v: &Value) -> Prefs {
     b("startWithWindows", &mut p.start_with_windows);
     b("closeToTray", &mut p.close_to_tray);
     b("autoUnlock", &mut p.auto_unlock);
+    b("unlockOnLock", &mut p.unlock_on_lock);
     b("onTop", &mut p.on_top);
     b("stats", &mut p.stats);
     b("dots", &mut p.dots);
@@ -201,7 +268,7 @@ pub fn to_value(p: &Prefs) -> Value {
         "cropL": p.crop_l, "cropT": p.crop_t, "cropR": p.crop_r, "cropB": p.crop_b,
         "audioOut": p.audio_out.as_str(), "volume": p.volume, "lipSync": p.lip_sync,
         "audioBuffer": p.audio_buffer.as_str(), "touch": p.touch, "keyboard": p.keyboard,
-        "gestures": p.gestures, "startWithWindows": p.start_with_windows, "closeToTray": p.close_to_tray, "autoUnlock": p.auto_unlock,
+        "gestures": p.gestures, "startWithWindows": p.start_with_windows, "closeToTray": p.close_to_tray, "autoUnlock": p.auto_unlock, "unlockOnLock": p.unlock_on_lock,
         "onTop": p.on_top, "stats": p.stats, "dots": p.dots,
         "platform": p.platform.as_str(), "rememberPlatform": p.remember_platform,
         "androidMaxSize": p.android_max_size.as_str(), "androidFps": p.android_fps.as_str(),
@@ -224,9 +291,27 @@ mod tests {
     }
 
     #[test]
+    fn language_follows_windows() {
+        let tags = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(lang_from(&tags(&["en-US", "id-ID"])), "id");
+        assert_eq!(lang_from(&tags(&["id"])), "id");
+        assert_eq!(lang_from(&tags(&["en-US", "ja-JP"])), "en");
+        assert_eq!(
+            lang_from(&tags(&["it-IT"])),
+            "en",
+            "Italian is not Indonesian"
+        );
+        assert_eq!(lang_from(&[]), "en");
+    }
+
+    #[test]
     fn fresh_install_defaults() {
         let p = defaults();
-        assert_eq!(p.lang.as_str(), "id", "Indonesian on a fresh install");
+        assert_eq!(
+            p.lang.as_str(),
+            system_lang(),
+            "the Windows language on a fresh install"
+        );
         assert_eq!(p.theme.as_str(), "dark", "Liquid Glass Dark by default");
         assert_eq!(p.platform.as_str(), "");
         assert!(!p.remember_platform);

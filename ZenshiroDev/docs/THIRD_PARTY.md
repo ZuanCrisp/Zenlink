@@ -64,7 +64,7 @@ Design references for the Rust window are listed in `ZenshiroDev/docs/rust/THIRD
 - Checked by `apps/desktop/backend/tests/test_scrcpy_pin.py` (SHA-256) and the Rust test
   `scrcpy::tests::bundled_server_is_present_with_the_pinned_size`.
 
-## Android platform-tools `adb`, in `third_party\platform-tools\`
+## Android platform-tools `adb` (downloaded on request)
 
 - What: `adb.exe`, `AdbWinApi.dll`, `AdbWinUsbApi.dll` and `NOTICE.txt` from
   Google's Android SDK Platform-Tools, **unmodified**. ZenLink starts this adb
@@ -79,13 +79,16 @@ Design references for the Rust window are listed in `ZenshiroDev/docs/rust/THIRD
     the build prints all four SHA-256s.
   - Authenticode: `adb.exe`, `AdbWinApi.dll` and `AdbWinUsbApi.dll` are validly
     signed by **Google LLC**. `build_portable_release.ps1` stops if not.
-- Where: installer in `third_party\platform-tools\`. The source zip does not
-  carry them: `Start ZenLink.bat` offers to download Google's
-  `platform-tools_r37.0.1-win.zip` (SHA-256
-  `45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99`, checked;
-  `adb.exe` must be Google-signed) and extracts the same four files there
-  (`ZenshiroDev\tooling\windows\tools\get-adb.ps1`). Portable.exe
-  packs the same files and unpacks them to `%LOCALAPPDATA%\ZenLink-Next\platform-tools`.
+- Where (since 2.5.11): no ZenLink package carries adb any more. When Android is
+  chosen and no adb is found, ZenLink offers "Install adb": it downloads Google's
+  `platform-tools_r37.0.1-win.zip` from dl.google.com (8,044,989 bytes, SHA-256
+  `45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99`, both
+  checked before anything is extracted) and extracts the same four files,
+  unmodified, to `%LOCALAPPDATA%\ZenLink-Next\platform-tools`
+  (`apps/desktop/src/android.rs` `install_adb`). Source mode uses the same
+  in-app button; `ZenshiroDev\tooling\windows\tools\get-adb.ps1` is the manual
+  equivalent (also checks that `adb.exe` is Google-signed). Installs of 2.5.1 and older kept adb in
+  `third_party\platform-tools\` next to ZenLink.exe; ZenLink still uses it there.
 - Licence (audit for B-10, 2026-11-07; a reading of the texts, not legal advice):
   - The platform-tools package comes with the Android SDK License Agreement
     (`package.xml`, `android-sdk-license`). §3.4 forbids redistributing the

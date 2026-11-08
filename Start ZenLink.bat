@@ -6,9 +6,10 @@ title ZenLink
 
 rem --- Pinned versions: the same as the release build -----------------------
 rem Python packages: apps\desktop\backend\requirements.txt, with the exact versions
-rem of apps\desktop\backend\requirements.lock as constraints. adb: Google platform-tools,
-rem downloaded once by ZenshiroDev\tooling\windows\tools\get-adb.ps1 when no adb is found (checksum and Google
-rem signature checked). Change these only together with ZenshiroDev\docs\THIRD_PARTY.md.
+rem of apps\desktop\backend\requirements.lock as constraints. adb: Google platform-tools;
+rem the ZenLink window downloads it on request (Android page, "Install adb") with the same
+rem revision and SHA-256 as apps\desktop\src\android.rs. ZenshiroDev\tooling\windows\tools\get-adb.ps1
+rem does the same by hand. Change these only together with ZenshiroDev\docs\THIRD_PARTY.md.
 set "ZL_ADB_REV=37.0.1"
 set "ZL_ADB_SHA256=45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99"
 
@@ -89,7 +90,6 @@ if exist "%~dp0Start ZenLink.local.bat" (
 rem ZenLink.exe finds this checkout (Python backend, .venv) through ZENLINK_SOURCE,
 rem also when CARGO_TARGET_DIR builds it outside the checkout.
 set "ZENLINK_SOURCE=%~dp0."
-call :check_adb
 if /i "%ZENLINK_UI%"=="classic" goto :classic
 set "NEXT=%~dp0ZenLink.exe"
 if exist "%NEXT%" goto :start_next
@@ -130,33 +130,6 @@ if not "!RC!"=="0" (
     echo The build failed. If ZenLink is still open, close it and run Start ZenLink.bat again.
     pause
     exit /b 1
-)
-exit /b 0
-
-:check_adb
-rem Android needs Google's adb. The installer and Portable.exe bundle it; the
-rem source package downloads the official copy once (ZenshiroDev\tooling\windows\tools\get-adb.ps1, pinned
-rem revision, SHA-256 and Google signature checked). Skipped when an adb is
-rem already there (Android SDK or PATH) or when the user said no before.
-if exist "%~dp0ZenshiroDev\resources\third_party\platform-tools\adb.exe" exit /b 0
-if exist "%~dp0.no-adb" exit /b 0
-if defined ANDROID_HOME if exist "%ANDROID_HOME%\platform-tools\adb.exe" exit /b 0
-if defined ANDROID_SDK_ROOT if exist "%ANDROID_SDK_ROOT%\platform-tools\adb.exe" exit /b 0
-if exist "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" exit /b 0
-where adb >nul 2>&1 && exit /b 0
-if not exist "%~dp0ZenshiroDev\tooling\windows\tools\get-adb.ps1" exit /b 0
-echo.
-echo  - Android phones and tablets need adb (Google platform-tools %ZL_ADB_REV%, about 8 MB).
-choice /c YN /n /m "   Download it from Google now? iPhone and iPad work without it. [Y/N] "
-if !errorlevel! neq 1 (
-    echo Not downloaded. Delete this file to be asked again.> "%~dp0.no-adb"
-    exit /b 0
-)
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ZenshiroDev\tooling\windows\tools\get-adb.ps1" -Revision "%ZL_ADB_REV%" -Sha256 "%ZL_ADB_SHA256%"
-if errorlevel 1 (
-    echo    adb could not be downloaded. ZenLink still starts; Android needs adb.
-    echo    It will be offered again next time.
-    timeout /t 5 >nul
 )
 exit /b 0
 

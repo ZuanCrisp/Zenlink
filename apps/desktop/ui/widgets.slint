@@ -298,6 +298,8 @@ export component Card inherits Glass {
     in property <color> tint-a: #f472b6;
     in property <color> tint-b: #db2777;
     property <bool> open: UiTest.info-open;
+    // Folded: only the header shows (click the title or the chevron).
+    in-out property <bool> collapsed: false;
     strong: false;
     nested: true;
     background: Theme.card;
@@ -328,8 +330,9 @@ export component Card inherits Glass {
                 vertical-alignment: center;
                 horizontal-stretch: 1;
                 overflow: elide;
+                TouchArea { mouse-cursor: pointer; clicked => { root.collapsed = !root.collapsed; } }
             }
-            if root.info != "": Rectangle {
+            if root.info != "" && !root.collapsed: Rectangle {
                 width: 24px;
                 height: 24px;
                 border-radius: 12px;
@@ -337,14 +340,35 @@ export component Card inherits Glass {
                 Icon { text: "\u{E946}"; font-size: 12px; color: root.open ? Theme.text : Theme.text-3; }
                 itA := TouchArea { mouse-cursor: pointer; clicked => { root.open = !root.open; } }
             }
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 12px;
+                background: itC.has-hover ? Theme.hover : transparent;
+                Icon { text: root.collapsed ? "\u{E70D}" : "\u{E70E}"; font-size: 11px; color: Theme.text-3; }
+                itC := TouchArea { mouse-cursor: pointer; clicked => { root.collapsed = !root.collapsed; } }
+            }
         }
         // Neutral note (the pink box clashed with the card colours). The
         // text is a direct child of the card's layout: wrapped text nested
         // in another element or layout was measured too short, and the card
         // content overlapped the next card.
-        if root.open: Text { text: root.info; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
-        if root.open: Rectangle { height: 1px; background: Theme.line; }
-        @children
+        if root.open && !root.collapsed: Text { text: root.info; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+        if root.open && !root.collapsed: Rectangle { height: 1px; background: Theme.line; }
+        // Folded cards keep their content (and its state) but take no room:
+        // a clipped box of height 0 (a layout's max-height can't go below
+        // its content's min-height, which left an empty card).
+        Rectangle {
+            clip: true;
+            height: root.collapsed ? 0px : body.preferred-height;
+            body := VerticalLayout {
+                y: 0px;
+                width: parent.width;
+                height: self.preferred-height;
+                spacing: 10px;
+                @children
+            }
+        }
     }
 }
 

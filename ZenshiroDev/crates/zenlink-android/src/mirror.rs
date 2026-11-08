@@ -217,6 +217,9 @@ pub struct VideoOptions {
     /// Device sound as raw PCM (Android 11+). Raw needs no decoder on the
     /// PC: 1.5 Mbps, small next to the video.
     pub audio: bool,
+    /// Keep the sound playing on the device too (`audio_dup`, Android 13+;
+    /// the server then captures the playback, not the output).
+    pub audio_dup: bool,
     /// Control socket (touch, keys, clipboard from the PC).
     pub control: bool,
     /// Mirror a new virtual display instead of the device screen
@@ -263,6 +266,7 @@ impl Default for VideoOptions {
             codec: "h264",
             encoder: None,
             audio: false,
+            audio_dup: false,
             control: false,
             new_display: None,
         }
@@ -283,7 +287,9 @@ pub fn server_command(scid: u32, tunnel_forward: bool, o: &VideoOptions) -> Stri
         "CLASSPATH={DEVICE_SERVER_PATH} app_process / com.genymobile.scrcpy.Server {SCRCPY_VERSION} \
          scid={scid:08x} log_level=info video_codec={} {} {}",
         o.codec,
-        if o.audio {
+        if o.audio && o.audio_dup {
+            "audio=true audio_codec=raw audio_source=playback audio_dup=true"
+        } else if o.audio {
             "audio=true audio_codec=raw"
         } else {
             "audio=false"
@@ -804,6 +810,15 @@ mod tests {
             ..VideoOptions::default()
         };
         assert!(server_command(1, false, &o).contains(" audio=true audio_codec=raw control=false"));
+        // Both: the phone keeps its sound (scrcpy audio_dup, playback source).
+        let both = VideoOptions {
+            audio: true,
+            audio_dup: true,
+            ..VideoOptions::default()
+        };
+        assert!(server_command(1, false, &both).contains(
+            " audio=true audio_codec=raw audio_source=playback audio_dup=true control=false"
+        ));
         assert_eq!(codec_name(CODEC_OPUS), "opus");
         assert_eq!(codec_name(0x0072_6177), "raw");
     }
@@ -917,6 +932,7 @@ mod tests {
                 codec: "h264",
                 encoder: None,
                 audio: false,
+                audio_dup: false,
                 control: true,
                 new_display: None,
             },

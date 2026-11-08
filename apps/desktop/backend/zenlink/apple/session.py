@@ -20,6 +20,7 @@ from . import audio, offer
 log = logging.getLogger(__name__)
 
 STREAM_HOST = "127.0.0.1"
+LOCK_NOTIFICATION = "com.apple.springboard.lockcomplete"
 STREAM_PORT = 47422  # beta (stable v2.2.31 uses 47322)
 DISPLAY_SERVICE = "com.apple.coredevice.displayservice"
 
@@ -50,10 +51,12 @@ async def _reset_userspace_tunnel() -> None:
 
 class AppleCastSession:
     def __init__(self, udid: str, on_state: Callable[[str, str], None], options: dict,
-                 on_rotation: Callable[[int | None], None] | None = None) -> None:
+                 on_rotation: Callable[[int | None], None] | None = None,
+                 on_locked: Callable[[], None] | None = None) -> None:
         self.udid = udid
         self.on_state = on_state
         self.on_rotation = on_rotation or (lambda _r: None)
+        self.on_locked = on_locked or (lambda: None)
         self.options = options
         self.wifi = bool(options.get("wifi"))
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -147,17 +150,69 @@ class AppleCastSession:
                 log.warning("eager video start failed (retried on /codec)", exc_info=True)
 
         server._eager_stream_start = eager_video_only
+        handle_http = server._handle_http
+
+        async def quiet_http(reader, writer) -> None:
+            # A client that closes its connection mid-request (the ZenLink
+            # window, a browser tab) is normal; asyncio would log it as an
+            # unhandled error (WinError 64) with a full traceback.
+            try:
+                await handle_http(reader, writer)
+            except (ConnectionResetError, BrokenPipeError):
+                pass
+
+        server._handle_http = quiet_http
         self._server = server
+        self._tunnel_closed = asyncio.Event()
         orientation = asyncio.create_task(self._watch_orientation(rsd))
+        lock = asyncio.create_task(self._watch_lock(rsd))
+        serve = asyncio.create_task(server.serve())
+        closed = asyncio.create_task(self._tunnel_closed.wait())
         self.on_state("streaming", "")
         try:
-            await server.serve()
+            await asyncio.wait({serve, closed}, return_when=asyncio.FIRST_COMPLETED)
+            if not serve.done():
+                # The tunnel died (cable pulled, device asleep too long): end the
+                # session instead of leaving a dead "streaming" one behind.
+                raise RuntimeError("The connection to the device closed. Start mirroring again.")
+            serve.result()
         finally:
-            orientation.cancel()
-            with contextlib.suppress(BaseException):
-                await orientation
+            for task in (serve, closed, orientation, lock):
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    await task
             self.on_rotation(None)
             self._server = None
+
+    async def _watch_lock(self, rsd) -> None:
+        """SpringBoard posts lockcomplete each time the device locks (screen
+        off, side button, auto-lock). Read-only: it only observes."""
+        from pymobiledevice3.services.notification_proxy import RemoteNotificationProxyService
+
+        while True:
+            try:
+                async with RemoteNotificationProxyService(rsd) as proxy:
+                    await proxy.notify_register_dispatch(LOCK_NOTIFICATION)
+                    log.info("lock watch: ready")
+                    async for event in proxy.receive_notification():
+                        if event.get("Name") == LOCK_NOTIFICATION:
+                            log.info("device locked")
+                            self.on_locked()
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if self._dead(error):
+                    return
+                log.info("lock watch: %s", error)
+                await asyncio.sleep(3.0)
+
+    def _dead(self, error: BaseException) -> bool:
+        """True (and the session ends) when the error means the tunnel closed."""
+        if "dial plane is closed" in str(error):
+            log.info("tunnel closed: %s", error)
+            self._tunnel_closed.set()
+            return True
+        return False
 
     async def _watch_orientation(self, rsd) -> None:
         """Poll SpringBoard's interface orientation (read-only, never rotates
@@ -179,6 +234,8 @@ class AppleCastSession:
             except asyncio.CancelledError:
                 raise
             except Exception as error:
+                if self._dead(error):
+                    return
                 log.debug("orientation poll: %s", error)
                 sb = None
                 await asyncio.sleep(2.0)

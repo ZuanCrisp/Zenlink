@@ -25,10 +25,14 @@ def spawn_new_instance() -> None:
     module = (__package__ or "zenlink").split(".")[0]
     env = dict(os.environ, **{WAIT_ENV: "1"})
     argv = [sys.executable, *sys.argv[1:]] if getattr(sys, "frozen", False) else [exe, "-m", module, *sys.argv[1:]]
+    # CREATE_NO_WINDOW gives the new instance a hidden console that its own
+    # children inherit. Not DETACHED_PROCESS: Windows then ignores
+    # CREATE_NO_WINDOW, and the venv's python.exe launcher starts the real
+    # interpreter without a console, so Windows opens a visible one for it.
     subprocess.Popen(
         argv,
         cwd=str(BACKEND_DIR), env=env,
-        creationflags=0x08000000 | 0x00000008 | 0x00000200,  # no window, detached, new group
+        creationflags=0x08000000 | 0x00000200,  # no window, new process group
         close_fds=True,
     )
 

@@ -68,8 +68,6 @@ def logo(size: tuple[int, int], dest: Path) -> None:
 def main() -> None:
     if not (SOURCE / "ZenLink.exe").exists() or not (SOURCE / "ZenLinkService.exe").exists():
         sys.exit(f"{SOURCE} is not built: run build_portable_release.ps1 first")
-    if not (SOURCE / "third_party" / "platform-tools" / "adb.exe").exists():
-        sys.exit("adb is missing from the layout")
     ver = version()
     if LAYOUT.exists():
         shutil.rmtree(LAYOUT)

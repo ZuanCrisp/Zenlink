@@ -48,6 +48,7 @@ def char_usage(ch: str) -> tuple[int, bool] | None:
 
 MAX_PASSCODE = 32
 ENTER = 0x28
+SPACE = 0x2C
 
 
 def clean_passcode(raw: str) -> str:
@@ -81,7 +82,8 @@ def install_buttons() -> None:
     _state["dimmed"] = False
 
 
-async def run(client: aiohttp.ClientSession, base: str, action: str, text: str = "", passcode: str = "") -> tuple[bool, str]:
+async def run(client: aiohttp.ClientSession, base: str, action: str, text: str = "", passcode: str = "",
+              family: str = "") -> tuple[bool, str]:
     async def key(usages):
         async with client.post(f"{base}/key", json={"usages": usages}) as r:
             if r.status >= 400:
@@ -117,16 +119,30 @@ async def run(client: aiohttp.ClientSession, base: str, action: str, text: str =
         await button("lock")
         return True, ""
     if action == "wake":
-        await button("home")
-        await asyncio.sleep(0.45)
-        await touch("contact", 32768, 58000)
-        for i in range(1, 9):
-            await asyncio.sleep(0.025)
-            await touch("contact", 32768, int(58000 - 46000 * i / 8))
-        await touch("release", 32768, 12000)
+        if family == "iPad":
+            # Tested on iPadOS 27 (Touch ID iPad, landscape): Home turns the
+            # screen on; the first key on the lock screen opens the passcode
+            # prompt (the key itself is not typed); then the code goes in.
+            # No touches, so the device rotation does not matter (a swipe
+            # sent in portrait coordinates opened the Camera in landscape).
+            await button("home")
+            await asyncio.sleep(1.0)
+            await key([SPACE])
+            await asyncio.sleep(0.04)
+            await key([])
+            await asyncio.sleep(0.8)
+        else:
+            # iPhone: the lock screen is always portrait, so swipe up.
+            await button("home")
+            await asyncio.sleep(0.45)
+            await touch("contact", 32768, 58000)
+            for i in range(1, 9):
+                await asyncio.sleep(0.025)
+                await touch("contact", 32768, int(58000 - 46000 * i / 8))
+            await touch("release", 32768, 12000)
+            await asyncio.sleep(0.5)
         code = clean_passcode(passcode)
         if code:
-            await asyncio.sleep(0.5)
             for report in passcode_keys(code):
                 await key(report)
                 await asyncio.sleep(0.04)

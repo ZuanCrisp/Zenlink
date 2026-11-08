@@ -2,6 +2,25 @@
 
 Full notes for each version are on the [Releases](https://github.com/zenvyzenshiro/zenlink/releases) page.
 
+## 2.5.11
+
+### Added
+- **Sound route per mode:** Windows only, device only, or both. Apple Driver mode turns the device volume down for "Windows only" (iPad volume buttons follow the orientation); Android 13+ can play on both at once; ZenLink Studio plays on Windows or the device.
+- **Unlock again when the screen locks** (Apple Driver mode, opt-in): when the device locks while mirroring, ZenLink wakes it and enters the saved passcode. On iPad it no longer depends on the orientation.
+- **Install adb from the app:** Android needs Google's adb; ZenLink downloads the official platform-tools (about 8 MB, SHA-256 checked) with a progress bar, once. Setup.exe and Portable.exe are smaller because they no longer carry adb.
+- **Language follows Windows:** Bahasa Indonesia when Windows lists it, English otherwise (the website follows the browser). A language you pick is kept.
+- **Collapsible settings cards** and a 5-step beginner flow in the README.
+
+### Fixed
+- After switching the connection mode or driver, ZenLink asks to restart instead of switching silently.
+- A restart of the service no longer opens a console window.
+- ZenLink Studio explains "driver installed but not attached yet: unplug and plug in again" instead of asking to install the driver.
+- Apple Driver mode: a session whose USB tunnel closed now ends with a message instead of staying on "streaming"; harmless disconnect errors are no longer logged as crashes.
+- The welcome screen shows the real version.
+
+### Changed
+- **Repository layout:** monorepo with `apps/desktop` (window and Python backend) and `ZenshiroDev/` (shared crates, resources, tooling, technical docs). Build outputs go to `out/`; dev outputs can live outside the checkout (`Start ZenLink.local.bat`).
+
 ## 2.5.1
 
 ### Added

@@ -180,6 +180,10 @@ struct App {
     mode_sent: Option<Instant>,
     /// A choice is waiting for the backend (it may still be starting).
     mode_pending: bool,
+    /// Pending connection mode the "restart now" sheet was already shown
+    /// for, so it asks once per change (from the chooser, Settings, a
+    /// driver change or the API).
+    restart_asked: Option<String>,
     /// Result of the last "Check drivers", shown under the service line.
     drivers_text: Option<String>,
     /// Device overlay ZenLink opened last ("control-center" / "notifications")
@@ -461,9 +465,14 @@ fn passcode_query(ui: &AppWindow, api: &Api, save: Option<String>) {
 
 fn push_audio(api: &Api, p: &Prefs, muted: bool) {
     let api = api.clone();
-    let body = json!({ "enabled": p.audio_out.as_str() == "pc", "volume": p.volume / 100.0, "muted": muted });
-    android::set_audio(p.audio_out.as_str() == "pc", p.volume / 100.0, muted);
-    std::thread::spawn(move || api.audio(&body));
+    let to_pc = p.audio_out.as_str() != "device";
+    let body = json!({ "enabled": to_pc, "route": p.audio_out.as_str(), "volume": p.volume / 100.0, "muted": muted });
+    android::set_audio(to_pc, p.volume / 100.0, muted);
+    let relock = json!({ "enabled": p.unlock_on_lock });
+    std::thread::spawn(move || {
+        api.audio(&body);
+        let _ = api.post("/api/unlock-on-lock", &relock);
+    });
 }
 
 fn str_of<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
@@ -506,6 +515,14 @@ fn tr_backend(ui: &AppWindow, en: &str) -> String {
         (
             "A libusb0 filter is stacked on Apple's driver. Press Remove libusb0 filter in Settings > Connection & Drivers first.",
             "Filter libusb0 menumpuk di driver Apple. Tekan Hapus filter libusb0 di Pengaturan > Koneksi & driver dulu.",
+        ),
+        (
+            "The ZenLink Studio driver is installed, but Windows hasn't attached it to the device yet. Unplug the cable and plug it in again (restart Windows if that doesn't help).",
+            "Driver ZenLink Studio sudah terpasang, tapi Windows belum memakainya untuk perangkat ini. Cabut lalu colok lagi kabelnya (restart Windows kalau belum berhasil).",
+        ),
+        (
+            "The USB Direct driver isn't installed for this device yet. Open Settings > Connection & Drivers and press Install USB Direct driver, then reconnect the cable.",
+            "Driver ZenLink Studio belum terpasang di perangkat ini. Buka Pengaturan > Koneksi & driver, tekan Pasang driver ZenLink Studio, lalu colok ulang kabelnya.",
         ),
         ("Stop casting before changing drivers.", "Hentikan mirroring dulu sebelum mengganti driver."),
         ("Another driver change is running.", "Penggantian driver lain sedang berjalan."),
@@ -736,12 +753,38 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     if !needs && !just_sent && ui.get_chooser_open() && !ui.get_chooser_cancelable() {
         ui.set_chooser_open(false);
     }
-    if let Some(p) = str_of(st, &["connection", "pending"]) {
+    let pending = str_of(st, &["connection", "pending"]);
+    if pending.is_none() {
+        APP.with_borrow_mut(|a| a.restart_asked = None);
+    }
+    if let Some(p) = pending {
         let name = if p == "apple" {
             "Apple Driver"
         } else {
             "ZenLink Studio"
         };
+        // A new mode only applies after the service restarts: offer it once,
+        // not just the note in the connection line.
+        let ask = !ui.get_sheet_open()
+            && !ui.get_chooser_open()
+            && APP.with_borrow(|a| a.restart_asked.as_deref() != Some(p));
+        if ask {
+            APP.with_borrow_mut(|a| a.restart_asked = Some(p.to_string()));
+            open_sheet(
+                ui,
+                "restart",
+                tr(
+                    "Mulai ulang untuk ganti mode",
+                    "Restart to switch the mode",
+                ),
+                tr(
+                    &format!("{name} dipakai setelah layanan ZenLink dimulai ulang. Mirroring yang berjalan akan berhenti."),
+                    &format!("{name} is used after the ZenLink service restarts. Mirroring that is running stops."),
+                ),
+                tr("Mulai ulang sekarang", "Restart now"),
+                tr("Nanti", "Later"),
+            );
+        }
         ui.set_connection(
             format!(
                 "{} · {}",
@@ -1282,6 +1325,15 @@ fn run_driver(ui: &AppWindow, api: &Api, action: String) {
                 } else {
                     "Apple Driver"
                 };
+                // This sheet already offers the restart for the new mode.
+                if action != "removefilter" {
+                    let mode = if action == "bind" {
+                        "usbdirect"
+                    } else {
+                        "apple"
+                    };
+                    APP.with_borrow_mut(|a| a.restart_asked = Some(mode.into()));
+                }
                 open_sheet(
                     &ui,
                     "restart",
@@ -1390,6 +1442,10 @@ fn apply_flow(ui: &AppWindow, f: &flow::Flow) {
 /// What the Android poll does: 0 = nothing (Apple workspace), 1 = count
 /// devices (platform screen), 2 = list them with names (Android workspace).
 static ANDROID_POLL: AtomicU8 = AtomicU8::new(0);
+/// Set after adb was installed: the poll tries to start the ADB server again.
+static ADB_RETRY: AtomicBool = AtomicBool::new(false);
+/// An adb download runs (one at a time).
+static ADB_INSTALLING: AtomicBool = AtomicBool::new(false);
 
 enum AdbView {
     /// No ADB server, and no `adb` program to start one with.
@@ -1424,6 +1480,9 @@ fn start_android_poll(ui: &AppWindow) {
         let mut tried_start = false;
         loop {
             let mode = ANDROID_POLL.load(Relaxed);
+            if ADB_RETRY.swap(false, Relaxed) {
+                tried_start = false;
+            }
             if mode == 0 {
                 std::thread::sleep(Duration::from_millis(500));
                 continue;
@@ -1530,12 +1589,9 @@ fn show_android(
     use zenlink_android::devices::Connection;
     use zenlink_android::discovery::Readiness;
     ui.set_android_count(list.len() as i32);
+    ui.set_adb_missing(matches!(view, AdbView::NoAdb) || ADB_INSTALLING.load(Relaxed));
     let status = match view {
-        AdbView::NoAdb => tr_ui(
-            ui,
-            "ADB tidak ditemukan. Pasang Android SDK Platform-Tools (resmi Google) atau atur ANDROID_HOME, lalu buka lagi layar ini.",
-            "ADB was not found. Install the Android SDK Platform-Tools (official, from Google) or set ANDROID_HOME, then open this screen again.",
-        ),
+        AdbView::NoAdb => tr_ui(ui, "adb belum terpasang.", "adb is not installed yet."),
         AdbView::Starting => tr_ui(ui, "Menyalakan ADB…", "Starting ADB…"),
         AdbView::NotRunning => tr_ui(
             ui,
@@ -1555,9 +1611,21 @@ fn show_android(
                     "Windows sees a phone on USB, but ADB does not yet. Turn on USB debugging (steps below), then unplug and plug the cable in again.",
                 )
             } else if list.is_empty() {
-                tr_ui(ui, "Belum ada perangkat Android. Ikuti langkah di bawah.", "No Android device yet. Follow the steps below.")
+                tr_ui(
+                    ui,
+                    "Belum ada perangkat Android. Ikuti langkah di bawah.",
+                    "No Android device yet. Follow the steps below.",
+                )
             } else {
-                format!("{} {}", list.len(), tr_ui(ui, "perangkat terlihat lewat ADB.", "device(s) seen through ADB."))
+                format!(
+                    "{} {}",
+                    list.len(),
+                    tr_ui(
+                        ui,
+                        "perangkat terlihat lewat ADB.",
+                        "device(s) seen through ADB."
+                    )
+                )
             };
             if *other {
                 format!(
@@ -1676,7 +1744,11 @@ fn hevc_ok() -> bool {
 /// scrcpy server options from Settings › Android video and Settings › Audio.
 /// H.265 falls back to H.264 when Windows has no HEVC decoder.
 /// The codec and encoder come from the Smart Encoder plan (`android.rs`).
-fn android_options(p: &Prefs, audio_supported: bool) -> zenlink_android::mirror::VideoOptions {
+fn android_options(
+    p: &Prefs,
+    audio_supported: bool,
+    sdk: Option<u32>,
+) -> zenlink_android::mirror::VideoOptions {
     let num = |s: &str, d: u32| s.parse::<u32>().unwrap_or(d);
     zenlink_android::mirror::VideoOptions {
         max_size: num(&p.android_max_size, 1920),
@@ -1684,7 +1756,10 @@ fn android_options(p: &Prefs, audio_supported: bool) -> zenlink_android::mirror:
         max_fps: num(&p.android_fps, 60),
         codec: "h264",
         encoder: None,
-        audio: audio_supported && p.audio_out.as_str() == "pc",
+        audio: audio_supported && p.audio_out.as_str() != "device",
+        // Both: the phone keeps its sound (Android 13+); older phones go
+        // silent while the PC plays it, as with "Windows".
+        audio_dup: p.audio_out.as_str() == "both" && sdk.is_some_and(|s| s >= 33),
         control: true,
         new_display: None,
     }
@@ -2690,7 +2765,7 @@ fn android_start(ui: &AppWindow, index: i32) {
                 d.name.display.clone(),
                 server,
                 shared.clone(),
-                android_options(&p, d.audio_supported),
+                android_options(&p, d.audio_supported, d.sdk),
                 android::Smart {
                     pref: android_pref(&p),
                     dec: android_decoders(),
@@ -3589,7 +3664,7 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let p = ui.get_prefs();
         android::set_audio(
-            p.audio_out.as_str() == "pc",
+            p.audio_out.as_str() != "device",
             p.volume / 100.0,
             ui.get_muted(),
         );
@@ -3685,6 +3760,52 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() {
                 android_wifi_qr(&ui);
             }
+        });
+        let weak = ui.as_weak();
+        ui.on_install_adb(move || {
+            if ADB_INSTALLING.swap(true, Relaxed) {
+                return;
+            }
+            if let Some(ui) = weak.upgrade() {
+                ui.set_adb_error("".into());
+                ui.set_adb_progress(0.0);
+            }
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let w = weak.clone();
+                let progress = move |done: u64, total: u64| {
+                    let f = if total > 0 { done as f32 / total as f32 } else { 0.0 };
+                    let w = w.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = w.upgrade() {
+                            ui.set_adb_progress(f);
+                        }
+                    });
+                };
+                let result = android::install_adb(&progress);
+                match &result {
+                    Ok(p) => log::info!("android: adb installed at {}", p.display()),
+                    Err(e) => log::warn!("android: adb install failed: {e}"),
+                }
+                ADB_INSTALLING.store(false, Relaxed);
+                ADB_RETRY.store(true, Relaxed);
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.set_adb_progress(-1.0);
+                        if let Err(e) = result {
+                            ui.set_adb_error(
+                                format!(
+                                    "{} ({e})",
+                                    tr_ui(&ui, "Gagal memasang adb. Cek internet lalu coba lagi.", "Could not install adb. Check the internet connection and try again.")
+                                )
+                                .into(),
+                            );
+                        } else {
+                            ui.set_adb_missing(false);
+                        }
+                    }
+                });
+            });
         });
         let weak = ui.as_weak();
         ui.on_android_wifi_qr_cancel(move || {

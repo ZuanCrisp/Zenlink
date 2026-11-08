@@ -257,9 +257,12 @@ class UsbDirectSession:
         self._check_driver_stack()
         dev = find(self.serial)
         if dev is None:
+            # The driver stack check above passed: libusb0 is the device's
+            # driver, Windows just hasn't attached it yet (right after the
+            # driver change, before the cable is plugged in again).
             raise UsbDirectError(
-                "ZenLink can't open the device through libusb0. Open Settings > Connection & Drivers "
-                "and install the USB Direct driver, then reconnect the cable."
+                "The ZenLink Studio driver is installed, but Windows hasn't attached it to the device yet. "
+                "Unplug the cable and plug it in again (restart Windows if that doesn't help)."
             )
         self._mux_cfg, qt = _configs(dev)
         self.on_state("activating", "Switching the device to screen capture")

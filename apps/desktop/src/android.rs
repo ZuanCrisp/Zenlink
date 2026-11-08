@@ -883,47 +883,116 @@ pub fn load_server() -> Result<Vec<u8>, String> {
     Err(format!("{SERVER_FILE} not found"))
 }
 
-/// Portable.exe: Google's official, unmodified `adb` (platform-tools),
-/// deflate-compressed by build.rs from `ZENLINK_ADB_DIR` (B-28):
-/// `(file name, original size, compressed bytes)`.
-#[cfg(feature = "embedded-backend")]
-static PACKED_ADB: [(&str, u64, &[u8]); 4] = include!(concat!(env!("OUT_DIR"), "/packed_adb.rs"));
+/// Google's platform-tools for Windows, pinned: ZenLink does not ship adb,
+/// it downloads this exact zip on request (the same revision and SHA-256 as
+/// `ZL_ADB_REV`/`ZL_ADB_SHA256` in Start ZenLink.bat). The hash pins the bytes
+/// Google published; nothing else is accepted.
+pub const ADB_ZIP_URL: &str =
+    "https://dl.google.com/android/repository/platform-tools_r37.0.1-win.zip";
+pub const ADB_ZIP_SIZE: u64 = 8_044_989;
+pub const ADB_ZIP_SHA256: &str = "45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99";
+/// The files ZenLink keeps from the zip, unmodified.
+const ADB_FILES: [&str; 4] = ["adb.exe", "AdbWinApi.dll", "AdbWinUsbApi.dll", "NOTICE.txt"];
 
-/// Unpacks the packed `adb` to `platform-tools` in the data folder
-/// (`zenlink_core::local_data_dir`). A file with the right size stays (a
-/// running adb server keeps its exe locked), so this writes only after an
-/// update. The unpacked files are byte-for-byte the originals.
-#[cfg(feature = "embedded-backend")]
-fn unpack_adb() -> Option<PathBuf> {
-    let dir = zenlink_core::local_data_dir()?.join("platform-tools");
-    std::fs::create_dir_all(&dir).ok()?;
-    for (name, size, packed) in PACKED_ADB.iter() {
-        let path = dir.join(name);
-        let same = std::fs::metadata(&path)
-            .map(|m| m.len() == *size)
-            .unwrap_or(false);
-        if same {
-            continue;
+/// Where a downloaded adb lives: `platform-tools` in the local data folder.
+pub fn installed_adb_dir() -> Option<PathBuf> {
+    Some(zenlink_core::local_data_dir()?.join("platform-tools"))
+}
+
+/// Downloads Google's platform-tools zip (checked size and SHA-256), then
+/// extracts the four adb files to `installed_adb_dir()`. `progress(done,
+/// total)` reports the download. On any error nothing half-written stays.
+pub fn install_adb(progress: &dyn Fn(u64, u64)) -> Result<PathBuf, String> {
+    let dir = installed_adb_dir().ok_or("no local data folder")?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let zip = dir.join("platform-tools.zip");
+    let asset = zenlink_core::update::Asset {
+        name: "platform-tools.zip".into(),
+        url: ADB_ZIP_URL.into(),
+        size: ADB_ZIP_SIZE,
+        sha256: ADB_ZIP_SHA256.into(),
+    };
+    crate::updater::download(&asset, &zip, progress)?;
+    let result = (|| {
+        let bytes = std::fs::read(&zip).map_err(|e| format!("{}: {e}", zip.display()))?;
+        for name in ADB_FILES {
+            let data = zip_entry(&bytes, &format!("platform-tools/{name}"))?;
+            let path = dir.join(name);
+            let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
+            std::fs::write(&tmp, &data).map_err(|e| format!("{}: {e}", tmp.display()))?;
+            if let Err(e) = std::fs::rename(&tmp, &path) {
+                let _ = std::fs::remove_file(&tmp);
+                // A running adb server keeps adb.exe locked; same size = same file.
+                let same = std::fs::metadata(&path)
+                    .map(|m| m.len() == data.len() as u64)
+                    .unwrap_or(false);
+                if !same {
+                    return Err(format!("{}: {e}", path.display()));
+                }
+            }
         }
-        let data = miniz_oxide::inflate::decompress_to_vec(packed).ok()?;
-        if data.len() as u64 != *size {
-            log::warn!("android: packed {name} is damaged");
-            return None;
+        Ok(dir.join("adb.exe"))
+    })();
+    let _ = std::fs::remove_file(&zip);
+    result
+}
+
+/// One file from a zip archive (stored or deflated), found through the
+/// central directory. Enough for Google's platform-tools zip; no zip64.
+fn zip_entry(zip: &[u8], wanted: &str) -> Result<Vec<u8>, String> {
+    let u16_at = |o: usize| -> Option<usize> {
+        zip.get(o..o + 2)
+            .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
+    };
+    let u32_at = |o: usize| -> Option<usize> {
+        zip.get(o..o + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
+    };
+    // End of central directory: the last "PK\x05\x06" (comment up to 64 KB).
+    let low = zip.len().saturating_sub(22 + 65_535);
+    let eocd = (low..zip.len().saturating_sub(21))
+        .rev()
+        .find(|&i| zip[i..].starts_with(b"PK\x05\x06"))
+        .ok_or("not a zip file")?;
+    let count = u16_at(eocd + 10).ok_or("bad zip")?;
+    let mut at = u32_at(eocd + 16).ok_or("bad zip")?;
+    for _ in 0..count {
+        if !zip.get(at..).is_some_and(|b| b.starts_with(b"PK\x01\x02")) {
+            return Err("bad zip directory".into());
         }
-        let tmp = dir.join(format!("{name}.{}.tmp", std::process::id()));
-        std::fs::write(&tmp, &data).ok()?;
-        if std::fs::rename(&tmp, &path).is_err() {
-            let _ = std::fs::remove_file(&tmp);
-            return None;
+        let method = u16_at(at + 10).ok_or("bad zip")?;
+        let csize = u32_at(at + 20).ok_or("bad zip")?;
+        let usize_ = u32_at(at + 24).ok_or("bad zip")?;
+        let nlen = u16_at(at + 28).ok_or("bad zip")?;
+        let elen = u16_at(at + 30).ok_or("bad zip")?;
+        let clen = u16_at(at + 32).ok_or("bad zip")?;
+        let local = u32_at(at + 42).ok_or("bad zip")?;
+        let name = zip.get(at + 46..at + 46 + nlen).ok_or("bad zip")?;
+        if name == wanted.as_bytes() {
+            let lnlen = u16_at(local + 26).ok_or("bad zip")?;
+            let lelen = u16_at(local + 28).ok_or("bad zip")?;
+            let data_at = local + 30 + lnlen + lelen;
+            let data = zip.get(data_at..data_at + csize).ok_or("bad zip")?;
+            let out = match method {
+                0 => data.to_vec(),
+                8 => miniz_oxide::inflate::decompress_to_vec_with_limit(data, usize_)
+                    .map_err(|e| format!("{wanted}: inflate {e:?}"))?,
+                m => return Err(format!("{wanted}: zip method {m}")),
+            };
+            if out.len() != usize_ {
+                return Err(format!("{wanted}: size mismatch"));
+            }
+            return Ok(out);
         }
+        at += 46 + nlen + elen + clen;
     }
-    Some(dir.join("adb.exe"))
+    Err(format!("{wanted} is missing from the zip"))
 }
 
 /// The `adb` program to start the ADB server with, when none runs.
 /// `ZL_ADB=none` disables it (tests); `ZL_ADB=<path>` picks one.
-/// Otherwise: the bundled `third_party\platform-tools` next to the exe
-/// (installer), the copy packed into Portable.exe, the Android SDK
+/// Otherwise: a `third_party\platform-tools` next to the exe (older
+/// installs), the copy ZenLink downloaded (`install_adb`), the Android SDK
 /// (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, Android Studio's default folder), PATH.
 pub fn find_adb() -> Option<PathBuf> {
     let exe = if cfg!(windows) { "adb.exe" } else { "adb" };
@@ -948,9 +1017,8 @@ pub fn find_adb() -> Option<PathBuf> {
             c.push(dir.join("platform-tools").join(exe));
         }
     }
-    #[cfg(feature = "embedded-backend")]
-    if let Some(p) = unpack_adb() {
-        c.push(p);
+    if let Some(dir) = installed_adb_dir() {
+        c.push(dir.join(exe));
     }
     for var in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
         if let Some(root) = std::env::var_os(var) {
@@ -976,6 +1044,90 @@ pub fn find_adb() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use zenlink_android::mirror::{write_device_meta, write_packet};
+
+    /// A minimal zip: (name, data, deflate?) entries, local headers + central
+    /// directory + end record, the way zip tools write them.
+    fn make_zip(entries: &[(&str, &[u8], bool)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut central = Vec::new();
+        for (name, data, deflate) in entries {
+            let body = if *deflate {
+                miniz_oxide::deflate::compress_to_vec(data, 6)
+            } else {
+                data.to_vec()
+            };
+            let method: u16 = if *deflate { 8 } else { 0 };
+            let offset = out.len() as u32;
+            out.extend_from_slice(b"PK\x03\x04");
+            out.extend_from_slice(&[20, 0, 0, 0]);
+            out.extend_from_slice(&method.to_le_bytes());
+            out.extend_from_slice(&[0; 8]); // time, date, crc (not checked)
+            out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            out.extend_from_slice(&[0, 0]);
+            out.extend_from_slice(name.as_bytes());
+            out.extend_from_slice(&body);
+            central.extend_from_slice(b"PK\x01\x02");
+            central.extend_from_slice(&[20, 0, 20, 0, 0, 0]);
+            central.extend_from_slice(&method.to_le_bytes());
+            central.extend_from_slice(&[0; 8]);
+            central.extend_from_slice(&(body.len() as u32).to_le_bytes());
+            central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            central.extend_from_slice(&[0; 12]); // extra, comment, disk, attributes
+            central.extend_from_slice(&offset.to_le_bytes());
+            central.extend_from_slice(name.as_bytes());
+        }
+        let at = out.len() as u32;
+        out.extend_from_slice(&central);
+        out.extend_from_slice(b"PK\x05\x06\0\0\0\0");
+        out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+        out.extend_from_slice(&at.to_le_bytes());
+        out.extend_from_slice(&[0, 0]);
+        out
+    }
+
+    #[test]
+    fn zip_entry_reads_stored_and_deflated_files() {
+        let big = vec![b'a'; 10_000];
+        let zip = make_zip(&[
+            ("platform-tools/NOTICE.txt", b"notice", false),
+            ("platform-tools/adb.exe", &big, true),
+        ]);
+        assert_eq!(
+            zip_entry(&zip, "platform-tools/NOTICE.txt").unwrap(),
+            b"notice"
+        );
+        assert_eq!(zip_entry(&zip, "platform-tools/adb.exe").unwrap(), big);
+        assert!(zip_entry(&zip, "platform-tools/missing")
+            .unwrap_err()
+            .contains("missing"));
+        assert!(zip_entry(b"not a zip", "x").is_err());
+        assert!(
+            zip_entry(&zip[..zip.len() - 30], "platform-tools/adb.exe").is_err(),
+            "truncated zip"
+        );
+    }
+
+    /// Real download from dl.google.com into a temporary LOCALAPPDATA:
+    /// `cargo test -p zenlink-app --release install_adb_from_google -- --ignored`.
+    #[test]
+    #[ignore]
+    fn install_adb_from_google() {
+        let tmp = std::env::temp_dir().join(format!("zl-adb-test-{}", std::process::id()));
+        std::env::set_var("LOCALAPPDATA", &tmp);
+        let adb = install_adb(&|_, _| {}).expect("install");
+        assert!(adb.is_file());
+        let out = std::process::Command::new(&adb)
+            .arg("version")
+            .output()
+            .expect("run adb");
+        assert!(String::from_utf8_lossy(&out.stdout).contains("37.0.1"));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     fn wire(packets: &[Packet]) -> Vec<u8> {
         let mut w = Vec::new();

@@ -34,7 +34,7 @@ export struct Prefs {
     fit-window: bool,
     rotation: string,       // auto | 0 | 90 | 180 | 270
     crop-l: float, crop-t: float, crop-r: float, crop-b: float,
-    audio-out: string,      // pc | device
+    audio-out: string,      // pc (Windows only) | device | both
     volume: float,
     lip-sync: bool,
     audio-buffer: string,   // low | normal | high
@@ -44,6 +44,7 @@ export struct Prefs {
     start-with-windows: bool,
     close-to-tray: bool,
     auto-unlock: bool,
+    unlock-on-lock: bool, // unlock again when the device locks while mirroring
     on-top: bool,
     stats: bool,
     dots: bool,             // animated dot background
@@ -1093,7 +1094,7 @@ component PlatformSelector inherits Rectangle {
                             alignment: start;
                             spacing: 6px;
                             Text { text: I18n.t("Selamat datang di ZenLink", "Welcome to ZenLink"); font-size: 12px; font-weight: 600; color: Theme.accent; vertical-alignment: center; }
-                            Text { text: "NEXT · v2.5"; font-size: 9.5px; font-weight: 700; letter-spacing: 1px; color: Theme.text-2; vertical-alignment: center; }
+                            Text { text: "v" + AppInfo.version; font-size: 9.5px; font-weight: 700; letter-spacing: 1px; color: Theme.text-2; vertical-alignment: center; }
                         }
                         Text { text: I18n.t("Perangkat apa yang ingin kamu sambungkan?", "Which device would you like to connect?"); font-size: 18px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
                     }
@@ -1376,6 +1377,11 @@ component AndroidHome inherits Rectangle {
     callback wifi-qr();
     callback wifi-qr-cancel();
     property <bool> wifi-open: false;
+    // adb is not bundled: ZenLink downloads Google's platform-tools on request.
+    in property <bool> adb-missing;
+    in property <float> adb-progress: -1; // 0..1 while downloading, -1 otherwise
+    in property <string> adb-error;
+    callback install-adb();
     Glass {
         width: min(parent.width - 32px, 460px);
         height: min(parent.height - 32px, acol.preferred-height + 2px);
@@ -1400,6 +1406,43 @@ component AndroidHome inherits Rectangle {
                         horizontal-stretch: 1;
                         Text { text: I18n.t("Smartphone / Tablet Android", "Android Smartphone / Tablet"); font-size: 15px; font-weight: 800; color: Theme.text; }
                         Text { text: root.status; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                    }
+                }
+                if root.adb-missing: VerticalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: I18n.t("Android butuh adb, alat resmi Google (sekitar 8 MB). ZenLink mengunduh dan memasangnya untukmu, sekali saja.",
+                                     "Android needs adb, Google's official tool (about 8 MB). ZenLink downloads and installs it for you, once.");
+                        font-size: 12px; color: Theme.text; wrap: word-wrap;
+                    }
+                    if root.adb-progress >= 0: Rectangle {
+                        height: 6px;
+                        border-radius: 3px;
+                        background: Theme.fill;
+                        clip: true;
+                        Rectangle {
+                            x: 0;
+                            width: parent.width * clamp(root.adb-progress, 0, 1);
+                            height: parent.height;
+                            border-radius: 3px;
+                            background: Theme.accent;
+                            animate width { duration: 120ms; }
+                        }
+                    }
+                    if root.adb-progress >= 0: Text {
+                        text: I18n.t("Mengunduh adb… ", "Downloading adb… ") + round(root.adb-progress * 100) + "%";
+                        font-size: 11px; color: Theme.text-2;
+                    }
+                    if root.adb-error != "": Text { text: root.adb-error; font-size: 11px; color: Theme.warn; wrap: word-wrap; }
+                    if root.adb-progress < 0: HorizontalLayout {
+                        alignment: start;
+                        GlassButton {
+                            primary: true;
+                            icon: "\u{E896}";
+                            label: I18n.t("Pasang adb", "Install adb");
+                            tip: I18n.t("Unduh dari dl.google.com, dicek SHA-256", "Download from dl.google.com, checked with SHA-256");
+                            clicked => { root.install-adb(); }
+                        }
                     }
                 }
                 for d[i] in root.devices: HorizontalLayout {
@@ -1817,10 +1860,24 @@ component SettingsPanel inherits Glass {
                     info: I18n.t("Suara diputar lewat WASAPI di PC ini. Lip sync menahan gambar sedikit supaya pas dengan suara. Buffer rendah = lebih rapat, tinggi = lebih tahan gangguan.",
                         "Sound plays through WASAPI on this PC. Lip sync holds the picture a little so it matches the sound. Low buffer is tighter, high rides out hiccups.");
                     Seg {
-                        options: ["pc", "device"];
-                        labels: [I18n.t("Di PC ini", "On this PC"), I18n.t("Hanya perangkat", "Device only")];
+                        options: ["pc", "device", "both"];
+                        labels: ["Windows", I18n.t("Perangkat", "Device"), I18n.t("Keduanya", "Both")];
                         value: prefs.audio-out;
                         changed(v) => { root.prefs.audio-out = v; root.changed(root.prefs); }
+                    }
+                    Text {
+                        text: prefs.audio-out == "pc"
+                            ? I18n.t("Suara hanya di Windows; perangkat diam.", "Sound on Windows only; the device stays silent.")
+                            : prefs.audio-out == "device"
+                            ? I18n.t("Suara hanya di perangkat; Windows diam.", "Sound on the device only; Windows stays silent.")
+                            : root.studio
+                            ? I18n.t("ZenLink Studio lewat kabel tidak bisa memutar di dua tempat: suara diputar di Windows.", "ZenLink Studio over the cable can't play in both places: the sound plays on Windows.")
+                            : root.screen == "android"
+                            ? I18n.t("Suara di Windows dan HP (Android 13+; HP lama: hanya Windows).", "Sound on Windows and the phone (Android 13+; older phones: Windows only).")
+                            : I18n.t("Suara di Windows dan di perangkat.", "Sound on Windows and on the device.");
+                        font-size: 11px;
+                        color: Theme.text-2;
+                        wrap: word-wrap;
                     }
                     Row {
                         label: I18n.t("Volume PC", "PC volume");
@@ -1948,6 +2005,11 @@ component SettingsPanel inherits Glass {
                         label: I18n.t("Buka kunci saat mirroring mulai", "Unlock when mirroring starts");
                         hint: I18n.t("Juga Alt+U kapan saja", "Also Alt+U at any time");
                         Toggle { checked: prefs.auto-unlock; toggled(v) => { root.prefs.auto-unlock = v; root.changed(root.prefs); } }
+                    }
+                    Row {
+                        label: I18n.t("Buka kunci lagi saat layar terkunci", "Unlock again when the screen locks");
+                        hint: I18n.t("Mode Apple Driver, pakai kode sandi tersimpan", "Apple Driver mode, uses the saved passcode");
+                        Toggle { checked: prefs.unlock-on-lock; toggled(v) => { root.prefs.unlock-on-lock = v; root.changed(root.prefs); } }
                     }
                 }
 
@@ -2330,6 +2392,10 @@ export component AppWindow inherits Window {
     in property <bool> apple-detected;
     in property <int> android-count;
     in property <string> android-status;
+    in property <bool> adb-missing;
+    in property <float> adb-progress: -1;
+    in property <string> adb-error;
+    callback install-adb();
     in property <[AndroidRow]> android-devices;
     // Android session (phase A3): "idle", "connecting", "streaming", "error".
     in property <string> android-phase: "idle";
@@ -2542,6 +2608,10 @@ export component AppWindow inherits Window {
                             qr-on: root.android-qr-on;
                             qr-status: root.android-qr-status;
                             wifi-qr => { root.android-wifi-qr(); }
+                            adb-missing: root.adb-missing;
+                            adb-progress: root.adb-progress;
+                            adb-error: root.adb-error;
+                            install-adb => { root.install-adb(); }
                             wifi-qr-cancel => { root.android-wifi-qr-cancel(); }
                         }
                         if root.screen == "apple" && root.phase != "streaming": Placeholder {
