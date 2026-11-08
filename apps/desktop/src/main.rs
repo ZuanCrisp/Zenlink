@@ -1059,6 +1059,14 @@ fn widen_for_sheet(ui: &AppWindow) {
         return;
     };
     let cur = ui.window().size().to_logical(ui.window().scale_factor());
+    // A slide still running (Home from a mirror with a panel open) would end on
+    // the narrow mirror stage: let it end on the idle stage instead.
+    let idle = idle_stage_w(ui);
+    APP.with_borrow_mut(|a| {
+        if let Some(s) = a.hold_stage.as_mut() {
+            *s = s.max(idle);
+        }
+    });
     // Never narrower than the idle stage plus the open settings panel (the
     // window may not have taken that size yet when this runs at launch).
     let want = if ui.get_settings_open() || ui.get_menu_open() {
@@ -1436,7 +1444,8 @@ fn apply_flow(ui: &AppWindow, f: &flow::Flow) {
     ui.set_screen(f.screen.as_str().into());
     ANDROID_POLL.store(
         match f.screen {
-            flow::Screen::Platform => 1,
+            // 2 on Home too: the device menu shows phone names there.
+            flow::Screen::Platform => 2,
             flow::Screen::Android => 2,
             flow::Screen::Apple => 2,
         },
@@ -1451,10 +1460,12 @@ fn apply_flow(ui: &AppWindow, f: &flow::Flow) {
     if f.screen == flow::Screen::Platform {
         widen_for_sheet(ui);
     }
+    // The menu highlight follows the page on screen.
+    rail_refresh(ui);
 }
 
 /// What the Android poll does: 0 = nothing (Apple workspace), 1 = count
-/// devices (platform screen), 2 = list them with names (Android workspace).
+/// devices without names, 2 = list them with names (Home and both workspaces).
 static ANDROID_POLL: AtomicU8 = AtomicU8::new(0);
 /// Set after adb was installed: the poll tries to start the ADB server again.
 static ADB_RETRY: AtomicBool = AtomicBool::new(false);
@@ -2893,15 +2904,26 @@ fn rail_refresh(ui: &AppWindow) {
     }
     // Keep the pick while it is listed; otherwise the first phone of the
     // workspace on screen.
-    let sel = sel.filter(|k| keys.contains(k)).or_else(|| {
-        if ui.get_screen().as_str() == "apple" {
-            apple_default.or_else(|| keys.iter().find(|k| k.starts_with("i:")).cloned())
-        } else {
-            keys.iter().find(|k| k.starts_with("a:")).cloned()
-        }
-    });
+    // A pick of the other family (Android while the Apple page shows) would
+    // highlight a page that is not on screen.
+    let want = match ui.get_screen().as_str() {
+        "apple" => "i:",
+        "android" => "a:",
+        _ => "",
+    };
+    let sel = sel
+        .filter(|k| keys.contains(k) && k.starts_with(want))
+        .or_else(|| {
+            if ui.get_screen().as_str() == "apple" {
+                apple_default.or_else(|| keys.iter().find(|k| k.starts_with("i:")).cloned())
+            } else {
+                keys.iter().find(|k| k.starts_with("a:")).cloned()
+            }
+        });
+    // On Home only Home is highlighted; the pick is kept for coming back.
+    let home = ui.get_screen().as_str() == "platform";
     for (r, k) in rows.iter_mut().zip(&keys) {
-        r.selected = sel.as_ref() == Some(k);
+        r.selected = !home && sel.as_ref() == Some(k);
     }
     ui.set_rail_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
     APP.with_borrow_mut(|a| {
@@ -4102,9 +4124,10 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
         let weak = ui.as_weak();
-        ui.on_rail_connect(move || {
+        ui.on_adding_opened(move || {
+            // The window may be as narrow as a phone picture: room for the page.
             if let Some(ui) = weak.upgrade() {
-                ui.invoke_change_platform();
+                widen_for_sheet(&ui);
             }
         });
         let weak = ui.as_weak();
@@ -4918,7 +4941,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 android_tick(&ui);
             }
             APP.with_borrow_mut(|a| {
-                let streaming = (a.streaming && on_apple) || (a.android_live && on_android);
+                // The "Connect a device" page covers the stage: hide the picture meanwhile.
+                let streaming = ((a.streaming && on_apple) || (a.android_live && on_android)) && !ui.get_adding();
                 // scrcpy sends the picture already turned; Apple reports the angle separately.
                 let device_rotation = if on_android { 0 } else { a.device_rotation };
                 let Some(v) = a.view.as_ref() else { return };

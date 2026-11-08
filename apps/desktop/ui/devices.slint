@@ -60,6 +60,8 @@ export component DeviceRail inherits Glass {
     // HOME: device type and mode choice, shown inside the stage.
     in property <bool> home-on;
     callback home();
+    // The "Connect a device" page is on screen: only that item is highlighted.
+    in property <bool> adding;
     border-radius: 22px;
     VerticalLayout {
         padding: 10px;
@@ -90,7 +92,7 @@ export component DeviceRail inherits Glass {
             Rectangle {
                 height: 46px;
                 border-radius: 12px;
-                background: d.selected ? Theme.accent-soft : ta.has-hover ? Theme.fill : transparent;
+                background: (d.selected && !root.adding) ? Theme.accent-soft : ta.has-hover ? Theme.fill : transparent;
                 ta := TouchArea { mouse-cursor: pointer; clicked => { root.pick(i); } }
                 HorizontalLayout {
                     padding-left: 10px;
@@ -100,7 +102,7 @@ export component DeviceRail inherits Glass {
                         width: 18px;
                         text: d.kind == "apple" ? "\u{E70A}" : "\u{E8EA}";
                         font-size: 16px;
-                        color: d.selected ? Theme.accent : Theme.text-2;
+                        color: (d.selected && !root.adding) ? Theme.accent : Theme.text-2;
                     }
                     VerticalLayout {
                         alignment: center;
@@ -112,7 +114,7 @@ export component DeviceRail inherits Glass {
                                 text: d.title;
                                 font-size: 12.5px;
                                 font-weight: 600;
-                                color: d.selected ? Theme.accent : Theme.text;
+                                color: (d.selected && !root.adding) ? Theme.accent : Theme.text;
                                 overflow: elide;
                             }
                             VerticalLayout {
@@ -163,7 +165,7 @@ export component DeviceRail inherits Glass {
                 }
             }
             // Sub-menu of the selected phone.
-            if d.selected && d.state != "window": VerticalLayout {
+            if (d.selected && !root.adding) && d.state != "window": VerticalLayout {
                 padding-left: 22px;
                 spacing: 2px;
                 RailItem {
@@ -186,6 +188,7 @@ export component DeviceRail inherits Glass {
         RailItem {
             icon: "\u{E710}";
             label: I18n.t("Sambung perangkat", "Connect a device");
+            on: root.adding;
             clicked => { root.connect(); }
         }
     }

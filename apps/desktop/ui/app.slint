@@ -1366,6 +1366,137 @@ component AndroidVideoCard inherits Card {
     }
 }
 
+// Android over Wi-Fi without a cable (QR, pairing code, IP:port): on the
+// Android page and on "Connect a device".
+component AndroidWifiCard inherits Card {
+    in property <bool> wifi-busy;
+    in property <image> qr-image;
+    in property <bool> qr-on;
+    in property <string> qr-status;
+    callback wifi-connect(string);
+    callback wifi-pair(string, string);
+    callback wifi-qr();
+    callback wifi-qr-cancel();
+    property <bool> code-open: false;
+    VerticalLayout {
+        spacing: 10px;
+        Text {
+            text: I18n.t("Sudah pakai kabel? Tekan tombol Wi-Fi di samping nama HP, selesai. Tanpa kabel (Android 11+):", "Already on the cable? Press the Wi-Fi button next to the phone's name, done. Without a cable (Android 11+):");
+            font-size: 11.5px;
+            color: Theme.text-2;
+            wrap: word-wrap;
+        }
+        if !root.qr-on: VerticalLayout {
+            spacing: 6px;
+            Text { text: I18n.t("Cara 1 · Pindai QR (paling mudah)", "Option 1 · Scan a QR code (easiest)"); font-size: 12.5px; font-weight: 650; color: Theme.text; }
+            StepRow { text: "1.  " + I18n.t("HP dan PC tersambung ke Wi-Fi yang sama.", "The phone and the PC are on the same Wi-Fi."); }
+            StepRow { text: "2.  " + I18n.t("Di HP: Pengaturan › Opsi pengembang › Debugging nirkabel (Wireless debugging) › aktifkan.", "On the phone: Settings › Developer options › Wireless debugging › turn it on."); }
+            StepRow { text: "3.  " + I18n.t("Tekan tombol di bawah, lalu di HP ketuk \"Sambungkan perangkat dengan kode QR\" dan pindai.", "Press the button below, then on the phone tap \"Pair device with QR code\" and scan."); }
+            HorizontalLayout {
+                alignment: start;
+                GlassButton {
+                    primary: true;
+                    icon: "\u{ED14}";
+                    label: I18n.t("Tampilkan QR", "Show QR code");
+                    enabled: !root.wifi-busy;
+                    tip: I18n.t("Tampilkan QR untuk dipindai di HP", "Show a QR code to scan on the phone");
+                    clicked => { root.wifi-qr(); }
+                }
+            }
+        }
+        if root.qr-on: VerticalLayout {
+            spacing: 8px;
+            alignment: start;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 196px;
+                    height: 196px;
+                    border-radius: 12px;
+                    background: white;
+                    Image {
+                        source: root.qr-image;
+                        width: 180px;
+                        height: 180px;
+                        image-rendering: pixelated;
+                    }
+                }
+            }
+            Text {
+                text: I18n.t("Di HP: Debugging nirkabel › \"Sambungkan perangkat dengan kode QR\", lalu pindai kode ini.", "On the phone: Wireless debugging › \"Pair device with QR code\", then scan this code.");
+                font-size: 11.5px;
+                color: Theme.text-2;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+            }
+            BusyBar { }
+            Text {
+                text: root.qr-status;
+                font-size: 11.5px;
+                color: Theme.accent;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+            }
+            HorizontalLayout {
+                alignment: center;
+                GlassButton {
+                    icon: "\u{E711}";
+                    label: I18n.t("Batal", "Cancel");
+                    clicked => { root.wifi-qr-cancel(); }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.line; }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: I18n.t("Cara 2 · Kode pairing atau alamat IP", "Option 2 · Pairing code or IP address"); font-size: 12.5px; font-weight: 650; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+            GlassButton {
+                label: root.code-open ? I18n.t("Tutup", "Hide") : I18n.t("Buka", "Show");
+                clicked => { root.code-open = !root.code-open; }
+            }
+        }
+        if root.code-open: VerticalLayout {
+            spacing: 6px;
+            StepRow { text: "1.  " + I18n.t("Di Debugging nirkabel, ketuk \"Sambungkan perangkat dengan kode penyambungan\".", "In Wireless debugging, tap \"Pair device with pairing code\"."); }
+            StepRow { text: "2.  " + I18n.t("Isi alamat IP:port dan kode 6 digit yang tampil di jendela itu, tekan Pair.", "Enter the IP:port and the 6-digit code shown in that window, press Pair."); }
+            StepRow { text: "3.  " + I18n.t("Isi alamat IP:port dari layar utama Debugging nirkabel (port-nya beda), tekan Sambung. Sudah pernah pairing? Langsung langkah 3.", "Enter the IP:port from the main Wireless debugging screen (a different port), press Connect. Paired before? Go straight to step 3."); }
+            HorizontalLayout {
+                spacing: 8px;
+                addr := Field {
+                    placeholder: I18n.t("IP:port, mis. 192.168.1.20:37099", "IP:port, e.g. 192.168.1.20:37099");
+                    accepted => { if !root.wifi-busy { root.wifi-connect(self.text); } }
+                }
+                code := Field {
+                    horizontal-stretch: 0;
+                    width: 96px;
+                    placeholder: I18n.t("Kode 6 digit", "6-digit code");
+                    input-type: InputType.number;
+                    accepted => { if !root.wifi-busy { root.wifi-pair(addr.text, self.text); } }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                GlassButton {
+                    icon: "\u{E8D7}";
+                    label: "Pair";
+                    enabled: !root.wifi-busy && code.text != "";
+                    tip: I18n.t("Langkah 2: pairing sekali dengan kode dari HP", "Step 2: pair once with the code from the phone");
+                    clicked => { root.wifi-pair(addr.text, code.text); }
+                }
+                GlassButton {
+                    primary: true;
+                    icon: "\u{E71B}";
+                    label: I18n.t("Sambung", "Connect");
+                    enabled: !root.wifi-busy && addr.text != "";
+                    tip: I18n.t("Langkah 3: sambung ke alamat ini (adb connect)", "Step 3: connect to this address (adb connect)");
+                    clicked => { root.wifi-connect(addr.text); }
+                }
+            }
+        }
+    }
+}
+
 component AndroidHome inherits Rectangle {
     in property <string> status;
     in property <[AndroidRow]> devices;
@@ -1382,7 +1513,6 @@ component AndroidHome inherits Rectangle {
     in property <bool> wifi-busy;
     // Current Wi-Fi step while busy ("Reading the phone's Wi-Fi address…").
     in property <string> wifi-status;
-    property <bool> code-open: false;
     callback wifi-device(int);
     callback wifi-connect(string);
     callback wifi-pair(string, string);
@@ -1548,124 +1678,15 @@ component AndroidHome inherits Rectangle {
                     }
                     Rectangle { horizontal-stretch: 1; }
                 }
-                if root.wifi-open || root.qr-on: Card {
-                    VerticalLayout {
-                        spacing: 10px;
-                        Text {
-                            text: I18n.t("Sudah pakai kabel? Tekan tombol Wi-Fi di samping nama HP, selesai. Tanpa kabel (Android 11+):", "Already on the cable? Press the Wi-Fi button next to the phone's name, done. Without a cable (Android 11+):");
-                            font-size: 11.5px;
-                            color: Theme.text-2;
-                            wrap: word-wrap;
-                        }
-                        if !root.qr-on: VerticalLayout {
-                            spacing: 6px;
-                            Text { text: I18n.t("Cara 1 · Pindai QR (paling mudah)", "Option 1 · Scan a QR code (easiest)"); font-size: 12.5px; font-weight: 650; color: Theme.text; }
-                            StepRow { text: "1.  " + I18n.t("HP dan PC tersambung ke Wi-Fi yang sama.", "The phone and the PC are on the same Wi-Fi."); }
-                            StepRow { text: "2.  " + I18n.t("Di HP: Pengaturan › Opsi pengembang › Debugging nirkabel (Wireless debugging) › aktifkan.", "On the phone: Settings › Developer options › Wireless debugging › turn it on."); }
-                            StepRow { text: "3.  " + I18n.t("Tekan tombol di bawah, lalu di HP ketuk \"Sambungkan perangkat dengan kode QR\" dan pindai.", "Press the button below, then on the phone tap \"Pair device with QR code\" and scan."); }
-                            HorizontalLayout {
-                                alignment: start;
-                                GlassButton {
-                                    primary: true;
-                                    icon: "\u{ED14}";
-                                    label: I18n.t("Tampilkan QR", "Show QR code");
-                                    enabled: !root.wifi-busy;
-                                    tip: I18n.t("Tampilkan QR untuk dipindai di HP", "Show a QR code to scan on the phone");
-                                    clicked => { root.wifi-qr(); }
-                                }
-                            }
-                        }
-                        if root.qr-on: VerticalLayout {
-                            spacing: 8px;
-                            alignment: start;
-                            HorizontalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    width: 196px;
-                                    height: 196px;
-                                    border-radius: 12px;
-                                    background: white;
-                                    Image {
-                                        source: root.qr-image;
-                                        width: 180px;
-                                        height: 180px;
-                                        image-rendering: pixelated;
-                                    }
-                                }
-                            }
-                            Text {
-                                text: I18n.t("Di HP: Debugging nirkabel › \"Sambungkan perangkat dengan kode QR\", lalu pindai kode ini.", "On the phone: Wireless debugging › \"Pair device with QR code\", then scan this code.");
-                                font-size: 11.5px;
-                                color: Theme.text-2;
-                                wrap: word-wrap;
-                                horizontal-alignment: center;
-                            }
-                            BusyBar { }
-                            Text {
-                                text: root.qr-status;
-                                font-size: 11.5px;
-                                color: Theme.accent;
-                                wrap: word-wrap;
-                                horizontal-alignment: center;
-                            }
-                            HorizontalLayout {
-                                alignment: center;
-                                GlassButton {
-                                    icon: "\u{E711}";
-                                    label: I18n.t("Batal", "Cancel");
-                                    clicked => { root.wifi-qr-cancel(); }
-                                }
-                            }
-                        }
-                        Rectangle { height: 1px; background: Theme.line; }
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text { text: I18n.t("Cara 2 · Kode pairing atau alamat IP", "Option 2 · Pairing code or IP address"); font-size: 12.5px; font-weight: 650; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
-                            GlassButton {
-                                label: root.code-open ? I18n.t("Tutup", "Hide") : I18n.t("Buka", "Show");
-                                clicked => { root.code-open = !root.code-open; }
-                            }
-                        }
-                        if root.code-open: VerticalLayout {
-                            spacing: 6px;
-                            StepRow { text: "1.  " + I18n.t("Di Debugging nirkabel, ketuk \"Sambungkan perangkat dengan kode penyambungan\".", "In Wireless debugging, tap \"Pair device with pairing code\"."); }
-                            StepRow { text: "2.  " + I18n.t("Isi alamat IP:port dan kode 6 digit yang tampil di jendela itu, tekan Pair.", "Enter the IP:port and the 6-digit code shown in that window, press Pair."); }
-                            StepRow { text: "3.  " + I18n.t("Isi alamat IP:port dari layar utama Debugging nirkabel (port-nya beda), tekan Sambung. Sudah pernah pairing? Langsung langkah 3.", "Enter the IP:port from the main Wireless debugging screen (a different port), press Connect. Paired before? Go straight to step 3."); }
-                            HorizontalLayout {
-                                spacing: 8px;
-                                addr := Field {
-                                    placeholder: I18n.t("IP:port, mis. 192.168.1.20:37099", "IP:port, e.g. 192.168.1.20:37099");
-                                    accepted => { if !root.wifi-busy { root.wifi-connect(self.text); } }
-                                }
-                                code := Field {
-                                    horizontal-stretch: 0;
-                                    width: 96px;
-                                    placeholder: I18n.t("Kode 6 digit", "6-digit code");
-                                    input-type: InputType.number;
-                                    accepted => { if !root.wifi-busy { root.wifi-pair(addr.text, self.text); } }
-                                }
-                            }
-                            HorizontalLayout {
-                                spacing: 8px;
-                                alignment: end;
-                                GlassButton {
-                                    icon: "\u{E8D7}";
-                                    label: "Pair";
-                                    enabled: !root.wifi-busy && code.text != "";
-                                    tip: I18n.t("Langkah 2: pairing sekali dengan kode dari HP", "Step 2: pair once with the code from the phone");
-                                    clicked => { root.wifi-pair(addr.text, code.text); }
-                                }
-                                GlassButton {
-                                    primary: true;
-                                    icon: "\u{E71B}";
-                                    label: I18n.t("Sambung", "Connect");
-                                    enabled: !root.wifi-busy && addr.text != "";
-                                    tip: I18n.t("Langkah 3: sambung ke alamat ini (adb connect)", "Step 3: connect to this address (adb connect)");
-                                    clicked => { root.wifi-connect(addr.text); }
-                                }
-                            }
-                        }
-                    }
+                if root.wifi-open || root.qr-on: AndroidWifiCard {
+                    wifi-busy: root.wifi-busy;
+                    qr-image: root.qr-image;
+                    qr-on: root.qr-on;
+                    qr-status: root.qr-status;
+                    wifi-connect(a) => { root.wifi-connect(a); }
+                    wifi-pair(a, c) => { root.wifi-pair(a, c); }
+                    wifi-qr => { root.wifi-qr(); }
+                    wifi-qr-cancel => { root.wifi-qr-cancel(); }
                 }
                 AndroidVideoCard {
                     prefs: root.prefs;
@@ -1697,6 +1718,116 @@ component AndroidHome inherits Rectangle {
                 HorizontalLayout {
                     alignment: start;
                     GlassButton { icon: "\u{E72B}"; label: I18n.t("Ganti jenis perangkat", "Change device type"); clicked => { root.back(); } }
+                }
+            }
+        }
+    }
+}
+
+// "Connect a device" (v2.6): how to add a phone, inside the stage. A phone
+// that connects shows up in the device menu on its own.
+component AddDevice inherits Rectangle {
+    in-out property <string> kind: "android";
+    in property <bool> adb-missing;
+    in property <bool> wifi-busy;
+    in property <string> wifi-status;
+    in property <image> qr-image;
+    in property <bool> qr-on;
+    in property <string> qr-status;
+    callback install-adb();
+    callback wifi-connect(string);
+    callback wifi-pair(string, string);
+    callback wifi-qr();
+    callback wifi-qr-cancel();
+    callback close();
+    TouchArea { }
+    Glass {
+        width: min(parent.width - 32px, 480px);
+        height: min(parent.height - 32px, col.preferred-height + 2px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-radius: 20px;
+        ScrollView {
+            col := VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle {
+                        width: 36px;
+                        height: 36px;
+                        border-radius: 11px;
+                        background: @linear-gradient(135deg, Theme.accent 0%, Theme.accent.darker(0.35) 100%);
+                        Icon { text: "\u{E710}"; color: white; font-size: 17px; }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        Text { text: I18n.t("Sambung perangkat baru", "Connect a new device"); font-size: 15px; font-weight: 800; color: Theme.text; }
+                        Text { text: I18n.t("Setelah tersambung, perangkat muncul di menu kiri.", "Once connected, the device shows up in the menu on the left."); font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                    }
+                    VerticalLayout { alignment: start; GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup", "Close"); clicked => { root.close(); } } }
+                }
+                Seg {
+                    options: ["android", "apple"];
+                    labels: ["Android", "iPhone / iPad"];
+                    value: root.kind;
+                    changed(v) => { root.kind = v; }
+                }
+                if root.kind == "android": VerticalLayout {
+                    spacing: 10px;
+                    if root.adb-missing: HorizontalLayout {
+                        spacing: 8px;
+                        Text { text: I18n.t("Android butuh adb (sekitar 8 MB, sekali saja).", "Android needs adb (about 8 MB, once)."); font-size: 12px; color: Theme.text; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
+                        GlassButton { primary: true; icon: "\u{E896}"; label: I18n.t("Pasang adb", "Install adb"); clicked => { root.install-adb(); } }
+                    }
+                    Text { text: I18n.t("Lewat kabel USB", "Over a USB cable"); font-size: 12.5px; font-weight: 650; color: Theme.text; }
+                    FlowStep {
+                        title: I18n.t("Aktifkan Debugging USB", "Turn on USB debugging");
+                        sub: I18n.t("Pengaturan › Tentang ponsel › ketuk Nomor bentukan 7×, lalu Opsi pengembang › Debugging USB.", "Settings › About phone › tap Build number 7×, then Developer options › USB debugging.");
+                        state: "todo";
+                    }
+                    FlowStep {
+                        title: I18n.t("Colok kabel data", "Plug in a data cable");
+                        sub: I18n.t("Lalu ketuk Izinkan di HP. HP langsung muncul di menu.", "Then tap Allow on the phone. It shows up in the menu right away.");
+                        state: "todo";
+                        last: true;
+                    }
+                    Text { text: I18n.t("Lewat Wi-Fi", "Over Wi-Fi"); font-size: 12.5px; font-weight: 650; color: Theme.text; }
+                    if root.wifi-busy: VerticalLayout {
+                        spacing: 6px;
+                        BusyBar { }
+                        Text { text: root.wifi-status != "" ? root.wifi-status : I18n.t("Memproses…", "Working…"); font-size: 11.5px; color: Theme.accent; wrap: word-wrap; }
+                    }
+                    AndroidWifiCard {
+                        wifi-busy: root.wifi-busy;
+                        qr-image: root.qr-image;
+                        qr-on: root.qr-on;
+                        qr-status: root.qr-status;
+                        wifi-connect(a) => { root.wifi-connect(a); }
+                        wifi-pair(a, c) => { root.wifi-pair(a, c); }
+                        wifi-qr => { root.wifi-qr(); }
+                        wifi-qr-cancel => { root.wifi-qr-cancel(); }
+                    }
+                }
+                if root.kind == "apple": VerticalLayout {
+                    spacing: 10px;
+                    FlowStep {
+                        title: I18n.t("Colok kabel ke PC", "Plug the cable into the PC");
+                        sub: I18n.t("Buka kunci iPhone/iPad dulu.", "Unlock the iPhone/iPad first.");
+                        state: "todo";
+                    }
+                    FlowStep {
+                        title: I18n.t("Ketuk Percayai, masukkan kode sandi", "Tap Trust, enter the passcode");
+                        sub: I18n.t("Perangkat muncul di menu kiri. Pilih untuk mulai.", "The device shows up in the menu on the left. Pick it to start.");
+                        state: "todo";
+                    }
+                    FlowStep {
+                        title: I18n.t("Wi-Fi (opsional)", "Wi-Fi (optional)");
+                        sub: I18n.t("Setelah sekali lewat kabel, perangkat di Wi-Fi yang sama ikut muncul tanpa kabel.", "After one cable setup, the device on the same Wi-Fi shows up without the cable.");
+                        state: "todo";
+                        last: true;
+                    }
                 }
             }
         }
@@ -2424,6 +2555,9 @@ export component AppWindow inherits Window {
     // v2.6 device menu (left) and the drawer under the picture.
     in property <[RailDev]> rail-devices;
     in-out property <bool> menu-open: true;
+    // "Connect a device" page in the stage.
+    in-out property <bool> adding;
+    callback adding-opened();
     // Menu slide, 0 = closed, 1 = open (driven from Rust like `sp`).
     in property <float> mp: 1;
     // Side panel next to the menu (Screen settings or Files, one at a time).
@@ -2432,7 +2566,6 @@ export component AppWindow inherits Window {
     in-out property <bool> drawer-files;
     callback rail-pick(int);
     callback rail-pop(int);
-    callback rail-connect();
     callback menu-toggled(bool);
     callback files-toggled(bool);
     callback panel-toggled(bool);
@@ -2591,6 +2724,13 @@ export component AppWindow inherits Window {
                 menu-open: root.menu-open;
                 menu => {
                     root.menu-open = !root.menu-open;
+                    // The side panel belongs to the menu: it closes with it.
+                    if !root.menu-open && (root.drawer-screen || root.drawer-files) {
+                        root.drawer-screen = false;
+                        root.drawer-files = false;
+                        root.files-toggled(false);
+                        root.panel-toggled(false);
+                    }
                     root.menu-toggled(root.menu-open);
                 }
                 settings => {
@@ -2619,17 +2759,38 @@ export component AppWindow inherits Window {
                         devices: root.rail-devices;
                         screen-on: root.drawer-screen;
                         files-on: root.drawer-files;
-                        pick(i) => { root.rail-pick(i); }
+                        pick(i) => { root.adding = false; root.rail-pick(i); }
                         pop(i) => { root.rail-pop(i); }
-                        connect => { root.rail-connect(); }
-                        home-on: root.screen == "platform";
-                        home => { if root.screen != "platform" { root.change-platform(); } }
+                        adding: root.adding;
+                        connect => {
+                            if root.drawer-screen || root.drawer-files {
+                                root.drawer-screen = false;
+                                root.drawer-files = false;
+                                root.files-toggled(false);
+                                root.panel-toggled(false);
+                            }
+                            root.adding = true;
+                            root.adding-opened();
+                        }
+                        home-on: root.screen == "platform" && !root.adding;
+                        home => {
+                            root.adding = false;
+                            if root.drawer-screen || root.drawer-files {
+                                root.drawer-screen = false;
+                                root.drawer-files = false;
+                                root.files-toggled(false);
+                                root.panel-toggled(false);
+                            }
+                            if root.screen != "platform" { root.change-platform(); }
+                        }
                         screen => {
+                            root.adding = false;
                             root.drawer-screen = !root.drawer-screen;
                             root.drawer-files = false;
                             root.panel-toggled(root.drawer-screen);
                         }
                         files => {
+                            root.adding = false;
                             root.drawer-files = !root.drawer-files;
                             root.drawer-screen = false;
                             root.files-toggled(root.drawer-files);
@@ -2685,7 +2846,7 @@ export component AppWindow inherits Window {
                             height: parent.height;
                             image-fit: fill;
                         }
-                        if root.on-android && root.android-phase != "streaming": AndroidHome {
+                        if root.on-android && root.android-phase != "streaming" && !root.adding: AndroidHome {
                             status: root.android-status;
                             devices: root.android-devices;
                             phase: root.android-phase;
@@ -2711,8 +2872,25 @@ export component AppWindow inherits Window {
                             install-adb => { root.install-adb(); }
                             wifi-qr-cancel => { root.android-wifi-qr-cancel(); }
                         }
+                        if root.adding: AddDevice {
+                            width: parent.width;
+                            height: parent.height;
+                            kind: root.screen == "apple" ? "apple" : "android";
+                            adb-missing: root.adb-missing;
+                            wifi-busy: root.android-wifi-busy;
+                            wifi-status: root.android-wifi-status;
+                            qr-image: root.android-qr;
+                            qr-on: root.android-qr-on;
+                            qr-status: root.android-qr-status;
+                            install-adb => { root.install-adb(); }
+                            wifi-connect(a) => { root.android-wifi-connect(a); }
+                            wifi-pair(a, c) => { root.android-wifi-pair(a, c); }
+                            wifi-qr => { root.android-wifi-qr(); }
+                            wifi-qr-cancel => { root.android-wifi-qr-cancel(); }
+                            close => { root.adding = false; }
+                        }
                         // HOME (v2.6): device type and Apple mode are chosen inside the stage.
-                        if root.screen == "platform": PlatformSelector {
+                        if root.screen == "platform" && !root.adding: PlatformSelector {
                             inline: true;
                             width: parent.width;
                             height: parent.height;
@@ -2724,7 +2902,7 @@ export component AppWindow inherits Window {
                             prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
                             choose(p, r) => { root.choose-platform(p, r); }
                         }
-                        if root.chooser-open && root.screen == "apple": ModeChooser {
+                        if root.chooser-open && root.screen == "apple" && !root.adding: ModeChooser {
                             inline: true;
                             width: parent.width;
                             height: parent.height;
@@ -2738,7 +2916,7 @@ export component AppWindow inherits Window {
                             cancel => { root.chooser-open = false; }
                             back => { root.change-platform(); }
                         }
-                        if root.screen == "apple" && root.phase != "streaming" && !root.chooser-open: Placeholder {
+                        if root.screen == "apple" && root.phase != "streaming" && !root.chooser-open && !root.adding: Placeholder {
                             phase: root.phase;
                             device: root.device;
                             message: root.message;
@@ -2761,7 +2939,9 @@ export component AppWindow inherits Window {
                             dismiss => { root.flow-dismiss(); }
                         }
                     }
-                    if root.on-android || root.mode-active != "usbdirect": BottomBar {
+                    // Phone buttons only while a phone is mirrored (not on Home or a setup screen).
+                    if !root.adding && ((root.on-android && root.android-phase == "streaming")
+                        || (root.screen == "apple" && root.phase == "streaming" && root.mode-active != "usbdirect")): BottomBar {
                         compact: root.compact-bar;
                         android: root.on-android;
                         action(a) => { root.action(a); }

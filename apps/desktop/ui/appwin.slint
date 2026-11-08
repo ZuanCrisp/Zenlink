@@ -1,13 +1,16 @@
 // One Android app in its own window (v2.5.1): `ZenLink.exe --android-app`.
 // The app runs on its own virtual display on the phone (scrcpy new_display);
 // the picture is the same native D3D11 child window as the main window's.
+// v2.6: same look as the main window (glass bar and glass stage).
 import { Theme, I18n } from "theme.slint";
-import { GlassButton } from "widgets.slint";
+import { Glass, GlassButton } from "widgets.slint";
 
 export component AppWin inherits Window {
     title: root.screen ? root.device + " · ZenLink" : root.app-name + " · " + root.device + " · ZenLink";
     icon: @image-url("../../../ZenshiroDev/resources/assets/logo-256.png");
-    background: Theme.stage;
+    background: Theme.dark
+        ? @linear-gradient(160deg, #1f1b26 0%, #121216 55%, #1c1319 100%)
+        : @linear-gradient(160deg, #eef0f7 0%, #f6f6f9 55%, #f7eef3 100%);
     // A phone-like start size; the virtual display follows the window.
     preferred-width: 430px;
     preferred-height: 820px;
@@ -22,8 +25,12 @@ export component AppWin inherits Window {
     // "connecting" | "streaming" | "error"
     in property <string> phase: "connecting";
     in property <string> message;
-    // Height of the button strip above the picture (Rust places the video under it).
+    // Layout Rust needs to place the video: outer padding, bar height, gap
+    // between bar and stage, and the picture inset inside the stage.
+    out property <length> pad: 8px;
     out property <length> bar-h: 44px;
+    out property <length> gap: 8px;
+    out property <length> inset: 10px;
     callback action(string);
     callback retry();
     callback key-input(string, bool, bool, bool) -> bool;
@@ -39,46 +46,71 @@ export component AppWin inherits Window {
             return reject;
         }
         VerticalLayout {
-            Rectangle {
+            padding: root.pad;
+            spacing: root.gap;
+            Glass {
                 height: root.bar-h;
-                background: Theme.base;
+                border-radius: 16px;
                 HorizontalLayout {
                     padding: 6px;
-                    padding-left: 8px;
+                    padding-left: 10px;
                     spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image { source: @image-url("../../../ZenshiroDev/resources/assets/logo-256.png"); width: 22px; height: 22px; }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        horizontal-stretch: 1;
+                        min-width: 0px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: root.screen ? root.device : root.app-name;
+                                font-size: 12.5px;
+                                font-weight: 650;
+                                color: Theme.text;
+                                overflow: elide;
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 7px;
+                                    height: 7px;
+                                    border-radius: 3.5px;
+                                    background: root.phase == "streaming" ? Theme.accent : root.phase == "error" ? Theme.warn : Theme.text-3;
+                                }
+                            }
+                        }
+                        Text {
+                            text: root.phase == "streaming" ? (root.screen ? "Live" : root.device)
+                                : root.phase == "error" ? I18n.t("Terputus", "Disconnected") : I18n.t("Menyambung…", "Connecting…");
+                            font-size: 10.5px;
+                            color: Theme.text-3;
+                            overflow: elide;
+                        }
+                    }
                     GlassButton { icon: "\u{E72B}"; tip: I18n.t("Kembali", "Back"); enabled: root.phase == "streaming"; clicked => { root.action("back"); } }
                     if root.screen: GlassButton { icon: "\u{E80F}"; tip: I18n.t("Beranda", "Home"); enabled: root.phase == "streaming"; clicked => { root.action("home"); } }
                     if root.screen: GlassButton { icon: "\u{E8A9}"; tip: I18n.t("Aplikasi terbaru", "Recent apps"); enabled: root.phase == "streaming"; clicked => { root.action("switcher"); } }
                     if !root.screen: GlassButton { icon: "\u{E777}"; tip: I18n.t("Mulai ulang app", "Restart the app"); enabled: root.phase == "streaming"; clicked => { root.action("restart-app"); } }
-                    Text {
-                        horizontal-stretch: 1;
-                        text: root.app-name;
-                        font-size: 13px;
-                        font-weight: 650;
-                        color: Theme.text;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
                     // Back into the main window (like dropping a Chrome tab back).
                     if root.screen: GlassButton {
+                        primary: true;
                         icon: "\u{E8A0}";
                         label: I18n.t("Gabung", "Merge");
-                        tip: I18n.t("Kembalikan HP ini ke jendela utama ZenLink", "Move this phone back into the main ZenLink window");
+                        tip: I18n.t("Gabung: kembalikan HP ini ke jendela utama ZenLink", "Merge: move this phone back into the main ZenLink window");
                         clicked => { root.action("merge"); }
                     }
-                    if !root.screen: Text {
-                        text: root.device;
-                        font-size: 11px;
-                        color: Theme.text-3;
-                        vertical-alignment: center;
-                        overflow: elide;
-                        max-width: 160px;
-                    }
                 }
-                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
             }
+            // Glass stage, as in the main window; the picture sits inside it.
             Rectangle {
-                background: Theme.stage;
+                border-radius: 22px;
+                background: Theme.panel;
+                border-width: 1px;
+                border-color: Theme.edge;
+                clip: true;
                 if root.phase != "streaming": VerticalLayout {
                     alignment: center;
                     padding: 24px;

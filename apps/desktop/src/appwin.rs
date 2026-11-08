@@ -157,13 +157,31 @@ thread_local! {
 fn picture_rect(ui: &AppWin) -> (f32, f32, f32, f32) {
     let sf = ui.window().scale_factor();
     let size = ui.window().size();
-    let top = ui.get_bar_h() * sf;
+    // Inside the glass stage: below the bar, inset on every side.
+    let side = (ui.get_pad() + ui.get_inset()) * sf;
+    let top = (ui.get_pad() + ui.get_bar_h() + ui.get_gap() + ui.get_inset()) * sf;
     (
-        0.0,
+        side,
         top,
-        size.width as f32,
-        (size.height as f32 - top).max(1.0),
+        (size.width as f32 - 2.0 * side).max(1.0),
+        (size.height as f32 - top - side).max(1.0),
     )
+}
+
+/// The picture's own rectangle inside `r` (contain fit), so the glass stage
+/// shows around it instead of black bars.
+fn fit_rect(r: (f32, f32, f32, f32), pic: (u32, u32)) -> (f32, f32, f32, f32) {
+    let (x, y, w, h) = r;
+    if pic.0 == 0 || pic.1 == 0 {
+        return r;
+    }
+    let aspect = pic.0 as f32 / pic.1 as f32;
+    let (pw, ph) = if w / h > aspect {
+        (h * aspect, h)
+    } else {
+        (w, w / aspect)
+    };
+    (x + (w - pw) / 2.0, y + (h - ph) / 2.0, pw, ph)
 }
 
 fn start_session(ui: &AppWin, a: &AppArgs) {
@@ -305,7 +323,16 @@ fn tick(ui: &AppWin, a: &AppArgs) {
     }
     ST.with_borrow_mut(|s| {
         let Some(v) = s.view.as_ref() else { return };
-        v.set_bounds(x as i32, y as i32, w as i32, h as i32, streaming, 0);
+        let (px, py, pw, ph) = fit_rect((x, y, w, h), v.shown_size());
+        let radius = (12.0 * ui.window().scale_factor()).round() as i32;
+        v.set_bounds(
+            px.round() as i32,
+            py.round() as i32,
+            pw.round() as i32,
+            ph.round() as i32,
+            streaming,
+            radius,
+        );
         if a.screen {
             return; // the phone's own screen keeps its size
         }
@@ -467,6 +494,22 @@ mod tests {
             device: "TECNO POVA 6".into(),
             screen: false,
         }
+    }
+
+    #[test]
+    fn picture_is_centred_inside_the_stage() {
+        // Portrait phone in a wide stage: full height, centred horizontally.
+        assert_eq!(
+            fit_rect((0.0, 0.0, 400.0, 200.0), (100, 200)),
+            (150.0, 0.0, 100.0, 200.0)
+        );
+        // Landscape picture in a tall stage: full width, centred vertically.
+        assert_eq!(
+            fit_rect((10.0, 20.0, 200.0, 400.0), (200, 100)),
+            (10.0, 170.0, 200.0, 100.0)
+        );
+        // No frame yet: the whole stage.
+        assert_eq!(fit_rect((1.0, 2.0, 3.0, 4.0), (0, 0)), (1.0, 2.0, 3.0, 4.0));
     }
 
     #[test]
