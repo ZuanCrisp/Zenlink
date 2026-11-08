@@ -10,6 +10,8 @@ pyimg4 reading its own version) fails the build instead of a user's cast.
 import multiprocessing
 import sys
 
+import zenlink  # noqa: F401 - pure-Python lzss/lzfse before pyimg4 loads (issue #2)
+
 SELFTEST_MODULES = (
     "pyimg4",
     "pymobiledevice3.services.mobile_image_mounter",
@@ -68,6 +70,10 @@ def selftest(out_path: str) -> int:
         results["zenlink.aac (zlaac.dll)"] = "ok"
     except BaseException:  # noqa: BLE001
         results["zenlink.aac (zlaac.dll)"] = traceback.format_exc(limit=3)
+    # Issue #2: Smart App Control blocked the native lzss .pyd. pyimg4 must get
+    # the pure-Python modules (no __file__), never a DLL from the bundle.
+    native = [m for m in ("lzss", "lzfse") if getattr(sys.modules.get(m), "__file__", None)]
+    results["lzss/lzfse pure Python"] = "ok" if not native else f"native module loaded: {native}"
     ok = all(v == "ok" for v in results.values())
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump({"ok": ok, "modules": results}, fh, indent=1)

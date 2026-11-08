@@ -120,7 +120,12 @@ $pyiArgs = @(
     "--exclude-module", "pefile",
     "--exclude-module", "sqlite3",
     "--exclude-module", "_sqlite3",
-    "--exclude-module", "lib2to3"
+    "--exclude-module", "lib2to3",
+    # pyimg4 imports these but the developer image mount never calls them;
+    # zenlink\_lzss.py stands in. Their unsigned .pyd files were blocked by
+    # Smart App Control (GitHub issue #2).
+    "--exclude-module", "lzss",
+    "--exclude-module", "lzfse"
 )
 # Version resource (Author: Zenvy Zenshiro)
 # Numeric part only ("2.5.0-beta.1" -> "2.5.0"): Windows version fields are n.n.n.n.
@@ -149,6 +154,29 @@ if ($LASTEXITCODE) { throw "PyInstaller failed" }
 
 $app = Join-Path $dist "ZenLinkService"
 
+# Code signing (GitHub issue #2: Smart App Control blocks unsigned native
+# modules without reputation). Off until a trusted certificate exists. Set
+# ZENLINK_SIGN_ARGS to the signtool options after "sign", e.g. for Azure
+# Trusted Signing: /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256
+#   /dlib <path>\Azure.CodeSigning.Dlib.dll /dmdf <path>\metadata.json
+# Files that already carry a valid signature (python313.dll, wintun.dll) are kept.
+function Invoke-Sign([string[]]$files) {
+    if (-not $env:ZENLINK_SIGN_ARGS) { return }
+    $todo = @($files | Where-Object { (Get-AuthenticodeSignature $_).Status -ne "Valid" })
+    if (-not $todo) { return }
+    $signtool = (Get-Command signtool.exe -ErrorAction SilentlyContinue).Source
+    if (-not $signtool) { throw "ZENLINK_SIGN_ARGS is set but signtool.exe is not on PATH" }
+    # Batches keep the command line short.
+    for ($i = 0; $i -lt $todo.Count; $i += 50) {
+        $batch = $todo[$i..([Math]::Min($i + 49, $todo.Count - 1))]
+        & $signtool sign ($env:ZENLINK_SIGN_ARGS -split " ") $batch
+        if ($LASTEXITCODE) { throw "signtool failed" }
+    }
+    Write-Host "    signed $($todo.Count) file(s)" -ForegroundColor Green
+}
+if (-not $env:ZENLINK_SIGN_ARGS) { Write-Warning "ZENLINK_SIGN_ARGS not set: release files are NOT code-signed (Smart App Control may block them)." }
+Invoke-Sign @(Get-ChildItem $app -Recurse -Include *.exe, *.dll, *.pyd | ForEach-Object FullName)
+
 # Import every device-path module inside the built exe (ZenshiroDev\tooling\windows\packaging\launch.py
 # --selftest). A missing module or package metadata fails the build here.
 function Test-FrozenExe([string]$exe) {
@@ -166,7 +194,7 @@ Test-FrozenExe (Join-Path $app "ZenLinkService.exe")
 # The full FFmpeg from PyAV must not come back (Phase 1 size win).
 if (Get-ChildItem $app -Recurse -Filter "avcodec-*.dll") { throw "PyAV/FFmpeg DLLs found in $app" }
 # Size audit: removed parts must stay out, the one PortAudio must be in.
-foreach ($gone in "pydantic_core", "sqlite3.dll", "_sqlite3.pyd", "libportaudio32bit.dll", "libportaudioarm64.dll", "libportaudio64bit-asio.dll", "webview", "pythonnet", "PIL", "chardet", "Python.Runtime.dll") {
+foreach ($gone in "lzss*.pyd", "lzfse*.pyd", "pydantic_core","sqlite3.dll", "_sqlite3.pyd", "libportaudio32bit.dll", "libportaudioarm64.dll", "libportaudio64bit-asio.dll", "webview", "pythonnet", "PIL", "chardet", "Python.Runtime.dll") {
     if (Get-ChildItem $app -Recurse -Filter $gone) { throw "$gone found in $app (see ZenshiroDev/docs/SIZE_AUDIT.md)" }
 }
 if (-not (Test-Path (Join-Path $app "_sounddevice_data\portaudio-binaries\libportaudio64bit.dll"))) { throw "PortAudio x64 missing in $app" }
@@ -194,6 +222,7 @@ if ($LASTEXITCODE) { throw "cargo failed" }
 $rustTarget = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root "target" }
 $rustExe = Join-Path $rustTarget "release\ZenLink.exe"
 Copy-Item $rustExe $app
+Invoke-Sign @(Join-Path $app "ZenLink.exe")
 
 Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta
 # Same app as one .exe: it unpacks itself to a temporary folder on start and
@@ -209,6 +238,10 @@ $oneArgs += @("--distpath", (Join-Path $build "onefile-dist"), "--workpath", (Jo
 if ($LASTEXITCODE) { throw "PyInstaller (one file) failed" }
 $service = Join-Path $build "onefile-dist\ZenLinkService.exe"
 Test-FrozenExe $service
+# shortcut: only the outer one-file exe is signed; the .pyd/.dll it unpacks to
+# %TEMP%\_MEI* stay unsigned. Ship the signed folder build inside the Portable
+# exe instead once a certificate exists (see ZenshiroDev/docs/SMART_APP_CONTROL.md).
+Invoke-Sign @($service)
 # The Rust ZenLink.exe with that backend packed inside (unpacked to
 # %LOCALAPPDATA%\ZenLink-Next\service on start).
 $env:ZENLINK_BACKEND_EXE = $service
@@ -216,6 +249,7 @@ $env:ZENLINK_BACKEND_EXE = $service
 Remove-Item Env:ZENLINK_BACKEND_EXE
 if ($LASTEXITCODE) { throw "cargo (portable) failed" }
 Copy-Item (Join-Path $build "rust-portable\release\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
+Invoke-Sign @(Join-Path $release "ZenLink-v$Version-Portable.exe")
 
 Write-Host "[4/4] Building the installer and the source zip..." -ForegroundColor Magenta
 $iscc = @(
@@ -231,6 +265,7 @@ if ($iscc) {
     [IO.File]::WriteAllLines((Join-Path $app "install-manifest.txt"), [string[]]$names)
     & $iscc "/DAppVersion=$Version" "/DAppVersionNum=$VersionNum" "/DSourceDir=$app" "/O$release" "ZenshiroDev\tooling\windows\packaging\ZenLink.iss"
     if ($LASTEXITCODE) { throw "Inno Setup failed" }
+    Invoke-Sign @(Get-ChildItem $release -Filter "*-Setup.exe" | ForEach-Object FullName)
 } else {
     Write-Warning "Inno Setup 6 not found: skipping Setup.exe (winget install JRSoftware.InnoSetup)."
 }
