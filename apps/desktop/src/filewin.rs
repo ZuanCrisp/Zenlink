@@ -375,9 +375,29 @@ fn start_copier(ui: &AppWindow) -> Sender<CopyJob> {
     tx
 }
 
-/// Opens a file with its app, or a folder in Explorer.
+/// Files that would run code when opened; from the phone they are only shown
+/// in their folder, never started.
+fn runs_code(path: &Path) -> bool {
+    const RISKY: &[&str] = &[
+        "exe", "com", "scr", "pif", "msi", "msix", "appx", "bat", "cmd", "ps1", "psm1", "vbs",
+        "vbe", "js", "jse", "wsf", "wsh", "hta", "lnk", "url", "reg", "cpl", "dll", "jar",
+        "chm", "inf", "scf", "msc", "application", "appref-ms", "settingcontent-ms",
+    ];
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_none_or(|e| RISKY.contains(&e.to_ascii_lowercase().as_str()))
+}
+
+/// Opens a file with its app, or a folder in Explorer. A file that would run
+/// code is selected in its folder instead.
 fn open_on_pc(path: &Path) {
-    if let Err(e) = std::process::Command::new("explorer.exe").arg(path).spawn() {
+    let mut c = std::process::Command::new("explorer.exe");
+    if path.is_file() && runs_code(path) {
+        c.arg(format!("/select,{}", path.display()));
+    } else {
+        c.arg(path);
+    }
+    if let Err(e) = c.spawn() {
         log::warn!("files: explorer: {e}");
     }
 }
@@ -532,16 +552,18 @@ pub fn install(ui: &AppWindow) {
 /// Shows `phone` in the drawer: a new phone starts at `/sdcard`, the same
 /// phone keeps its folder and refreshes.
 pub fn show(ui: &AppWindow, phone: FileArgs) {
-    let same = ST.with_borrow(|s| s.phone.as_ref().map(|p| &p.serial) == Some(&phone.serial));
     ui.global::<Files>().set_device(phone.device.clone().into());
+    // Always keep the newest target: a reconnected phone has a new transport id.
+    let same = ST.with_borrow_mut(|s| {
+        let same = s.phone.as_ref().map(|p| &p.serial) == Some(&phone.serial);
+        s.phone = Some(phone);
+        same
+    });
     if same {
         go(ui, current_path());
         return;
     }
-    ST.with_borrow_mut(|s| {
-        s.phone = Some(phone);
-        s.entries.clear();
-    });
+    ST.with_borrow_mut(|s| s.entries.clear());
     notice(ui, String::new());
     go(ui, "/sdcard".into());
 }
@@ -600,6 +622,16 @@ mod tests {
         assert_eq!(icon_for(&e("IMG_1.JPG", 0o100660)), "\u{EB9F}");
         assert_eq!(icon_for(&e("a.apk", 0o100660)), "\u{E7B8}");
         assert_eq!(icon_for(&e("noext", 0o100660)), "\u{E7C3}");
+    }
+
+    #[test]
+    fn phone_files_that_run_code_are_never_started() {
+        for n in ["setup.exe", "a.BAT", "x.lnk", "y.hta", "z.ps1", "noext"] {
+            assert!(runs_code(Path::new(n)), "{n}");
+        }
+        for n in ["IMG_1.jpg", "song.mp3", "doc.pdf", "clip.MP4"] {
+            assert!(!runs_code(Path::new(n)), "{n}");
+        }
     }
 
     #[test]

@@ -9,7 +9,7 @@
 //! - `RECV <path>` -> `DATA` chunks ... `DONE`, or `FAIL <message>`;
 //! - `SEND <path>,<mode>` + `DATA` ... `DONE <mtime>` -> `OKAY` / `FAIL`.
 //!
-//! Folder changes (new folder, rename, delete) use `shell:` with every path
+//! Folder changes (new folder, delete) use `shell:` with every path
 //! quoted as one word. Version-1 sync messages carry sizes as 32 bits, so a
 //! listed file over 4 GiB shows a wrong size; the copy itself is not
 //! limited (it streams until `DONE`).
@@ -322,10 +322,14 @@ pub fn pull(
 ) -> std::result::Result<PathBuf, CopyError> {
     let name = remote.rsplit('/').next().unwrap_or("file");
     let dest = free_local(local_dir, name);
-    let part = dest.with_file_name(format!(
-        "{}.part",
-        dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
-    ));
+    // A free name too: never truncate a file the user already has.
+    let part = free_local(
+        local_dir,
+        &format!(
+            "{}.part",
+            dest.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+        ),
+    );
     let result = (|| {
         let mut s = client.open_sync(target)?;
         let mut f = io::BufWriter::new(std::fs::File::create(&part)?);
@@ -408,14 +412,6 @@ fn quiet(client: &AdbClient, target: &Target, cmd: &str) -> Result<()> {
 
 pub fn make_dir(client: &AdbClient, target: &Target, path: &str) -> Result<()> {
     quiet(client, target, &format!("mkdir -p {}", shell_quote(path)))
-}
-
-pub fn rename(client: &AdbClient, target: &Target, from: &str, to: &str) -> Result<()> {
-    quiet(
-        client,
-        target,
-        &format!("mv -n {} {}", shell_quote(from), shell_quote(to)),
-    )
 }
 
 /// Deletes a file or a whole folder. Refuses anything outside `/sdcard`

@@ -114,7 +114,7 @@ class CastManager:
         # Where the sound plays: "pc" (Windows only), "device" or "both".
         self.audio_route = "pc"
         self._device_quiet = False  # ZenLink turned the device volume down
-        self._volume_lock = threading.Lock()
+        self._volume_lock = threading.RLock()  # _apply_device_volume_now restores under it
         self._volume_ready_at = 0.0
         # Unlock again when the device locks while mirroring (saved passcode).
         self.unlock_on_lock = False
@@ -460,7 +460,7 @@ class CastManager:
     def stop(self) -> dict:
         session = self._session
         if session is not None:
-            self._restore_device_volume()
+            self._restore_device_volume(retry=False)
         if session is not None:
             import traceback
 
@@ -584,12 +584,12 @@ class CastManager:
             mover = getattr(self._session, "set_audio_to_pc", None)
             if mover is not None:
                 mover(self.audio_enabled)
-        if route in AUDIO_ROUTES:
-            self._apply_device_volume()
             if not self.audio_enabled:
                 self._stop_sound()
             elif self.state.get("phase") == "streaming":
                 self._start_sound()
+        if route in AUDIO_ROUTES:
+            self._apply_device_volume()
         return self.audio.stats()
 
     def _on_session_state(self, phase: str, detail: str) -> None:
@@ -641,14 +641,21 @@ class CastManager:
             elif not quiet:
                 self._restore_device_volume()
 
-    def _restore_device_volume(self) -> None:
+    def _restore_device_volume(self, retry: bool = True) -> None:
         if not self._device_quiet or self._backend != "apple":
             return
-        if self._press_volume("up", VOLUME_STEPS // 2):
-            log.info("audio: device volume back to half")
-        self._device_quiet = False
+        # Stop must not wait out the retries of a stream that is gone, nor
+        # interleave with a volume change still running.
+        if not self._volume_lock.acquire(timeout=5 if retry else 1):
+            return
+        try:
+            if self._device_quiet and self._press_volume("up", VOLUME_STEPS // 2, retry):
+                log.info("audio: device volume back to half")
+            self._device_quiet = False
+        finally:
+            self._volume_lock.release()
 
-    def _press_volume(self, direction: str, times: int) -> bool:
+    def _press_volume(self, direction: str, times: int, retry: bool = True) -> bool:
         """Volume buttons through the DisplayService session. iPadOS swaps the
         two buttons in some orientations (tested: 270)."""
         import urllib.request
@@ -667,12 +674,13 @@ class CastManager:
                 r.read()
 
         # The first press waits until the stream accepts buttons (up to ~15 s).
-        for attempt in range(6):
+        attempts = 6 if retry else 1
+        for attempt in range(attempts):
             try:
                 press()
                 break
             except OSError as error:
-                if attempt == 5 or self.state.get("phase") != "streaming":
+                if attempt == attempts - 1 or self.state.get("phase") != "streaming":
                     log.info("audio: device volume %s failed: %s", direction, error)
                     return False
                 time.sleep(2.0)

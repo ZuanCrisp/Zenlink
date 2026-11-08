@@ -198,6 +198,8 @@ class AppleCastSession:
                         if event.get("Name") == LOCK_NOTIFICATION:
                             log.info("device locked")
                             self.on_locked()
+                # The stream ended without an error: wait before registering again.
+                await asyncio.sleep(3.0)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
