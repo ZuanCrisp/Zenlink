@@ -7,6 +7,7 @@ mod backdrop;
 mod devprofiles;
 mod dots;
 mod filedrop;
+mod filewin;
 mod flow;
 mod input;
 mod prefs;
@@ -2297,6 +2298,7 @@ fn apps_launch(ui: &AppWindow, index: i32, place: &str) {
         package: app.package.clone(),
         name: app.name.clone(),
         device: d.name.display.clone(),
+        screen: false,
     };
     match appwin::spawn(&args) {
         Ok(()) => show_toast(
@@ -2791,6 +2793,71 @@ fn android_start(ui: &AppWindow, index: i32) {
         }
     });
     android_tick(ui);
+}
+
+/// v2.6 multi-device: opens list entry `i` in its own ZenLink window, as a
+/// mirror of the phone's screen or (`files`) as its file manager. Each is
+/// its own process, so phones never share a decoder, control or copy queue.
+fn android_open_window(ui: &AppWindow, i: i32, files: bool) {
+    let Some(d) = APP.with_borrow(|a| {
+        usize::try_from(i)
+            .ok()
+            .and_then(|i| a.android_list.get(i))
+            .filter(|d| d.readiness == zenlink_android::discovery::Readiness::Ready)
+            .cloned()
+    }) else {
+        show_toast(
+            ui,
+            tr_ui(ui, "HP ini belum siap.", "This phone is not ready yet."),
+        );
+        return;
+    };
+    let name = d.name.display.clone();
+    let result = if files {
+        filewin::spawn(&filewin::FileArgs {
+            serial: d.primary.serial.clone(),
+            transport_id: d.primary.transport_id,
+            device: name.clone(),
+        })
+    } else {
+        appwin::spawn(&appwin::AppArgs {
+            serial: d.primary.serial.clone(),
+            transport_id: d.primary.transport_id,
+            package: String::new(),
+            name: name.clone(),
+            device: name.clone(),
+            screen: true,
+        })
+    };
+    match result {
+        Ok(()) => show_toast(
+            ui,
+            if files {
+                tr_ui(
+                    ui,
+                    &format!("Membuka file {name}…"),
+                    &format!("Opening the files of {name}…"),
+                )
+            } else {
+                tr_ui(
+                    ui,
+                    &format!("Membuka {name} di jendela baru…"),
+                    &format!("Opening {name} in a new window…"),
+                )
+            },
+        ),
+        Err(e) => {
+            log::warn!("android: window failed: {e}");
+            show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    &format!("Jendela gagal dibuka: {e}"),
+                    &format!("The window did not open: {e}"),
+                ),
+            );
+        }
+    }
 }
 
 /// Ends the Android session, if any.
@@ -3299,6 +3366,15 @@ fn main() -> Result<(), slint::PlatformError> {
             return Ok(());
         };
         return appwin::run(a);
+    }
+    // v2.6: `ZenLink.exe --android-files …` is one phone's file manager.
+    if args.first().map(String::as_str) == Some(filewin::ARG) {
+        init_log_named(APP_LOG_FILE_NAME);
+        let Some(a) = filewin::FileArgs::parse(&args) else {
+            log::warn!("file window: bad arguments {args:?}");
+            return Ok(());
+        };
+        return filewin::run(a);
     }
     // Tests run with their own prefs file (ZL_PREFS) and may run next to the
     // user's ZenLink; everyone else gets one ZenLink per user: a second start
@@ -3828,6 +3904,18 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() {
                 APP.with_borrow_mut(|a| a.android_via = Some(via.as_str() == "wifi"));
                 android_start(&ui, i);
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_window(move |i| {
+            if let Some(ui) = weak.upgrade() {
+                android_open_window(&ui, i, false);
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_files(move |i| {
+            if let Some(ui) = weak.upgrade() {
+                android_open_window(&ui, i, true);
             }
         });
     }

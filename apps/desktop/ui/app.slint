@@ -7,6 +7,7 @@ import { Theme, I18n } from "theme.slint";
 import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip, Tip, UiTest } from "widgets.slint";
 // v2.5.1: an Android app in its own window (ZenLink.exe --android-app).
 export { AppWin } from "appwin.slint";
+export { FileWin, FileRow, PlaceRow } from "filewin.slint";
 
 export { Theme, I18n, UiTest }
 
@@ -1362,6 +1363,9 @@ component AndroidHome inherits Rectangle {
     callback back();
     callback start-device(int);
     callback start-device-via(int, string);
+    // v2.6 multi-device: this phone in its own window; its files.
+    callback window-device(int);
+    callback files-device(int);
     // Phase A6: Android over Wi-Fi.
     in property <bool> wifi-busy;
     // Current Wi-Fi step while busy ("Reading the phone's Wi-Fi address…").
@@ -1465,6 +1469,22 @@ component AndroidHome inherits Rectangle {
                             enabled: !root.wifi-busy;
                             tip: I18n.t("Pindah ke Wi-Fi: setelah tersambung, kabel boleh dicabut", "Switch to Wi-Fi: once connected, you can unplug the cable");
                             clicked => { root.wifi-device(i); }
+                        }
+                    }
+                    if d.ok: VerticalLayout {
+                        alignment: center;
+                        GlassButton {
+                            icon: "\u{E8B7}";
+                            tip: I18n.t("File di HP ini: lihat, salin ke PC, kirim dari PC", "Files on this phone: browse, copy to the PC, send from the PC");
+                            clicked => { root.files-device(i); }
+                        }
+                    }
+                    if d.ok: VerticalLayout {
+                        alignment: center;
+                        GlassButton {
+                            icon: "\u{E8A7}";
+                            tip: I18n.t("Buka HP ini di jendela sendiri (bisa beberapa HP sekaligus, tiap jendela jadi sumber OBS)", "Open this phone in its own window (several phones at once, each window an OBS source)");
+                            clicked => { root.window-device(i); }
                         }
                     }
                     if d.ok && !d.both && root.phase != "connecting": VerticalLayout {
@@ -2405,6 +2425,8 @@ export component AppWindow inherits Window {
     in property <bool> hevc-ok;
     callback android-start(int);
     callback android-start-via(int, string);
+    callback android-window(int);
+    callback android-files(int);
     in property <bool> android-wifi-busy;
     in property <string> android-wifi-status;
     callback android-wifi-device(int);
@@ -2599,6 +2621,8 @@ export component AppWindow inherits Window {
                             back => { root.change-platform(); }
                             start-device(i) => { root.android-start(i); }
                             start-device-via(i, v) => { root.android-start-via(i, v); }
+                            window-device(i) => { root.android-window(i); }
+                            files-device(i) => { root.android-files(i); }
                             wifi-busy: root.android-wifi-busy;
                             wifi-status: root.android-wifi-status;
                             wifi-device(i) => { root.android-wifi-device(i); }

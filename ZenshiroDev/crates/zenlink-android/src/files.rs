@@ -101,7 +101,8 @@ pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-fn mtime(path: &Path) -> u32 {
+/// Modification time in Unix seconds (0 when unknown), for sync `DONE`.
+pub fn mtime(path: &Path) -> u32 {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()

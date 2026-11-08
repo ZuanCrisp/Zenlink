@@ -14,11 +14,13 @@
 //! - [`wireless`]: Android over Wi-Fi: tcpip from USB, Android 11+ pairing (phase A6).
 //! - [`apps`]: installed apps (`list_apps`), for app windows on a virtual display (v2.5.1).
 //! - [`files`]: files dropped on the window: install an APK or copy to Download (v2.5.1).
+//! - [`browse`]: device file manager: list, pull, push with progress and cancel (v2.6).
 //!
 //! Everything here is portable Rust; only [`adb::start_server`] touches the platform.
 
 pub mod adb;
 pub mod apps;
+pub mod browse;
 pub mod control;
 pub mod devices;
 pub mod discovery;

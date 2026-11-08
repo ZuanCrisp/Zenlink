@@ -1,0 +1,368 @@
+// v2.6: an Android phone's files in their own window
+// (`ZenLink.exe --android-files`). Browse the shared storage, copy files to
+// the PC, drop files from Explorer to send them to the phone.
+import { Theme, I18n } from "theme.slint";
+import { Glass, GlassButton, Icon } from "widgets.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct FileRow {
+    name: string,
+    // "Folder", "12.3 MB"
+    size: string,
+    date: string,
+    dir: bool,
+    // Segoe icon code point for the kind (folder, picture, video, ...).
+    icon: string,
+}
+
+export struct PlaceRow {
+    label: string,
+    path: string,
+    icon: string,
+}
+
+component FileLine inherits Rectangle {
+    in property <FileRow> item;
+    in property <bool> selected;
+    callback pick();
+    callback open();
+    height: 36px;
+    border-radius: 9px;
+    background: selected ? Theme.accent-soft : ta.has-hover ? Theme.fill : transparent;
+    ta := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.pick(); }
+        double-clicked => { root.open(); }
+    }
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 10px;
+        Icon {
+            width: 20px;
+            text: item.icon;
+            font-size: 16px;
+            color: item.dir ? Theme.accent : Theme.text-2;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: item.name;
+            font-size: 12.5px;
+            color: Theme.text;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        Text {
+            width: 90px;
+            text: item.size;
+            font-size: 11.5px;
+            color: Theme.text-3;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+        Text {
+            width: 120px;
+            text: item.date;
+            font-size: 11.5px;
+            color: Theme.text-3;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+export component FileWin inherits Window {
+    title: I18n.t("File", "Files") + " · " + root.device + " · ZenLink";
+    icon: @image-url("../../../ZenshiroDev/resources/assets/logo-256.png");
+    background: Theme.base;
+    preferred-width: 920px;
+    preferred-height: 620px;
+    min-width: 560px;
+    min-height: 380px;
+    default-font-family: "Segoe UI Variable Text";
+
+    in property <string> device;
+    in property <[PlaceRow]> places;
+    in property <string> path;
+    in property <[FileRow]> rows;
+    // "loading", "ready", "error"
+    in property <string> phase: "loading";
+    in property <string> message;
+    in-out property <int> selected: -1;
+    // Copy in progress: label, 0..1 (-1 = size unknown), queue length.
+    in property <string> job;
+    in property <float> job-progress: -1;
+    in property <int> queued;
+    in property <bool> busy;
+    in property <string> notice;
+    in property <bool> hidden-files;
+    // Delete confirmation and new-folder name sheets.
+    in-out property <bool> confirm-delete;
+    in-out property <bool> ask-folder;
+    property <string> folder-name;
+
+    callback go(string);
+    callback up();
+    callback refresh();
+    callback open-row(int);
+    callback copy-to-pc(int);
+    callback delete-row(int);
+    callback new-folder(string);
+    callback cancel-job();
+    callback show-hidden(bool);
+    callback open-downloads();
+
+    VerticalLayout {
+        // Top bar: up, path, actions.
+        Rectangle {
+            height: 52px;
+            background: Theme.panel;
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 8px;
+                GlassButton { icon: "\u{E74A}"; tip: I18n.t("Folder atas", "Up one folder"); enabled: root.path != "/" && root.path != "/sdcard"; clicked => { root.up(); } }
+                GlassButton { icon: "\u{E72C}"; tip: I18n.t("Muat ulang", "Refresh"); clicked => { root.refresh(); } }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 16px;
+                    background: Theme.fill;
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        Text {
+                            text: root.path;
+                            font-size: 12px;
+                            color: Theme.text-2;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+                GlassButton { icon: "\u{E8F4}"; label: I18n.t("Folder baru", "New folder"); clicked => { root.ask-folder = true; } }
+                GlassButton {
+                    primary: true;
+                    icon: "\u{E896}";
+                    label: I18n.t("Salin ke PC", "Copy to PC");
+                    enabled: root.selected >= 0 && root.selected < root.rows.length && !root.rows[root.selected].dir;
+                    clicked => { root.copy-to-pc(root.selected); }
+                }
+                GlassButton {
+                    icon: "\u{E74D}";
+                    tip: I18n.t("Hapus", "Delete");
+                    enabled: root.selected >= 0 && root.selected < root.rows.length;
+                    clicked => { root.confirm-delete = true; }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+        HorizontalLayout {
+            vertical-stretch: 1;
+            // Places.
+            Rectangle {
+                width: 190px;
+                background: Theme.panel;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 2px;
+                    alignment: start;
+                    Text {
+                        text: root.device;
+                        font-size: 13px;
+                        font-weight: 650;
+                        color: Theme.text;
+                        overflow: elide;
+                    }
+                    Rectangle { height: 8px; }
+                    for p in root.places: Rectangle {
+                        height: 32px;
+                        border-radius: 9px;
+                        background: root.path == p.path ? Theme.accent-soft : pa.has-hover ? Theme.fill : transparent;
+                        pa := TouchArea { mouse-cursor: pointer; clicked => { root.go(p.path); } }
+                        HorizontalLayout {
+                            padding-left: 8px;
+                            spacing: 8px;
+                            Icon { width: 18px; text: p.icon; font-size: 14px; color: root.path == p.path ? Theme.accent : Theme.text-2; }
+                            Text {
+                                text: p.label;
+                                font-size: 12.5px;
+                                color: root.path == p.path ? Theme.accent : Theme.text;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                    Rectangle { height: 10px; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        padding-left: 8px;
+                        Rectangle {
+                            width: 16px;
+                            height: 16px;
+                            border-radius: 4px;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            background: root.hidden-files ? Theme.btn : transparent;
+                            if root.hidden-files: Icon { text: "\u{E73E}"; font-size: 10px; color: Theme.btn-text; }
+                            TouchArea { clicked => { root.show-hidden(!root.hidden-files); } }
+                        }
+                        Text { text: I18n.t("File tersembunyi", "Hidden files"); font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
+                    }
+                    Rectangle { height: 6px; }
+                    GlassButton { icon: "\u{E8B7}"; label: I18n.t("Folder unduhan PC", "PC download folder"); clicked => { root.open-downloads(); } }
+                }
+                Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
+            }
+            // Listing.
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.base;
+                if root.phase == "ready" && root.rows.length > 0: ScrollView {
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 1px;
+                        alignment: start;
+                        for r[i] in root.rows: FileLine {
+                            item: r;
+                            selected: root.selected == i;
+                            pick => { root.selected = i; }
+                            open => { root.open-row(i); }
+                        }
+                    }
+                }
+                if root.phase != "ready" || root.rows.length == 0: VerticalLayout {
+                    alignment: center;
+                    padding: 24px;
+                    spacing: 8px;
+                    Text {
+                        text: root.phase == "loading" ? I18n.t("Membaca folder…", "Reading the folder…")
+                            : root.phase == "error" ? root.message
+                            : I18n.t("Folder ini kosong. Tarik file dari Explorer ke sini untuk mengirimnya ke HP.", "This folder is empty. Drag files from Explorer here to send them to the phone.");
+                        font-size: 12.5px;
+                        color: root.phase == "error" ? Theme.warn : Theme.text-2;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+        // Status / transfer strip.
+        Rectangle {
+            height: 46px;
+            background: Theme.panel;
+            Rectangle { y: 0; height: 1px; background: Theme.line; }
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 10px;
+                spacing: 10px;
+                if !root.busy: Text {
+                    horizontal-stretch: 1;
+                    text: root.notice != "" ? root.notice
+                        : I18n.t("Klik dua kali folder untuk membuka, file untuk menyalin ke PC. Tarik file dari Explorer untuk mengirim ke folder ini.", "Double-click a folder to open it, a file to copy it to the PC. Drag files from Explorer to send them to this folder.");
+                    font-size: 11.5px;
+                    color: Theme.text-2;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                if root.busy: HorizontalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 10px;
+                    Text {
+                        width: 260px;
+                        text: root.job + (root.queued > 0 ? "  (+" + root.queued + ")" : "");
+                        font-size: 11.5px;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        Rectangle {
+                            height: 6px;
+                            border-radius: 3px;
+                            background: Theme.fill;
+                            clip: true;
+                            Rectangle {
+                                x: 0;
+                                width: root.job-progress < 0 ? parent.width * 0.3 : parent.width * root.job-progress;
+                                height: parent.height;
+                                border-radius: 3px;
+                                background: Theme.accent;
+                            }
+                        }
+                    }
+                    Text {
+                        width: 44px;
+                        text: root.job-progress < 0 ? "" : Math.round(root.job-progress * 100) + "%";
+                        font-size: 11.5px;
+                        color: Theme.text-2;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                    }
+                    GlassButton { icon: "\u{E711}"; label: I18n.t("Batal", "Cancel"); clicked => { root.cancel-job(); } }
+                }
+            }
+        }
+    }
+
+    // Sheets.
+    if root.confirm-delete || root.ask-folder: Rectangle {
+        background: #00000080;
+        TouchArea { }
+        Glass {
+            strong: true;
+            width: 360px;
+            height: sheet.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            sheet := VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+                if root.confirm-delete: Text {
+                    text: I18n.t("Hapus \"", "Delete \"") + (root.selected >= 0 && root.selected < root.rows.length ? root.rows[root.selected].name : "")
+                        + I18n.t("\" dari HP? Tidak bisa dibatalkan.", "\" from the phone? This cannot be undone.");
+                    font-size: 12.5px;
+                    color: Theme.text;
+                    wrap: word-wrap;
+                }
+                if root.ask-folder: Text {
+                    text: I18n.t("Nama folder baru", "New folder name");
+                    font-size: 12.5px;
+                    color: Theme.text;
+                }
+                if root.ask-folder: Rectangle {
+                    height: 34px;
+                    border-radius: 10px;
+                    background: Theme.fill;
+                    name := TextInput {
+                        x: 10px;
+                        width: parent.width - 20px;
+                        font-size: 12.5px;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        single-line: true;
+                        edited => { root.folder-name = self.text; }
+                        accepted => { if self.text != "" { root.ask-folder = false; root.new-folder(self.text); } }
+                    }
+                    init => { name.focus(); }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    GlassButton { label: I18n.t("Batal", "Cancel"); clicked => { root.confirm-delete = false; root.ask-folder = false; } }
+                    if root.confirm-delete: GlassButton {
+                        primary: true;
+                        icon: "\u{E74D}";
+                        label: I18n.t("Hapus", "Delete");
+                        clicked => { root.confirm-delete = false; root.delete-row(root.selected); }
+                    }
+                    if root.ask-folder: GlassButton {
+                        primary: true;
+                        label: I18n.t("Buat", "Create");
+                        clicked => { if root.folder-name != "" { root.ask-folder = false; root.new-folder(root.folder-name); } }
+                    }
+                }
+            }
+        }
+    }
+}

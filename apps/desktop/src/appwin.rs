@@ -15,6 +15,11 @@
 //!
 //! This process has no backend, no tray and no single-instance check; it
 //! reads the prefs (language, theme, video settings) and never writes them.
+//!
+//! v2.6 multi-device: with `screen=1` (no package) the window mirrors the
+//! phone's own screen instead, so a second, third ... phone gets its own
+//! window, decoder and control next to the main window. Each window title is
+//! `<device> · ZenLink`, so OBS can capture each phone as its own source.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -40,6 +45,8 @@ pub struct AppArgs {
     /// App label and device name, for the title only.
     pub name: String,
     pub device: String,
+    /// Mirror the phone's own screen (multi-device) instead of an app.
+    pub screen: bool,
 }
 
 impl AppArgs {
@@ -54,6 +61,9 @@ impl AppArgs {
         ];
         if let Some(t) = self.transport_id {
             v.push(format!("transport={t}"));
+        }
+        if self.screen {
+            v.push("screen=1".into());
         }
         v
     }
@@ -76,6 +86,7 @@ impl AppArgs {
                 "name" => a.name = v.to_string(),
                 "device" => a.device = v.to_string(),
                 "transport" => a.transport_id = v.parse().ok(),
+                "screen" => a.screen = v == "1",
                 _ => {}
             }
         }
@@ -84,11 +95,18 @@ impl AppArgs {
         let serial_ok = !a.serial.is_empty()
             && a.serial.len() <= 128
             && a.serial.bytes().all(|b| b.is_ascii_graphic());
-        if !serial_ok || !is_package_name(&a.package) {
+        if a.screen {
+            a.package.clear();
+        }
+        if !serial_ok || (!a.screen && !is_package_name(&a.package)) {
             return None;
         }
         if a.name.trim().is_empty() {
-            a.name = a.package.clone();
+            a.name = if a.screen {
+                a.serial.clone()
+            } else {
+                a.package.clone()
+            };
         }
         Some(a)
     }
@@ -160,14 +178,17 @@ fn start_session(ui: &AppWin, a: &AppArgs) {
     let size = display_size(w, h);
     let p = prefs::load();
     let mut o = crate::android_options(&p, false, None);
+    // Sound stays with the main window (one sound at a time, no echo).
     o.audio = false;
-    o.max_size = 0; // the display already has the window's size
-    o.new_display = Some(NewDisplay {
-        width: size.0.into(),
-        height: size.1.into(),
-        dpi: display_dpi(ui.window().scale_factor()),
-        flex: true,
-    });
+    if !a.screen {
+        o.max_size = 0; // the display already has the window's size
+        o.new_display = Some(NewDisplay {
+            width: size.0.into(),
+            height: size.1.into(),
+            dpi: display_dpi(ui.window().scale_factor()),
+            flex: true,
+        });
+    }
     let shared = Arc::new(android::Shared::default());
     let mut src = android::DeviceSource::new(
         a.serial.clone(),
@@ -182,14 +203,18 @@ fn start_session(ui: &AppWin, a: &AppArgs) {
             known: None,
         },
     );
-    src.start_app = Some(a.package.clone());
-    log::info!(
-        "app window: {} on {} ({}x{})",
-        a.package,
-        a.serial,
-        size.0,
-        size.1
-    );
+    if a.screen {
+        log::info!("device window: {} ({})", a.device, a.serial);
+    } else {
+        src.start_app = Some(a.package.clone());
+        log::info!(
+            "app window: {} on {} ({}x{})",
+            a.package,
+            a.serial,
+            size.0,
+            size.1
+        );
+    }
     android::set_active(Some(shared.clone()));
     ST.with_borrow_mut(|s| {
         s.asked = size;
@@ -272,13 +297,16 @@ fn tick(ui: &AppWin, a: &AppArgs) {
             ui.set_phase(ui_phase.into());
             if st.phase == android::Phase::Error {
                 log::warn!("app window: {}", st.error);
-                ui.set_message(error_text(ui, &st.error).into());
+                ui.set_message(error_text(ui, &st.error, a.screen).into());
             }
         }
     }
     ST.with_borrow_mut(|s| {
         let Some(v) = s.view.as_ref() else { return };
         v.set_bounds(x as i32, y as i32, w as i32, h as i32, streaming, 0);
+        if a.screen {
+            return; // the phone's own screen keeps its size
+        }
         // Flex display: follow the window once its size settles.
         let want = display_size(w, h);
         let now = Instant::now();
@@ -302,7 +330,7 @@ fn tick(ui: &AppWin, a: &AppArgs) {
 }
 
 /// A short bilingual reason for the window, from the session's English error.
-fn error_text(ui: &AppWin, e: &str) -> String {
+fn error_text(ui: &AppWin, e: &str, screen: bool) -> String {
     let id = ui.global::<I18n>().get_id();
     let low = e.to_lowercase();
     if low.contains("device") && (low.contains("not found") || low.contains("offline")) {
@@ -310,6 +338,13 @@ fn error_text(ui: &AppWin, e: &str) -> String {
             "HP tidak tersambung lagi. Sambungkan lagi, lalu Coba lagi.".into()
         } else {
             "The phone is no longer connected. Connect it again, then Try again.".into()
+        };
+    }
+    if screen {
+        return if id {
+            format!("Layar HP tidak bisa ditampilkan: {e}")
+        } else {
+            format!("The phone's screen could not be shown: {e}")
         };
     }
     if id {
@@ -338,6 +373,7 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
     ui.global::<I18n>().set_id(p.lang.as_str() != "en");
     ui.set_app_name(a.name.clone().into());
     ui.set_device(a.device.clone().into());
+    ui.set_screen(a.screen);
 
     ui.on_key_input(|text, ctrl, shift, alt| {
         let Some(sh) = android::active() else {
@@ -418,6 +454,7 @@ mod tests {
             package: "org.videolan.vlc".into(),
             name: "VLC for Android".into(),
             device: "TECNO POVA 6".into(),
+            screen: false,
         }
     }
 
@@ -444,6 +481,28 @@ mod tests {
         let mut a = sample();
         a.serial.clear();
         assert_eq!(AppArgs::parse(&a.to_args()), None);
+    }
+
+    #[test]
+    fn device_window_needs_no_package() {
+        let a = AppArgs {
+            serial: "R58N".into(),
+            name: "Galaxy S24".into(),
+            device: "Galaxy S24".into(),
+            screen: true,
+            ..AppArgs::default()
+        };
+        assert_eq!(AppArgs::parse(&a.to_args()), Some(a));
+        // A package passed by mistake is ignored, never started.
+        let b = AppArgs::parse(&[
+            ARG.into(),
+            "serial=R58N".into(),
+            "screen=1".into(),
+            "package=x;reboot".into(),
+        ])
+        .unwrap();
+        assert!(b.package.is_empty());
+        assert_eq!(b.name, "R58N");
     }
 
     #[test]

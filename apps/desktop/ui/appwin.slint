@@ -5,7 +5,7 @@ import { Theme, I18n } from "theme.slint";
 import { GlassButton } from "widgets.slint";
 
 export component AppWin inherits Window {
-    title: root.app-name + " · " + root.device + " · ZenLink";
+    title: root.screen ? root.device + " · ZenLink" : root.app-name + " · " + root.device + " · ZenLink";
     icon: @image-url("../../../ZenshiroDev/resources/assets/logo-256.png");
     background: Theme.stage;
     // A phone-like start size; the virtual display follows the window.
@@ -17,6 +17,8 @@ export component AppWin inherits Window {
 
     in property <string> app-name;
     in property <string> device;
+    // Mirrors the phone's own screen (multi-device) instead of one app.
+    in property <bool> screen;
     // "connecting" | "streaming" | "error"
     in property <string> phase: "connecting";
     in property <string> message;
@@ -45,7 +47,9 @@ export component AppWin inherits Window {
                     padding-left: 8px;
                     spacing: 6px;
                     GlassButton { icon: "\u{E72B}"; tip: I18n.t("Kembali", "Back"); enabled: root.phase == "streaming"; clicked => { root.action("back"); } }
-                    GlassButton { icon: "\u{E777}"; tip: I18n.t("Mulai ulang app", "Restart the app"); enabled: root.phase == "streaming"; clicked => { root.action("restart-app"); } }
+                    if root.screen: GlassButton { icon: "\u{E80F}"; tip: I18n.t("Beranda", "Home"); enabled: root.phase == "streaming"; clicked => { root.action("home"); } }
+                    if root.screen: GlassButton { icon: "\u{E8A9}"; tip: I18n.t("Aplikasi terbaru", "Recent apps"); enabled: root.phase == "streaming"; clicked => { root.action("switcher"); } }
+                    if !root.screen: GlassButton { icon: "\u{E777}"; tip: I18n.t("Mulai ulang app", "Restart the app"); enabled: root.phase == "streaming"; clicked => { root.action("restart-app"); } }
                     Text {
                         horizontal-stretch: 1;
                         text: root.app-name;
@@ -55,7 +59,7 @@ export component AppWin inherits Window {
                         vertical-alignment: center;
                         overflow: elide;
                     }
-                    Text {
+                    if !root.screen: Text {
                         text: root.device;
                         font-size: 11px;
                         color: Theme.text-3;
@@ -75,7 +79,7 @@ export component AppWin inherits Window {
                     Text {
                         text: root.phase == "error"
                             ? (root.message != "" ? root.message : I18n.t("App tidak bisa dibuka.", "The app could not be opened."))
-                            : I18n.t("Membuka ", "Opening ") + root.app-name + "…";
+                            : (root.screen ? I18n.t("Menyambung ke ", "Connecting to ") + root.device + "…" : I18n.t("Membuka ", "Opening ") + root.app-name + "…");
                         font-size: 13px;
                         color: root.phase == "error" ? Theme.warn : Theme.text-2;
                         wrap: word-wrap;
