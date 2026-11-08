@@ -1,0 +1,92 @@
+// One Android app in its own window (v2.5.1): `ZenLink.exe --android-app`.
+// The app runs on its own virtual display on the phone (scrcpy new_display);
+// the picture is the same native D3D11 child window as the main window's.
+import { Theme, I18n } from "theme.slint";
+import { GlassButton } from "widgets.slint";
+
+export component AppWin inherits Window {
+    title: root.app-name + " · " + root.device + " · ZenLink";
+    icon: @image-url("../../../ZenshiroDev/resources/assets/logo-256.png");
+    background: Theme.stage;
+    // A phone-like start size; the virtual display follows the window.
+    preferred-width: 430px;
+    preferred-height: 820px;
+    min-width: 280px;
+    min-height: 320px;
+    default-font-family: "Segoe UI Variable Text";
+
+    in property <string> app-name;
+    in property <string> device;
+    // "connecting" | "streaming" | "error"
+    in property <string> phase: "connecting";
+    in property <string> message;
+    // Height of the button strip above the picture (Rust places the video under it).
+    out property <length> bar-h: 44px;
+    callback action(string);
+    callback retry();
+    callback key-input(string, bool, bool, bool) -> bool;
+    public function focus-keys() {
+        keys.focus();
+    }
+
+    keys := FocusScope {
+        key-pressed(ev) => {
+            if root.key-input(ev.text, ev.modifiers.control, ev.modifiers.shift, ev.modifiers.alt) {
+                return accept;
+            }
+            return reject;
+        }
+        VerticalLayout {
+            Rectangle {
+                height: root.bar-h;
+                background: Theme.base;
+                HorizontalLayout {
+                    padding: 6px;
+                    padding-left: 8px;
+                    spacing: 6px;
+                    GlassButton { icon: "\u{E72B}"; tip: I18n.t("Kembali", "Back"); enabled: root.phase == "streaming"; clicked => { root.action("back"); } }
+                    GlassButton { icon: "\u{E777}"; tip: I18n.t("Mulai ulang app", "Restart the app"); enabled: root.phase == "streaming"; clicked => { root.action("restart-app"); } }
+                    Text {
+                        horizontal-stretch: 1;
+                        text: root.app-name;
+                        font-size: 13px;
+                        font-weight: 650;
+                        color: Theme.text;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.device;
+                        font-size: 11px;
+                        color: Theme.text-3;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        max-width: 160px;
+                    }
+                }
+                Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+            }
+            Rectangle {
+                background: Theme.stage;
+                if root.phase != "streaming": VerticalLayout {
+                    alignment: center;
+                    padding: 24px;
+                    spacing: 12px;
+                    Text {
+                        text: root.phase == "error"
+                            ? (root.message != "" ? root.message : I18n.t("App tidak bisa dibuka.", "The app could not be opened."))
+                            : I18n.t("Membuka ", "Opening ") + root.app-name + "…";
+                        font-size: 13px;
+                        color: root.phase == "error" ? Theme.warn : Theme.text-2;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                    }
+                    if root.phase == "error": HorizontalLayout {
+                        alignment: center;
+                        GlassButton { primary: true; icon: "\u{E72C}"; label: I18n.t("Coba lagi", "Try again"); clicked => { root.retry(); } }
+                    }
+                }
+            }
+        }
+    }
+}

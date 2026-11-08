@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" width="180" height="180" alt="ZenLink logo" style="border-radius: 40px; box-shadow: 0 16px 36px rgba(255, 79, 163, 0.35);">
+  <img src="ZenshiroDev/resources/assets/logo.png" width="180" height="180" alt="ZenLink logo" style="border-radius: 40px; box-shadow: 0 16px 36px rgba(255, 79, 163, 0.35);">
 </p>
 
 <h1 align="center">ZenLink</h1>
@@ -49,7 +49,7 @@
 >   - [**libusb-win32**](https://sourceforge.net/projects/libusb-win32/) by **Stephan Meyer & Travis Lee Robinson** (driver GPL, library LGPL) — the libusb0 driver bundled in `drivers/libusb-win32` (unmodified, signed binaries; source at the link).
 >   - [**libwdi / Zadig**](https://github.com/pbatard/libwdi) by **Pete Batard** (LGPL / GPL) — the driver-package approach ZenLink follows; Zadig itself is not bundled.
 >   - [**scrcpy**](https://github.com/Genymobile/scrcpy) by **Genymobile & Romain Vimont** (Apache-2.0) — the official scrcpy server (v5.0.1, unmodified) runs on the Android phone; ZenLink's Android client is its own Rust code.
->   - **Android SDK Platform-Tools `adb`** by **Google** (Android Open Source Project, Apache-2.0; `NOTICE.txt` included) — bundled unmodified and Google-signed, see [docs/THIRD_PARTY.md](docs/THIRD_PARTY.md).
+>   - **Android SDK Platform-Tools `adb`** by **Google** (Android Open Source Project, Apache-2.0; `NOTICE.txt` included) — bundled unmodified and Google-signed, see [ZenshiroDev/docs/THIRD_PARTY.md](ZenshiroDev/docs/THIRD_PARTY.md).
 >   - [**UxPlay**](https://github.com/FDH2/UxPlay) by **F. Duncanh** and [**RPiPlay / shairplay**](https://github.com/FD-/RPiPlay) (GPL-3.0) — the AirPlay mirroring protocol reference. ZenLink's AirPlay receiver is written in Python; the **playfair** FairPlay code in `native/playfair` is used unmodified (GPL-3.0).
 
 ---
@@ -141,11 +141,26 @@ git clone https://github.com/zenvyzenshiro/zenlink.git
 cd zenlink
 .\"Start ZenLink.bat"
 ```
-The first run sets everything up: it installs Python 3.13 with winget if needed, creates the environment and installs `requirements.txt`, offers Apple Devices (for Apple Driver mode) and the firewall permission for AirPlay. For Android it offers to download Google's official `adb` (platform-tools 37.0.1, about 8 MB, checksum and Google signature checked), unless an Android SDK is already there (`ANDROID_HOME`). Setup.exe and Portable.exe bundle `adb`. Later runs open straight away. **`run.bat`** starts ZenLink with a visible console log.
+The first run sets everything up: it installs Python 3.13 with winget if needed, creates the environment and installs `apps/desktop/backend/requirements.txt`, offers Apple Devices (for Apple Driver mode) and the firewall permission for AirPlay. For Android it offers to download Google's official `adb` (platform-tools 37.0.1, about 8 MB, checksum and Google signature checked), unless an Android SDK is already there (`ANDROID_HOME`). Setup.exe and Portable.exe bundle `adb`. Later runs open straight away. **`ZenshiroDev\tooling\windows\scripts\run.bat`** starts ZenLink with a visible console log. Settings of a source checkout are kept in `data\` (ignored by git).
 
-Tests: `.venv\Scripts\python -m unittest discover -s tests` (no device needed; `tests\airplay_sim.py` simulates an iPhone mirroring over AirPlay).
+Tests: `.venv\Scripts\python -m unittest discover -s apps/desktop/backend/tests -t apps/desktop/backend` and `cargo test --workspace` (no device needed; `apps\desktop\backend\tests\airplay_sim.py` simulates an iPhone mirroring over AirPlay).
 
-To build the release files yourself: `powershell -ExecutionPolicy Bypass -File .\build_portable_release.ps1 -PlatformTools <Android SDK>\platform-tools` (Rust, PyInstaller, Inno Setup 6 for the installer).
+To build the release files yourself: `powershell -ExecutionPolicy Bypass -File .\build_portable_release.ps1 -PlatformTools <Android SDK>\platform-tools` (Rust, PyInstaller, Inno Setup 6 for the installer). Everything it builds goes to `out\`.
+
+### Repository layout
+
+| Folder | What it holds |
+|---|---|
+| `apps/desktop/` | `ZenLink.exe`: the Rust + Slint window (crate `zenlink-app`), and `backend/`, the Python sidecar (`ZenLinkService.exe`: Apple modes, ZenLink Studio, AirPlay) with its tests and `requirements.*`. |
+| `ZenshiroDev/crates/` | Shared Rust libraries: `zenlink-core` (backend API, sidecar, updates), `zenlink-video` (decode + D3D11), `zenlink-audio`, `zenlink-android` (ADB, scrcpy client). |
+| `ZenshiroDev/resources/` | `assets/` (icons, logos), `third_party/` (pinned scrcpy server; adb is downloaded here), `windows/drivers` (libusb-win32), `windows/native` (playfair, zlaac C sources). |
+| `ZenshiroDev/tooling/` | `windows/packaging` (installer, MSIX, PyInstaller hooks), `windows/tools` (PowerShell helpers), `windows/scripts` (console run, desktop shortcut), `dev/` (window build helper, fake backend, fixture generator). |
+| `ZenshiroDev/docs/` | Technical notes: Android, Rust, size audit, third-party notices, release notes. |
+| `docs/` | The website (GitHub Pages). |
+
+`Cargo.toml` at the root is the Rust workspace. The root also holds the three entry scripts: `Start ZenLink.bat`, `Uninstall-ZenLink.bat` and `build_portable_release.ps1`.
+
+Dev outputs go to ignored folders in the checkout: `.venv/`, `target/` (Rust), `data/` (settings of a source run) and `out/` (release build). To keep them outside, put a `Start ZenLink.local.bat` next to `Start ZenLink.bat` or in its parent folder that sets `CARGO_TARGET_DIR`, `ZENLINK_DATA_DIR` and `ZENLINK_OUT_DIR`. Installed and portable copies never write into the checkout.
 
 ---
 

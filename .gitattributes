@@ -5,19 +5,19 @@
 *.dll binary
 
 # Upstream files kept byte-exact (signatures and checksums).
-third_party/** -text
+ZenshiroDev/resources/third_party/** -text
 
 # Recorded scrcpy video streams (test fixtures).
 *.scrcpy binary
 
 # Manual.zip (git archive) stays small: no website,
 # no scrcpy server (it is built into ZenLink.exe; for a Rust build get it from
-# the scrcpy v5.0.1 release, docs/android/SCRCPY.md). adb is downloaded by
-# Start ZenLink.bat (tools/get-adb.ps1).
+# the scrcpy v5.0.1 release, ZenshiroDev/docs/android/SCRCPY.md). adb is downloaded by
+# Start ZenLink.bat (ZenshiroDev/tooling/windows/tools/get-adb.ps1).
 docs/index.html export-ignore
 docs/site.css export-ignore
 docs/site.js export-ignore
 docs/demo.css export-ignore
 docs/demo.js export-ignore
 docs/logo.png export-ignore
-third_party/scrcpy/scrcpy-server-v5.0.1 export-ignore
+ZenshiroDev/resources/third_party/scrcpy/scrcpy-server-v5.0.1 export-ignore

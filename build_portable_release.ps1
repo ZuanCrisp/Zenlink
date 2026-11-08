@@ -1,12 +1,13 @@
 <#
 .SYNOPSIS
-  Builds the ZenLink release files into .\release\:
+  Builds the ZenLink release files into out\release\ (work folders: out\build, out\dist):
 
     ZenLink-v<ver>-Portable.exe           one ZenLink.exe, nothing to install (no Python)
     ZenLink-v<ver>-Setup.exe              installer (Inno Setup 6, if installed)
     ZenLink-v<ver>-Manual.zip             manual install: ZenLink.exe + source + Start ZenLink.bat (sets up Python and adb on first run)
 
-  ZenLink.exe is the Rust window (rust\). The Python backend is built as
+  ZenLink.exe is the Rust window (apps\desktop, ZenshiroDev\crates\). The Python backend
+  (apps\desktop\backend) is built as
   ZenLinkService.exe; ZenLink.exe starts it headless. Needs cargo (rustup).
 
 .EXAMPLE
@@ -17,15 +18,19 @@ param(
     # Folder with Google's platform-tools (adb.exe, AdbWinApi.dll,
     # AdbWinUsbApi.dll, NOTICE.txt). Default: ANDROID_HOME / ANDROID_SDK_ROOT /
     # Android Studio's SDK folder.
-    [string]$PlatformTools = ""
+    [string]$PlatformTools = "",
+    # Output folder. Default: $env:ZENLINK_OUT_DIR, else out\ in the repository root.
+    [string]$Out = ""
 )
 $ErrorActionPreference = "Stop"
-Set-Location $PSScriptRoot
+# This script lives in the repository root; all paths below are relative to it.
+$root = $PSScriptRoot
+Set-Location $root
 
 if (-not $Version) {
-    $Version = (Select-String -Path pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+    $Version = (Select-String -Path apps\desktop\backend\pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 }
-$py = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+$py = Join-Path $root ".venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { throw "Run Start ZenLink.bat once first (it creates .venv)." }
 
 # Android (B-28): every package carries Google's official adb, unmodified.
@@ -57,29 +62,36 @@ foreach ($f in $adbFiles) {
     Write-Host ("    {0,-18} {1}" -f $f, (Get-FileHash (Join-Path $PlatformTools $f) -Algorithm SHA256).Hash)
 }
 
-$release = Join-Path $PSScriptRoot "release"
-$build = Join-Path $PSScriptRoot "build"
-$dist = Join-Path $PSScriptRoot "dist"
+# Every build output goes to out\ (ignored by git), or to -Out / ZENLINK_OUT_DIR.
+$out = if ($Out) { $Out } elseif ($env:ZENLINK_OUT_DIR) { $env:ZENLINK_OUT_DIR } else { Join-Path $root "out" }
+$out = [IO.Path]::GetFullPath($out)
+$release = Join-Path $out "release"
+$build = Join-Path $out "build"
+$dist = Join-Path $out "dist"
 Remove-Item -Recurse -Force $release, $build, $dist -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force $release | Out-Null
+New-Item -ItemType Directory -Force $release, $build | Out-Null
 
 Write-Host "[1/4] Installing build tools..." -ForegroundColor Magenta
-& $py -m pip install --disable-pip-version-check -q -r requirements.txt pyinstaller
+& $py -m pip install --disable-pip-version-check -q -r apps\desktop\backend\requirements.txt pyinstaller
 if ($LASTEXITCODE) { throw "pip failed" }
 
 Write-Host "[2/4] Building ZenLinkService.exe (PyInstaller) and ZenLink.exe (Rust)..." -ForegroundColor Magenta
 $sep = ";"
 $pyiArgs = @(
-    "-m", "PyInstaller", "packaging\launch.py",
+    "-m", "PyInstaller", "ZenshiroDev\tooling\windows\packaging\launch.py",
+    # The backend package lives in apps\desktop\backend (monorepo).
+    "--paths", "apps\desktop\backend",
+    "--distpath", $dist, "--workpath", (Join-Path $build "pyinstaller"), "--specpath", $build,
     "--name", "ZenLinkService", "--onedir", "--windowed", "--noconfirm", "--clean",
     # Never pack executables (no UPX: antivirus false positives).
     "--noupx",
-    "--icon", "assets\zenlink.ico",
+    "--icon", (Join-Path $root "ZenshiroDev\resources\assets\zenlink.ico"),
     "--contents-directory", ".",
-    "--version-file", "packaging\version_info.txt",
-    "--add-data", "assets${sep}assets",
-    "--add-data", "tools${sep}tools",
-    "--add-data", "drivers${sep}drivers",
+    "--version-file", (Join-Path $build "version_info.txt"),
+    # Bundle layout (unchanged): assets\, tools\, drivers\ next to the exe.
+    "--add-data", "$root\ZenshiroDev\resources\assets${sep}assets",
+    "--add-data", "$root\ZenshiroDev\tooling\windows\tools${sep}tools",
+    "--add-data", "$root\ZenshiroDev\resources\windows\drivers${sep}drivers",
     "--collect-all", "pymobiledevice3",
     # Package metadata (dist-info) of pymobiledevice3 and everything it
     # depends on: some read their own version at import (pyimg4 does), and
@@ -88,14 +100,14 @@ $pyiArgs = @(
     "--collect-all", "pmd_pytcp",
     "--collect-all", "pmd_net_addr",
     "--collect-all", "pytun_pmd3",  # wintun.dll, loaded when the tunnel module is imported
-    # Only the x64 PortAudio (packaging\pyi-hooks\hook-sounddevice.py).
-    "--additional-hooks-dir", "packaging\pyi-hooks",
+    # Only the x64 PortAudio (ZenshiroDev\tooling\windows\packaging\pyi-hooks\hook-sounddevice.py).
+    "--additional-hooks-dir", "$root\ZenshiroDev\tooling\windows\packaging\pyi-hooks",
     "--hidden-import", "_sounddevice_data",
     "--collect-all", "zeroconf",
-    "--add-binary", "zenlink\airplay\playfair.dll${sep}zenlink\airplay",
-    # Sound: minimal FFmpeg AAC decoder (native\zlaac). PyAV (full FFmpeg,
+    "--add-binary", "$root\apps\desktop\backend\zenlink\airplay\playfair.dll${sep}zenlink\airplay",
+    # Sound: minimal FFmpeg AAC decoder (ZenshiroDev\resources\windows\native\zlaac). PyAV (full FFmpeg,
     # ~65 MB) is only pulled in by pymobiledevice3's unused VNC transcoder.
-    "--add-binary", "zenlink\zlaac.dll${sep}zenlink",
+    "--add-binary", "$root\apps\desktop\backend\zenlink\zlaac.dll${sep}zenlink",
     "--exclude-module", "av",
     "--hidden-import", "Crypto.Cipher.AES",
     "--collect-submodules", "zenlink",
@@ -104,7 +116,7 @@ $pyiArgs = @(
     "--exclude-module", "IPython",
     # The classic WebView2 window (pywebview, pythonnet, pystray, Pillow,
     # ui\) is not packaged: ZenLink.exe is the window and the backend runs
-    # --headless (docs/SIZE_AUDIT.md, set A). The source zip keeps it
+    # --headless (ZenshiroDev/docs/SIZE_AUDIT.md, set A). The source zip keeps it
     # (ZENLINK_UI=classic with Start ZenLink.bat).
     "--exclude-module", "webview",
     "--exclude-module", "clr",
@@ -118,7 +130,7 @@ $pyiArgs = @(
     "--exclude-module", "chardet",
     "--exclude-module", "pydoc",
     # Never imported by the headless backend (trace + lazy-import scan in
-    # docs/SIZE_AUDIT.md, B1/B4/B5): pydantic comes with pymobiledevice3's
+    # ZenshiroDev/docs/SIZE_AUDIT.md, B1/B4/B5): pydantic comes with pymobiledevice3's
     # remote server, setuptools/PyInstaller/pefile are build tools, sqlite3
     # has no user. The frozen self-test checks every device-path module.
     "--exclude-module", "pydantic",
@@ -153,13 +165,13 @@ VSVersionInfo(
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]
 )
-"@ | Set-Content -Encoding UTF8 packaging\version_info.txt
+"@ | Set-Content -Encoding UTF8 (Join-Path $build "version_info.txt")
 & $py @pyiArgs
 if ($LASTEXITCODE) { throw "PyInstaller failed" }
 
 $app = Join-Path $dist "ZenLinkService"
 
-# Import every device-path module inside the built exe (packaging\launch.py
+# Import every device-path module inside the built exe (ZenshiroDev\tooling\windows\packaging\launch.py
 # --selftest). A missing module or package metadata fails the build here.
 function Test-FrozenExe([string]$exe) {
     $report = Join-Path $build ("selftest-" + [IO.Path]::GetFileNameWithoutExtension($exe) + "-" + (Get-Random) + ".json")
@@ -177,11 +189,18 @@ Test-FrozenExe (Join-Path $app "ZenLinkService.exe")
 if (Get-ChildItem $app -Recurse -Filter "avcodec-*.dll") { throw "PyAV/FFmpeg DLLs found in $app" }
 # Size audit: removed parts must stay out, the one PortAudio must be in.
 foreach ($gone in "pydantic_core", "sqlite3.dll", "_sqlite3.pyd", "libportaudio32bit.dll", "libportaudioarm64.dll", "libportaudio64bit-asio.dll", "webview", "pythonnet", "PIL", "chardet", "Python.Runtime.dll") {
-    if (Get-ChildItem $app -Recurse -Filter $gone) { throw "$gone found in $app (see docs/SIZE_AUDIT.md)" }
+    if (Get-ChildItem $app -Recurse -Filter $gone) { throw "$gone found in $app (see ZenshiroDev/docs/SIZE_AUDIT.md)" }
 }
 if (-not (Test-Path (Join-Path $app "_sounddevice_data\portaudio-binaries\libportaudio64bit.dll"))) { throw "PortAudio x64 missing in $app" }
-foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat") {
+foreach ($f in "LICENSE", "README.md", "Start ZenLink.bat") {
     Copy-Item $f $app
+}
+# Uninstall-ZenLink.bat is in the root; run.bat and Create-Desktop-Shortcut.bat
+# live in ZenshiroDev\tooling\windows\scripts. A packaged copy keeps all three
+# next to ZenLink.exe (each script finds its root either way).
+Copy-Item "Uninstall-ZenLink.bat" $app
+foreach ($f in "run.bat", "Create-Desktop-Shortcut.bat") {
+    Copy-Item (Join-Path "ZenshiroDev\tooling\windows\scripts" $f) $app
 }
 # Android: adb next to ZenLink.exe (found by find_adb); the scrcpy server is
 # built into ZenLink.exe, its licence ships beside it.
@@ -190,14 +209,14 @@ New-Item -ItemType Directory -Force $adbDest | Out-Null
 foreach ($f in $adbFiles) { Copy-Item (Join-Path $PlatformTools $f) $adbDest }
 $scrcpyDest = Join-Path $app "third_party\scrcpy"
 New-Item -ItemType Directory -Force $scrcpyDest | Out-Null
-Copy-Item "third_party\scrcpy\LICENSE" $scrcpyDest
+Copy-Item "ZenshiroDev\resources\third_party\scrcpy\LICENSE" $scrcpyDest
 # Credits and licences of everything bundled (scrcpy, adb, FFmpeg, ...).
-Copy-Item "docs\THIRD_PARTY.md" $app
-& cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app
+Copy-Item "ZenshiroDev\docs\THIRD_PARTY.md" $app
+& cargo build --release --manifest-path Cargo.toml -p zenlink-app
 if ($LASTEXITCODE) { throw "cargo failed" }
 # CARGO_TARGET_DIR lets the release build while a dev ZenLink.exe from
-# rust\target is open (Windows locks a running exe).
-$rustTarget = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $PSScriptRoot "rust\target" }
+# target\ is open (Windows locks a running exe).
+$rustTarget = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root "target" }
 $rustExe = Join-Path $rustTarget "release\ZenLink.exe"
 Copy-Item $rustExe $app
 
@@ -219,7 +238,7 @@ Test-FrozenExe $service
 # %LOCALAPPDATA%\ZenLink-Next\service on start).
 $env:ZENLINK_BACKEND_EXE = $service
 $env:ZENLINK_ADB_DIR = (Resolve-Path $PlatformTools).Path
-& cargo build --release --manifest-path rust\Cargo.toml -p zenlink-app --features embedded-backend --target-dir (Join-Path $build "rust-portable")
+& cargo build --release --manifest-path Cargo.toml -p zenlink-app --features embedded-backend --target-dir (Join-Path $build "rust-portable")
 Remove-Item Env:ZENLINK_BACKEND_EXE, Env:ZENLINK_ADB_DIR
 if ($LASTEXITCODE) { throw "cargo (portable) failed" }
 Copy-Item (Join-Path $build "rust-portable\release\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
@@ -232,11 +251,11 @@ $iscc = @(
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($iscc) {
     # Top-level entries of the install folder: the next Setup removes exactly
-    # these before copying (clean update, packaging/ZenLink.iss).
+    # these before copying (clean update, ZenshiroDev/tooling/windows/packaging/ZenLink.iss).
     $skip = @("Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat", "portable.txt", "install-manifest.txt")
     $names = @(Get-ChildItem -Force $app | Where-Object { $skip -notcontains $_.Name } | ForEach-Object { $_.Name }) + "install-manifest.txt"
     [IO.File]::WriteAllLines((Join-Path $app "install-manifest.txt"), [string[]]$names)
-    & $iscc "/DAppVersion=$Version" "/DAppVersionNum=$VersionNum" "/DSourceDir=$app" "/O$release" "packaging\ZenLink.iss"
+    & $iscc "/DAppVersion=$Version" "/DAppVersionNum=$VersionNum" "/DSourceDir=$app" "/O$release" "ZenshiroDev\tooling\windows\packaging\ZenLink.iss"
     if ($LASTEXITCODE) { throw "Inno Setup failed" }
 } else {
     Write-Warning "Inno Setup 6 not found: skipping Setup.exe (winget install JRSoftware.InnoSetup)."
@@ -245,7 +264,7 @@ $srcZip = Join-Path $release "ZenLink-v$Version-Manual.zip"
 git archive --format=zip --prefix="ZenLink-v$Version/" -o $srcZip HEAD
 # Ready-built ZenLink.exe next to Start ZenLink.bat (no Rust toolchain needed).
 # adb is not packed: Start ZenLink.bat downloads Google's official copy
-# (tools\get-adb.ps1). The website, agent notes and the scrcpy server
+# (ZenshiroDev\tooling\windows\tools\get-adb.ps1). The website, agent notes and the scrcpy server
 # (built into ZenLink.exe) are export-ignore in .gitattributes.
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 $zip = [IO.Compression.ZipFile]::Open($srcZip, "Update")

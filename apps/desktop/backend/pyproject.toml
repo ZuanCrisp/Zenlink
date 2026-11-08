@@ -1,0 +1,28 @@
+[project]
+name = "zenlink"
+version = "2.5.1"
+description = "Mirror and control an iPhone or iPad on Windows - Apple Driver (cable or Wi-Fi) or ZenLink Studio (cable or AirPlay) for live streaming."
+# README.md and LICENSE are in the repository root.
+license = "GPL-3.0-or-later"
+authors = [{ name = "Zenvy Zenshiro" }]
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "aiohttp>=3.10",
+    "pywebview>=5.3",
+    "pymobiledevice3>=11.49",
+    "av>=14",
+    "zeroconf>=0.132",
+    "pycryptodome>=3.20",
+    "cryptography>=42",
+    "pyusb>=1.2.1",
+    "sounddevice>=0.4.6",
+    "pystray>=0.19",
+    "Pillow>=10",
+]
+
+[project.urls]
+Homepage = "https://github.com/zenvyzenshiro/zenlink"
+Support = "https://sociabuzz.com/zenvy/tribe"
+
+[project.gui-scripts]
+zenlink = "zenlink.__main__:main"

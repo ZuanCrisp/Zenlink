@@ -5,10 +5,10 @@ cd /d "%~dp0"
 title ZenLink
 
 rem --- Pinned versions: the same as the release build -----------------------
-rem Python packages: requirements.txt, with the exact versions of
-rem requirements.lock as constraints. adb: Google platform-tools, downloaded
-rem once by tools\get-adb.ps1 when no adb is found (checksum and Google
-rem signature checked). Change these only together with docs\THIRD_PARTY.md.
+rem Python packages: apps\desktop\backend\requirements.txt, with the exact versions
+rem of apps\desktop\backend\requirements.lock as constraints. adb: Google platform-tools,
+rem downloaded once by ZenshiroDev\tooling\windows\tools\get-adb.ps1 when no adb is found (checksum and Google
+rem signature checked). Change these only together with ZenshiroDev\docs\THIRD_PARTY.md.
 set "ZL_ADB_REV=37.0.1"
 set "ZL_ADB_SHA256=45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99"
 
@@ -18,6 +18,9 @@ if exist "%~dp0ZenLinkService.exe" if exist "%~dp0ZenLink.exe" (
     exit /b 0
 )
 
+rem Source checkout (monorepo): the Python backend package is in apps\desktop\backend.
+set "BACKEND=%~dp0apps\desktop\backend"
+set "PYTHONPATH=%BACKEND%;%PYTHONPATH%"
 set "VENV=%~dp0.venv"
 set "PY=%VENV%\Scripts\python.exe"
 set "PYW=%VENV%\Scripts\pythonw.exe"
@@ -26,7 +29,7 @@ set "STAMPLOCK=%VENV%\.requirements-lock"
 
 rem Fast path: environment exists and requirements.txt / .lock haven't changed.
 if exist "%PY%" if exist "%STAMP%" if exist "%STAMPLOCK%" (
-    fc /b "%~dp0requirements.txt" "%STAMP%" >nul 2>&1 && fc /b "%~dp0requirements.lock" "%STAMPLOCK%" >nul 2>&1 && goto :launch
+    fc /b "%BACKEND%\requirements.txt" "%STAMP%" >nul 2>&1 && fc /b "%BACKEND%\requirements.lock" "%STAMPLOCK%" >nul 2>&1 && goto :launch
 )
 
 echo ZenLink - first-time setup
@@ -63,13 +66,13 @@ if not exist "%PY%" (
 
 echo [2/3] Installing components (about a minute the first time)...
 "%PY%" -m pip install --disable-pip-version-check -q --upgrade pip >nul 2>&1
-"%PY%" -m pip install --disable-pip-version-check -q -r "%~dp0requirements.txt" -c "%~dp0requirements.lock" || goto :failed
-copy /y "%~dp0requirements.txt" "%STAMP%" >nul
-copy /y "%~dp0requirements.lock" "%STAMPLOCK%" >nul
+"%PY%" -m pip install --disable-pip-version-check -q -r "%~dp0apps\desktop\backend\requirements.txt" -c "%~dp0apps\desktop\backend\requirements.lock" || goto :failed
+copy /y "%BACKEND%\requirements.txt" "%STAMP%" >nul
+copy /y "%BACKEND%\requirements.lock" "%STAMPLOCK%" >nul
 
 echo [3/3] Checking Windows components...
 call :check_env
-echo Setup complete. Run Create-Desktop-Shortcut.bat for a desktop shortcut.
+echo Setup complete. Run ZenshiroDev\tooling\windows\scripts\Create-Desktop-Shortcut.bat for a desktop shortcut.
 
 :launch
 rem ZenLink window (Rust, native GPU video). It starts the Python backend
@@ -77,15 +80,23 @@ rem from .venv by itself. Set ZENLINK_UI=classic for the old window.
 rem Android: ZenLink finds adb in the Android SDK (ANDROID_HOME,
 rem ANDROID_SDK_ROOT, %LOCALAPPDATA%\Android\Sdk) or on PATH. Machine-only
 rem settings such as ANDROID_HOME can go in "Start ZenLink.local.bat" next
-rem to this file (not part of the repository).
-if exist "%~dp0Start ZenLink.local.bat" call "%~dp0Start ZenLink.local.bat"
+rem to this file or in its parent folder (not part of the repository). It can
+rem also move dev outputs out of the checkout: CARGO_TARGET_DIR (Rust build),
+rem ZENLINK_DATA_DIR (settings and logs), ZENLINK_OUT_DIR (release build).
+if exist "%~dp0Start ZenLink.local.bat" (
+    call "%~dp0Start ZenLink.local.bat"
+) else if exist "%~dp0..\Start ZenLink.local.bat" call "%~dp0..\Start ZenLink.local.bat"
+rem ZenLink.exe finds this checkout (Python backend, .venv) through ZENLINK_SOURCE,
+rem also when CARGO_TARGET_DIR builds it outside the checkout.
+set "ZENLINK_SOURCE=%~dp0."
 call :check_adb
 if /i "%ZENLINK_UI%"=="classic" goto :classic
 set "NEXT=%~dp0ZenLink.exe"
 if exist "%NEXT%" goto :start_next
 rem Source checkout: build the window from the current code first, so a
 rem manual test always runs the latest changes. Unchanged code builds in seconds.
-set "NEXT=%~dp0rust\target\release\ZenLink.exe"
+set "NEXT=%~dp0target\release\ZenLink.exe"
+if defined CARGO_TARGET_DIR set "NEXT=%CARGO_TARGET_DIR%\release\ZenLink.exe"
 call :build_next || exit /b 1
 if not exist "%NEXT%" goto :classic
 
@@ -103,7 +114,7 @@ if exist "%PYW%" (
 exit /b 0
 
 :build_next
-if not exist "%~dp0rust\Cargo.toml" exit /b 0
+if not exist "%~dp0Cargo.toml" exit /b 0
 where cargo >nul 2>&1 || if exist "%USERPROFILE%\.cargo\bin\cargo.exe" set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 where cargo >nul 2>&1 || (
     echo Rust is not installed, so the window cannot be rebuilt from the code.
@@ -111,8 +122,8 @@ where cargo >nul 2>&1 || (
     exit /b 0
 )
 echo Building the ZenLink window from the current code...
-rem Elapsed time and an estimate in the window title (rust\tools\build-window.ps1).
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0rust\tools\build-window.ps1" -Rust "%~dp0rust"
+rem Elapsed time and an estimate in the window title (ZenshiroDev\tooling\dev\build-window.ps1).
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ZenshiroDev\tooling\dev\build-window.ps1" -Workspace "%~dp0."
 set "RC=!errorlevel!"
 if not "!RC!"=="0" (
     echo.
@@ -124,16 +135,16 @@ exit /b 0
 
 :check_adb
 rem Android needs Google's adb. The installer and Portable.exe bundle it; the
-rem source package downloads the official copy once (tools\get-adb.ps1, pinned
+rem source package downloads the official copy once (ZenshiroDev\tooling\windows\tools\get-adb.ps1, pinned
 rem revision, SHA-256 and Google signature checked). Skipped when an adb is
 rem already there (Android SDK or PATH) or when the user said no before.
-if exist "%~dp0third_party\platform-tools\adb.exe" exit /b 0
+if exist "%~dp0ZenshiroDev\resources\third_party\platform-tools\adb.exe" exit /b 0
 if exist "%~dp0.no-adb" exit /b 0
 if defined ANDROID_HOME if exist "%ANDROID_HOME%\platform-tools\adb.exe" exit /b 0
 if defined ANDROID_SDK_ROOT if exist "%ANDROID_SDK_ROOT%\platform-tools\adb.exe" exit /b 0
 if exist "%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe" exit /b 0
 where adb >nul 2>&1 && exit /b 0
-if not exist "%~dp0tools\get-adb.ps1" exit /b 0
+if not exist "%~dp0ZenshiroDev\tooling\windows\tools\get-adb.ps1" exit /b 0
 echo.
 echo  - Android phones and tablets need adb (Google platform-tools %ZL_ADB_REV%, about 8 MB).
 choice /c YN /n /m "   Download it from Google now? iPhone and iPad work without it. [Y/N] "
@@ -141,7 +152,7 @@ if !errorlevel! neq 1 (
     echo Not downloaded. Delete this file to be asked again.> "%~dp0.no-adb"
     exit /b 0
 )
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\get-adb.ps1" -Revision "%ZL_ADB_REV%" -Sha256 "%ZL_ADB_SHA256%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ZenshiroDev\tooling\windows\tools\get-adb.ps1" -Revision "%ZL_ADB_REV%" -Sha256 "%ZL_ADB_SHA256%"
 if errorlevel 1 (
     echo    adb could not be downloaded. ZenLink still starts; Android needs adb.
     echo    It will be offered again next time.

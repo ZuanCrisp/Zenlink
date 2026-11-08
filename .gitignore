@@ -5,20 +5,26 @@ __pycache__/
 zenlink.log
 capture/
 settings.json
+# Source checkout data (settings, passcode, device names): apps/desktop/backend/zenlink/paths.py
+/data/
 phonelink.log
 devices.json
 secrets.json
+# Build outputs: build_portable_release.ps1 writes to out/
+/out/
 build/
 dist/
 release/
-packaging/version_info.txt
 *.spec
 build.log
 airplay.json
 allow-airplay.cmd
-native/playfair/*.obj
+ZenshiroDev/resources/windows/native/playfair/*.obj
 crash.log
 
-# adb downloaded by Start ZenLink.bat (tools/get-adb.ps1)
-third_party/platform-tools/
+# adb downloaded by Start ZenLink.bat (ZenshiroDev/tooling/windows/tools/get-adb.ps1)
+ZenshiroDev/resources/third_party/platform-tools/
 .no-adb
+
+# Rust build output (Cargo workspace at the root)
+/target/
