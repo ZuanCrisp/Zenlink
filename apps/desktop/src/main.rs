@@ -175,6 +175,17 @@ struct App {
     hold_stage: Option<f32>,
     /// Settings slide: from, to, start, duration (B-22).
     slide: Option<(f32, f32, Instant, Duration)>,
+    /// Device menu slide (v2.6): from, to, start, duration. Like Settings,
+    /// the window widens on its right edge and the picture moves over.
+    menu_slide: Option<(f32, f32, Instant, Duration)>,
+    /// Side panel slide (Screen settings / Files), same shape.
+    panel_slide: Option<(f32, f32, Instant, Duration)>,
+    /// Device menu rows (v2.6): "a:<android key>" or "i:<apple id>", in
+    /// row order, the selected one, and Android phones in a window of
+    /// their own.
+    rail_keys: Vec<String>,
+    rail_sel: Option<String>,
+    popped: Vec<String>,
     dots_at: Option<Instant>,
     /// A mode choice was just sent: keep the chooser closed until the
     /// backend's state catches up.
@@ -663,6 +674,7 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     let first_id = first.and_then(|d| str_of(d, &["id"])).unwrap_or("");
     let rows = apple_rows(ui, st, first_id);
     ui.set_apple_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
+    rail_refresh(ui);
     let device = str_of(st, &["device", "name"])
         .or_else(|| first.and_then(|d| str_of(d, &["name"])))
         .unwrap_or("");
@@ -980,11 +992,12 @@ const PANEL_TTL: Duration = Duration::from_secs(20);
 /// one; [`idle_stage_w`] widens it on larger screens.
 const IDLE_STAGE_W: f32 = 440.0;
 
-/// Idle stage width for this screen: 32% of the work area, 440-640 px
-/// (the owner found 440 px next to Settings too narrow on a large screen).
+/// Idle stage width for this screen: 42% of the work area, 440-820 px
+/// (the owner found 440 px next to Settings too narrow on a large screen,
+/// and asked for a wider start again with the device menu, 2026-11-09).
 fn idle_stage_w(ui: &AppWindow) -> f32 {
     work_area(ui)
-        .map(|(_, _, ww, _)| (ww * 0.32).clamp(IDLE_STAGE_W, 640.0))
+        .map(|(_, _, ww, _)| (ww * 0.42).clamp(IDLE_STAGE_W, 820.0))
         .unwrap_or(IDLE_STAGE_W)
 }
 
@@ -1048,8 +1061,8 @@ fn widen_for_sheet(ui: &AppWindow) {
     let cur = ui.window().size().to_logical(ui.window().scale_factor());
     // Never narrower than the idle stage plus the open settings panel (the
     // window may not have taken that size yet when this runs at launch).
-    let want = if ui.get_settings_open() {
-        idle_stage_w(ui) + 16.0 + 368.0
+    let want = if ui.get_settings_open() || ui.get_menu_open() {
+        idle_stage_w(ui) + 16.0 + 368.0 * ui.get_sp() + 216.0 * ui.get_mp()
     } else {
         600.0
     };
@@ -1425,7 +1438,7 @@ fn apply_flow(ui: &AppWindow, f: &flow::Flow) {
         match f.screen {
             flow::Screen::Platform => 1,
             flow::Screen::Android => 2,
-            flow::Screen::Apple => 0,
+            flow::Screen::Apple => 2,
         },
         Relaxed,
     );
@@ -1706,6 +1719,7 @@ fn show_android(
         .collect();
     ui.set_android_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
     APP.with_borrow_mut(|a| a.android_list = list.to_vec());
+    rail_refresh(ui);
     // Test hook: show the QR pairing card (no phone needed to see it).
     static QR_TEST: AtomicBool = AtomicBool::new(false);
     if std::env::var_os("ZL_QR_TEST").is_some() && !QR_TEST.swap(true, Relaxed) {
@@ -2301,7 +2315,7 @@ fn apps_launch(ui: &AppWindow, index: i32, place: &str) {
         screen: false,
     };
     match appwin::spawn(&args) {
-        Ok(()) => show_toast(
+        Ok(_) => show_toast(
             ui,
             tr_ui(
                 ui,
@@ -2708,7 +2722,13 @@ fn android_start(ui: &AppWindow, index: i32) {
             if index >= 0 {
                 a.android_list.get(index as usize).filter(ready).cloned()
             } else {
-                a.android_list.iter().find(ready).cloned()
+                // The phone picked in the device menu (v2.6), else the first ready one.
+                let picked = a.rail_sel.as_deref().and_then(|k| k.strip_prefix("a:"));
+                picked
+                    .and_then(|k| a.android_list.iter().find(|d| d.id.key == k))
+                    .filter(ready)
+                    .or_else(|| a.android_list.iter().find(ready))
+                    .cloned()
             }
         });
         // A phone on both USB and Wi-Fi: use the link the user picked.
@@ -2795,57 +2815,203 @@ fn android_start(ui: &AppWindow, index: i32) {
     android_tick(ui);
 }
 
-/// v2.6 multi-device: opens list entry `i` in its own ZenLink window, as a
-/// mirror of the phone's screen or (`files`) as its file manager. Each is
-/// its own process, so phones never share a decoder, control or copy queue.
-fn android_open_window(ui: &AppWindow, i: i32, files: bool) {
-    let Some(d) = APP.with_borrow(|a| {
-        usize::try_from(i)
-            .ok()
-            .and_then(|i| a.android_list.get(i))
-            .filter(|d| d.readiness == zenlink_android::discovery::Readiness::Ready)
-            .cloned()
-    }) else {
-        show_toast(
-            ui,
-            tr_ui(ui, "HP ini belum siap.", "This phone is not ready yet."),
-        );
+/// v2.6 device menu: Android phones (ADB) and iPhones/iPads (backend) in
+/// one list, the selected one first in line for Start and Files.
+fn rail_refresh(ui: &AppWindow) {
+    use slint::Model;
+    use zenlink_android::devices::Connection;
+    use zenlink_android::discovery::Readiness;
+    let live_name =
+        (ui.get_android_phase().as_str() == "streaming").then(|| ui.get_android_device());
+    let (list, popped, sel) =
+        APP.with_borrow(|a| (a.android_list.clone(), a.popped.clone(), a.rail_sel.clone()));
+    let mut rows = Vec::new();
+    let mut keys = Vec::new();
+    for d in &list {
+        let key = format!("a:{}", d.id.key);
+        let ready = d.readiness == Readiness::Ready;
+        let pop = popped.contains(&key);
+        let live = live_name.as_deref() == Some(d.name.display.as_str());
+        let state = if pop {
+            "window"
+        } else if live {
+            "live"
+        } else if ready {
+            "ready"
+        } else {
+            "need"
+        };
+        let link = match d.primary.connection {
+            Connection::Usb => "USB",
+            Connection::WifiTcp { .. } | Connection::WifiTls { .. } => "Wi-Fi",
+            Connection::Emulator => "Emulator",
+            Connection::Unknown => "",
+        };
+        let word = match state {
+            "live" => "Live".to_string(),
+            "ready" => tr_ui(ui, "Siap", "Ready"),
+            _ => tr_ui(ui, "Perlu izin", "Needs attention"),
+        };
+        rows.push(RailDev {
+            kind: "android".into(),
+            title: d.name.display.clone().into(),
+            sub: format!("{link} · {word}").into(),
+            state: state.into(),
+            selected: false,
+            files: ready && !pop,
+            pop: ready && !pop,
+        });
+        keys.push(key);
+    }
+    let apple_live = ui.get_phase().as_str() == "streaming";
+    let mut apple_default = None;
+    for r in ui.get_apple_devices().iter() {
+        let key = format!("i:{}", r.id);
+        if r.selected {
+            apple_default = Some(key.clone());
+        }
+        let state = match r.state.as_str() {
+            "ready" if apple_live && r.selected => "live",
+            "ready" => "ready",
+            "need" => "need",
+            _ => "off",
+        };
+        rows.push(RailDev {
+            kind: "apple".into(),
+            title: r.title.clone(),
+            sub: if state == "live" {
+                "Live".into()
+            } else {
+                r.sub.clone()
+            },
+            state: state.into(),
+            selected: false,
+            files: false,
+            pop: false,
+        });
+        keys.push(key);
+    }
+    // Keep the pick while it is listed; otherwise the first phone of the
+    // workspace on screen.
+    let sel = sel.filter(|k| keys.contains(k)).or_else(|| {
+        if ui.get_screen().as_str() == "apple" {
+            apple_default.or_else(|| keys.iter().find(|k| k.starts_with("i:")).cloned())
+        } else {
+            keys.iter().find(|k| k.starts_with("a:")).cloned()
+        }
+    });
+    for (r, k) in rows.iter_mut().zip(&keys) {
+        r.selected = sel.as_ref() == Some(k);
+    }
+    ui.set_rail_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
+    APP.with_borrow_mut(|a| {
+        a.rail_keys = keys;
+        a.rail_sel = sel;
+    });
+}
+
+/// The Android phone selected in the device menu, if it is one.
+fn rail_android() -> Option<zenlink_android::discovery::AndroidDevice> {
+    APP.with_borrow(|a| {
+        let key = a.rail_sel.as_deref()?.strip_prefix("a:")?;
+        a.android_list.iter().find(|d| d.id.key == key).cloned()
+    })
+}
+
+fn rail_pick(ui: &AppWindow, i: i32) {
+    let Some(key) = APP.with_borrow(|a| a.rail_keys.get(usize::try_from(i).ok()?).cloned()) else {
         return;
     };
-    let name = d.name.display.clone();
-    let result = if files {
-        filewin::spawn(&filewin::FileArgs {
-            serial: d.primary.serial.clone(),
-            transport_id: d.primary.transport_id,
-            device: name.clone(),
-        })
+    APP.with_borrow_mut(|a| a.rail_sel = Some(key.clone()));
+    let remember = ui.get_prefs().remember_platform;
+    if let Some(id) = key.strip_prefix("i:") {
+        ui.set_drawer_files(false);
+        ui.set_drawer_screen(false);
+        ui.invoke_panel_toggled(false);
+        if ui.get_screen().as_str() != "apple" {
+            android_stop(ui);
+            ui.invoke_choose_platform("apple".into(), remember);
+        }
+        ui.invoke_apple_pick(id.into());
     } else {
-        appwin::spawn(&appwin::AppArgs {
-            serial: d.primary.serial.clone(),
-            transport_id: d.primary.transport_id,
-            package: String::new(),
-            name: name.clone(),
-            device: name.clone(),
-            screen: true,
-        })
+        if ui.get_screen().as_str() != "android" {
+            if matches!(
+                ui.get_phase().as_str(),
+                "connecting" | "activating" | "streaming"
+            ) {
+                ui.invoke_stop_cast();
+            }
+            ui.invoke_choose_platform("android".into(), remember);
+        }
+        if ui.get_drawer_files() {
+            files_show_selected(ui);
+        }
+    }
+    rail_refresh(ui);
+}
+
+/// Shows the selected Android phone in the Files drawer; false (and a
+/// toast) when no ready phone is selected.
+fn files_show_selected(ui: &AppWindow) -> bool {
+    use zenlink_android::discovery::Readiness;
+    match rail_android().filter(|d| d.readiness == Readiness::Ready) {
+        Some(d) => {
+            filewin::show(
+                ui,
+                filewin::FileArgs {
+                    serial: d.primary.serial.clone(),
+                    transport_id: d.primary.transport_id,
+                    device: d.name.display.clone(),
+                },
+            );
+            true
+        }
+        None => {
+            show_toast(
+                ui,
+                tr_ui(
+                    ui,
+                    "Pilih HP Android yang siap dulu.",
+                    "Pick a ready Android phone first.",
+                ),
+            );
+            false
+        }
+    }
+}
+
+/// Moves menu row `i` (a ready Android phone) to a window of its own, like
+/// dragging a Chrome tab out. The window's Merge button brings it back.
+fn rail_pop(ui: &AppWindow, i: i32) {
+    use zenlink_android::discovery::Readiness;
+    let Some((key, d)) = APP.with_borrow(|a| {
+        let key = a.rail_keys.get(usize::try_from(i).ok()?)?.clone();
+        let id = key.strip_prefix("a:")?;
+        let d = a.android_list.iter().find(|d| d.id.key == id)?.clone();
+        Some((key, d))
+    }) else {
+        return;
     };
-    match result {
-        Ok(()) => show_toast(
-            ui,
-            if files {
-                tr_ui(
-                    ui,
-                    &format!("Membuka file {name}…"),
-                    &format!("Opening the files of {name}…"),
-                )
-            } else {
-                tr_ui(
-                    ui,
-                    &format!("Membuka {name} di jendela baru…"),
-                    &format!("Opening {name} in a new window…"),
-                )
-            },
-        ),
+    if d.readiness != Readiness::Ready {
+        return;
+    }
+    // One phone, one mirror: the main window lets go of it first.
+    if ui.get_android_phase().as_str() != "idle"
+        && ui.get_android_device() == d.name.display.as_str()
+    {
+        android_stop(ui);
+    }
+    let name = d.name.display.clone();
+    let child = appwin::spawn(&appwin::AppArgs {
+        serial: d.primary.serial.clone(),
+        transport_id: d.primary.transport_id,
+        package: String::new(),
+        name: name.clone(),
+        device: name.clone(),
+        screen: true,
+    });
+    let mut child = match child {
+        Ok(c) => c,
         Err(e) => {
             log::warn!("android: window failed: {e}");
             show_toast(
@@ -2856,8 +3022,30 @@ fn android_open_window(ui: &AppWindow, i: i32, files: bool) {
                     &format!("The window did not open: {e}"),
                 ),
             );
+            return;
         }
-    }
+    };
+    log::info!("android: {name} moved to its own window");
+    APP.with_borrow_mut(|a| a.popped.push(key.clone()));
+    rail_refresh(ui);
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let merge = child.wait().ok().and_then(|s| s.code()) == Some(appwin::MERGE_EXIT);
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            APP.with_borrow_mut(|a| a.popped.retain(|k| *k != key));
+            if merge {
+                log::info!("android: {name} merged back into the main window");
+                APP.with_borrow_mut(|a| a.rail_sel = Some(key.clone()));
+                if ui.get_screen().as_str() != "android" {
+                    let remember = ui.get_prefs().remember_platform;
+                    ui.invoke_choose_platform("android".into(), remember);
+                }
+                android_start(&ui, -1);
+            }
+            rail_refresh(&ui);
+        });
+    });
 }
 
 /// Ends the Android session, if any.
@@ -2880,6 +3068,7 @@ fn android_stop(ui: &AppWindow) {
     });
     if had {
         ui.set_android_phase("idle".into());
+        rail_refresh(ui);
     }
 }
 
@@ -2895,6 +3084,7 @@ fn android_tick(ui: &AppWindow) {
     let live = st.phase == android::Phase::Streaming;
     ui.set_android_phase(st.phase.as_str().into());
     ui.set_android_device(st.device.clone().into());
+    rail_refresh(ui);
     ui.set_android_link(link.into());
     let message = match st.phase {
         android::Phase::Error => tr_ui(
@@ -3367,15 +3557,6 @@ fn main() -> Result<(), slint::PlatformError> {
         };
         return appwin::run(a);
     }
-    // v2.6: `ZenLink.exe --android-files …` is one phone's file manager.
-    if args.first().map(String::as_str) == Some(filewin::ARG) {
-        init_log_named(APP_LOG_FILE_NAME);
-        let Some(a) = filewin::FileArgs::parse(&args) else {
-            log::warn!("file window: bad arguments {args:?}");
-            return Ok(());
-        };
-        return filewin::run(a);
-    }
     // Tests run with their own prefs file (ZL_PREFS) and may run next to the
     // user's ZenLink; everyone else gets one ZenLink per user: a second start
     // shows the running one (also when it is hidden in the tray).
@@ -3428,6 +3609,7 @@ fn main() -> Result<(), slint::PlatformError> {
             tray::set_start_with_windows(p.start_with_windows, false);
         }
         filedrop::install(&ui);
+        filewin::install(&ui);
         let weak = ui.as_weak();
         ui.window().on_close_requested(move || {
             if let Some(ui) = weak.upgrade() {
@@ -3728,7 +3910,8 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
     ui.set_sp(if ui.get_settings_open() { 1.0 } else { 0.0 });
-    if ui.get_settings_open() {
+    ui.set_mp(if ui.get_menu_open() { 1.0 } else { 0.0 });
+    if ui.get_settings_open() || ui.get_menu_open() {
         // Settings start open: the window is the usual idle stage plus the
         // panel, not the panel squeezed into the default window (the window
         // has no size yet here, so do not measure it).
@@ -3907,16 +4090,61 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         });
         let weak = ui.as_weak();
-        ui.on_android_window(move |i| {
+        ui.on_rail_pick(move |i| {
             if let Some(ui) = weak.upgrade() {
-                android_open_window(&ui, i, false);
+                rail_pick(&ui, i);
             }
         });
         let weak = ui.as_weak();
-        ui.on_android_files(move |i| {
+        ui.on_rail_pop(move |i| {
             if let Some(ui) = weak.upgrade() {
-                android_open_window(&ui, i, true);
+                rail_pop(&ui, i);
             }
+        });
+        let weak = ui.as_weak();
+        ui.on_rail_connect(move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.invoke_change_platform();
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_files_toggled(move |open| {
+            if let Some(ui) = weak.upgrade() {
+                if open && !files_show_selected(&ui) {
+                    ui.set_drawer_files(false);
+                    ui.invoke_panel_toggled(false);
+                }
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_panel_toggled(move |_| {
+            let Some(ui) = weak.upgrade() else { return };
+            // One panel at a time: switching Screen <-> Files keeps it open.
+            let open = ui.get_drawer_screen() || ui.get_drawer_files();
+            let to = if open { 1.0 } else { 0.0 };
+            let from = ui.get_pp();
+            if (from - to).abs() < 0.001 {
+                return;
+            }
+            let sf = ui.window().scale_factor();
+            let stage = ui.window().size().to_logical(sf).width - ui.get_chrome_w();
+            let dur = Duration::from_millis(if open { 320 } else { 240 });
+            APP.with_borrow_mut(|a| {
+                a.panel_slide = Some((from, to, Instant::now(), dur));
+                a.hold_stage = Some(stage);
+            });
+        });
+        let weak = ui.as_weak();
+        ui.on_menu_toggled(move |open| {
+            let Some(ui) = weak.upgrade() else { return };
+            let sf = ui.window().scale_factor();
+            let stage = ui.window().size().to_logical(sf).width - ui.get_chrome_w();
+            let dur = Duration::from_millis(if open { 320 } else { 240 });
+            let from = ui.get_mp();
+            APP.with_borrow_mut(|a| {
+                a.menu_slide = Some((from, if open { 1.0 } else { 0.0 }, Instant::now(), dur));
+                a.hold_stage = Some(stage);
+            });
         });
     }
     {
@@ -4486,7 +4714,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 centring.set(Some((Instant::now(), ui.window().position())));
             } else if let Some((at, pos)) = centring.get() {
                 let w = ui.window();
-                let sliding = APP.with_borrow(|a| a.slide.is_some());
+                let sliding = APP.with_borrow(|a| {
+                    a.slide.is_some() || a.menu_slide.is_some() || a.panel_slide.is_some()
+                });
                 if at.elapsed() > Duration::from_secs(3) || w.position() != pos {
                     centring.set(None); // settled, or the user moved it
                 } else if !sliding {
@@ -4621,6 +4851,22 @@ fn main() -> Result<(), slint::PlatformError> {
                     APP.with_borrow_mut(|a| a.slide = None);
                 }
             }
+            // Device menu and side panel: like Settings, the window widens on
+            // its right edge on the same tick, and the picture moves over.
+            if let Some((from, to, at, dur)) = APP.with_borrow(|a| a.menu_slide) {
+                let k = (at.elapsed().as_secs_f32() / dur.as_secs_f32()).min(1.0);
+                ui.set_mp(from + (to - from) * slide_ease(k));
+                if k >= 1.0 {
+                    APP.with_borrow_mut(|a| a.menu_slide = None);
+                }
+            }
+            if let Some((from, to, at, dur)) = APP.with_borrow(|a| a.panel_slide) {
+                let k = (at.elapsed().as_secs_f32() / dur.as_secs_f32()).min(1.0);
+                ui.set_pp(from + (to - from) * slide_ease(k));
+                if k >= 1.0 {
+                    APP.with_borrow_mut(|a| a.panel_slide = None);
+                }
+            }
             if let Some(stage) = APP.with_borrow(|a| a.hold_stage) {
                 // Held before the window had a monitor: size it for this screen.
                 let stage = if stage == IDLE_STAGE_W {
@@ -4650,7 +4896,10 @@ fn main() -> Result<(), slint::PlatformError> {
                         keep_on_screen(&ui, wa, size);
                     }
                 }
-                let end = if ui.get_settings_open() { 16.0 + 368.0 } else { 16.0 };
+                let end = 16.0
+                    + if ui.get_settings_open() { 368.0 } else { 0.0 }
+                    + if ui.get_menu_open() { 216.0 } else { 0.0 }
+                    + if ui.get_drawer_screen() || ui.get_drawer_files() { 448.0 } else { 0.0 };
                 if (chrome - end).abs() < 0.01 {
                     APP.with_borrow_mut(|a| {
                         a.hold_stage = None;

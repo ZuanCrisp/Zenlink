@@ -1,35 +1,26 @@
-//! v2.6: an Android phone's files in their own window.
+//! v2.6: the selected Android phone's files, in the drawer under the picture.
 //!
-//! The main window starts `ZenLink.exe --android-files serial=… device=…`
-//! (one process per phone, like the app and device windows). It browses the
-//! phone's shared storage over the ADB sync protocol
+//! The drawer browses the phone's shared storage over the ADB sync protocol
 //! (`zenlink_android::browse`), copies files to the PC
-//! (`Downloads\ZenLink\<phone>`) and sends files dropped from Explorer to the
-//! folder that is open. Copies run one at a time on their own thread with
-//! progress and cancel; browsing stays responsive meanwhile.
-//!
-//! This process has no backend, no tray and no single-instance check; it
-//! reads the prefs (language, theme) and never writes them.
+//! (`Downloads\ZenLink\<phone>`) and sends files dropped on the window to
+//! the folder that is open. Copies run one at a time on their own thread
+//! with progress and cancel; browsing stays responsive meanwhile. State lives
+//! in the Slint `Files` global.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Sender};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use slint::winit_030::winit::event::WindowEvent;
-use slint::winit_030::{EventResult, WinitWindowAccessor};
 use slint::{ComponentHandle, ModelRc, VecModel};
 use zenlink_android::adb::{AdbClient, Target};
 use zenlink_android::browse::{self, CopyError, Entry};
 
-use crate::{prefs, FileRow, FileWin, I18n, PlaceRow, Theme};
+use crate::{tr_ui, AppWindow, FileRow, Files, I18n, PlaceRow};
 
-/// First argument that turns ZenLink.exe into a file window.
-pub const ARG: &str = "--android-files";
-
+/// The phone the drawer shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FileArgs {
     pub serial: String,
@@ -38,63 +29,12 @@ pub struct FileArgs {
 }
 
 impl FileArgs {
-    pub fn to_args(&self) -> Vec<String> {
-        let mut v = vec![
-            ARG.to_string(),
-            format!("serial={}", self.serial),
-            format!("device={}", self.device),
-        ];
-        if let Some(t) = self.transport_id {
-            v.push(format!("transport={t}"));
-        }
-        v
-    }
-
-    /// `None` unless the first argument is [`ARG`] and the serial is safe
-    /// for ADB requests (no spaces or control characters).
-    pub fn parse(args: &[String]) -> Option<Self> {
-        let (first, rest) = args.split_first()?;
-        if first != ARG {
-            return None;
-        }
-        let mut a = FileArgs::default();
-        for kv in rest {
-            let Some((k, v)) = kv.split_once('=') else {
-                continue;
-            };
-            match k {
-                "serial" => a.serial = v.to_string(),
-                "device" => a.device = v.to_string(),
-                "transport" => a.transport_id = v.parse().ok(),
-                _ => {}
-            }
-        }
-        let ok = !a.serial.is_empty()
-            && a.serial.len() <= 128
-            && a.serial.bytes().all(|b| b.is_ascii_graphic());
-        if !ok {
-            return None;
-        }
-        if a.device.trim().is_empty() {
-            a.device = a.serial.clone();
-        }
-        Some(a)
-    }
-
     fn target(&self) -> Target<'_> {
         match self.transport_id {
             Some(id) => Target::TransportId(id),
             None => Target::Serial(&self.serial),
         }
     }
-}
-
-pub fn spawn(a: &FileArgs) -> std::io::Result<()> {
-    let exe = std::env::current_exe()?;
-    std::process::Command::new(exe)
-        .args(a.to_args())
-        .spawn()
-        .map(|_| ())
 }
 
 /// "12.3 MB"; folders show a word instead.
@@ -165,13 +105,16 @@ pub fn download_dir(device: &str) -> PathBuf {
     base.join(name)
 }
 
+#[derive(Clone)]
 enum CopyJob {
     Pull {
+        phone: FileArgs,
         remote: String,
         size: u64,
         open: bool,
     },
     Push {
+        phone: FileArgs,
         local: PathBuf,
         dir: String,
     },
@@ -190,28 +133,33 @@ impl CopyJob {
 }
 
 struct State {
+    /// The phone shown; `None` until the drawer first opens.
+    phone: Option<FileArgs>,
     path: String,
     entries: Vec<Entry>,
     hidden: bool,
     /// Bumped on every listing request; a late answer for an older folder is dropped.
     gen: u64,
+    copier: Option<Sender<CopyJob>>,
 }
 
 thread_local! {
     static ST: RefCell<State> = const {
-        RefCell::new(State { path: String::new(), entries: Vec::new(), hidden: false, gen: 0 })
+        RefCell::new(State {
+            phone: None,
+            path: String::new(),
+            entries: Vec::new(),
+            hidden: false,
+            gen: 0,
+            copier: None,
+        })
     };
 }
 
-fn tr(ui: &FileWin, id: &str, en: &str) -> String {
-    if ui.global::<I18n>().get_id() {
-        id.to_string()
-    } else {
-        en.to_string()
-    }
-}
+static CANCEL: AtomicBool = AtomicBool::new(false);
+static QUEUED: AtomicUsize = AtomicUsize::new(0);
 
-fn show_entries(ui: &FileWin) {
+fn show_entries(ui: &AppWindow) {
     let rows: Vec<FileRow> = ST.with_borrow(|s| {
         s.entries
             .iter()
@@ -228,86 +176,101 @@ fn show_entries(ui: &FileWin) {
             })
             .collect()
     });
-    ui.set_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
-    ui.set_selected(-1);
+    let f = ui.global::<Files>();
+    f.set_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+    f.set_selected(-1);
 }
 
 /// Lists `path` on a short-lived thread and shows it when it arrives.
-fn go(ui: &FileWin, a: &FileArgs, path: String) {
-    let (gen, hidden) = ST.with_borrow_mut(|s| {
+fn go(ui: &AppWindow, path: String) {
+    let Some((phone, gen, hidden)) = ST.with_borrow_mut(|s| {
+        let phone = s.phone.clone()?;
         s.gen += 1;
         s.path = path.clone();
-        (s.gen, s.hidden)
-    });
-    ui.set_path(path.clone().into());
-    ui.set_phase("loading".into());
+        Some((phone, s.gen, s.hidden))
+    }) else {
+        return;
+    };
+    let f = ui.global::<Files>();
+    f.set_path(path.clone().into());
+    f.set_phase("loading".into());
     let weak = ui.as_weak();
-    let a = a.clone();
     std::thread::spawn(move || {
-        let r = browse::list(&AdbClient::default(), &a.target(), &path, hidden);
+        let r = browse::list(&AdbClient::default(), &phone.target(), &path, hidden);
         let _ = slint::invoke_from_event_loop(move || {
             let Some(ui) = weak.upgrade() else { return };
             if ST.with_borrow(|s| s.gen) != gen {
                 return;
             }
+            let f = ui.global::<Files>();
             match r {
                 Ok(v) => {
                     ST.with_borrow_mut(|s| s.entries = v);
                     show_entries(&ui);
-                    ui.set_phase("ready".into());
+                    f.set_phase("ready".into());
                 }
                 Err(e) => {
                     log::warn!("files: list {path}: {e}");
-                    let msg = error_text(&ui, &e.to_string());
-                    ui.set_message(msg.into());
-                    ui.set_phase("error".into());
+                    f.set_message(error_text(&ui, &e.to_string()).into());
+                    f.set_phase("error".into());
                 }
             }
         });
     });
 }
 
-fn error_text(ui: &FileWin, e: &str) -> String {
+fn current_path() -> String {
+    ST.with_borrow(|s| s.path.clone())
+}
+
+fn notice(ui: &AppWindow, text: String) {
+    ui.global::<Files>().set_notice(text.into());
+}
+
+fn error_text(ui: &AppWindow, e: &str) -> String {
     let low = e.to_lowercase();
     if low.contains("permission denied") {
-        tr(
+        tr_ui(
             ui,
             "Android tidak mengizinkan folder ini dibuka.",
             "Android does not allow opening this folder.",
         )
     } else if low.contains("not found") || low.contains("offline") || low.contains("no devices") {
-        tr(
+        tr_ui(
             ui,
             "HP tidak tersambung. Sambungkan lagi, lalu Muat ulang.",
             "The phone is not connected. Connect it again, then Refresh.",
         )
     } else {
-        format!("{}: {e}", tr(ui, "Gagal", "Failed"))
+        format!("{}: {e}", tr_ui(ui, "Gagal", "Failed"))
     }
 }
 
-fn entry_at(i: i32) -> Option<(String, Entry)> {
+fn entry_at(i: i32) -> Option<(FileArgs, String, Entry)> {
     ST.with_borrow(|s| {
         let e = s.entries.get(usize::try_from(i).ok()?)?.clone();
-        Some((browse::join(&s.path, &e.name), e))
+        Some((s.phone.clone()?, browse::join(&s.path, &e.name), e))
     })
 }
 
+fn enqueue(job: CopyJob) {
+    QUEUED.fetch_add(1, Ordering::Relaxed);
+    ST.with_borrow(|s| {
+        if let Some(tx) = &s.copier {
+            let _ = tx.send(job);
+        }
+    });
+}
+
 /// The copy thread: one job at a time, progress shown in the strip.
-fn start_copier(
-    ui: &FileWin,
-    a: &FileArgs,
-    cancel: Arc<AtomicBool>,
-    queued: Arc<AtomicUsize>,
-) -> Sender<CopyJob> {
+fn start_copier(ui: &AppWindow) -> Sender<CopyJob> {
     let (tx, rx) = channel::<CopyJob>();
     let weak = ui.as_weak();
-    let a = a.clone();
     std::thread::spawn(move || {
         let client = AdbClient::default();
         for job in rx {
-            queued.fetch_sub(1, Ordering::Relaxed);
-            cancel.store(false, Ordering::Relaxed);
+            QUEUED.fetch_sub(1, Ordering::Relaxed);
+            CANCEL.store(false, Ordering::Relaxed);
             let label = job.label();
             let total = match &job {
                 CopyJob::Pull { size, .. } => *size,
@@ -316,13 +279,14 @@ fn start_copier(
             {
                 let weak = weak.clone();
                 let label = label.clone();
-                let q = queued.load(Ordering::Relaxed) as i32;
+                let q = QUEUED.load(Ordering::Relaxed) as i32;
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
-                        ui.set_busy(true);
-                        ui.set_job(label.into());
-                        ui.set_job_progress(if total > 0 { 0.0 } else { -1.0 });
-                        ui.set_queued(q);
+                        let f = ui.global::<Files>();
+                        f.set_busy(true);
+                        f.set_job(label.into());
+                        f.set_job_progress(if total > 0 { 0.0 } else { -1.0 });
+                        f.set_queued(q);
                     }
                 });
             }
@@ -332,65 +296,78 @@ fn start_copier(
                     return;
                 }
                 last = Instant::now();
-                let f = (done as f64 / total as f64).min(1.0) as f32;
+                let p = (done as f64 / total as f64).min(1.0) as f32;
                 let weak = weak.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
-                        ui.set_job_progress(f);
+                        ui.global::<Files>().set_job_progress(p);
                     }
                 });
             };
-            let target = a.target();
             let result: Result<(String, Option<PathBuf>, bool), CopyError> = match &job {
-                CopyJob::Pull { remote, open, .. } => {
-                    let dir = download_dir(&a.device);
+                CopyJob::Pull {
+                    phone,
+                    remote,
+                    open,
+                    ..
+                } => {
+                    let dir = download_dir(&phone.device);
                     std::fs::create_dir_all(&dir)
                         .map_err(CopyError::from)
                         .and_then(|_| {
-                            browse::pull(&client, &target, remote, &dir, &mut progress, &cancel)
+                            browse::pull(
+                                &client,
+                                &phone.target(),
+                                remote,
+                                &dir,
+                                &mut progress,
+                                &CANCEL,
+                            )
                         })
                         .map(|p| (label.clone(), Some(p), *open))
                 }
-                CopyJob::Push { local, dir } => {
-                    browse::push(&client, &target, local, dir, &mut progress, &cancel)
+                CopyJob::Push { phone, local, dir } => {
+                    browse::push(&client, &phone.target(), local, dir, &mut progress, &CANCEL)
                         .map(|name| (name, None, false))
                 }
             };
             let refresh = matches!(job, CopyJob::Push { .. });
             let weak = weak.clone();
-            let a2 = a.clone();
-            let left = queued.load(Ordering::Relaxed);
+            let left = QUEUED.load(Ordering::Relaxed);
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(ui) = weak.upgrade() else { return };
                 if left == 0 {
-                    ui.set_busy(false);
+                    ui.global::<Files>().set_busy(false);
                 }
                 match result {
                     Ok((name, Some(path), open)) => {
                         log::info!("files: copied {} to {}", name, path.display());
-                        ui.set_notice(
-                            format!("{} {}", tr(&ui, "Tersalin ke", "Copied to"), path.display())
-                                .into(),
+                        notice(
+                            &ui,
+                            format!(
+                                "{} {}",
+                                tr_ui(&ui, "Tersalin ke", "Copied to"),
+                                path.display()
+                            ),
                         );
                         if open {
-                            open_on_pc(&path, false);
+                            open_on_pc(&path);
                         }
                     }
                     Ok((name, None, _)) => {
                         log::info!("files: sent {name}");
-                        ui.set_notice(format!("{} {name}", tr(&ui, "Terkirim:", "Sent:")).into());
+                        notice(&ui, format!("{} {name}", tr_ui(&ui, "Terkirim:", "Sent:")));
                     }
                     Err(CopyError::Cancelled) => {
-                        ui.set_notice(tr(&ui, "Dibatalkan.", "Cancelled.").into());
+                        notice(&ui, tr_ui(&ui, "Dibatalkan.", "Cancelled."))
                     }
                     Err(CopyError::Adb(e)) => {
                         log::warn!("files: copy failed: {e}");
-                        ui.set_notice(error_text(&ui, &e.to_string()).into());
+                        notice(&ui, error_text(&ui, &e.to_string()));
                     }
                 }
                 if refresh {
-                    let path = ST.with_borrow(|s| s.path.clone());
-                    go(&ui, &a2, path);
+                    go(&ui, current_path());
                 }
             });
         }
@@ -398,38 +375,44 @@ fn start_copier(
     tx
 }
 
-/// Opens a file with its app, or a folder (or `select` a file) in Explorer.
-fn open_on_pc(path: &Path, select: bool) {
-    let mut cmd = std::process::Command::new("explorer.exe");
-    if select {
-        cmd.arg(format!("/select,{}", path.display()));
-    } else {
-        cmd.arg(path);
-    }
-    if let Err(e) = cmd.spawn() {
+/// Opens a file with its app, or a folder in Explorer.
+fn open_on_pc(path: &Path) {
+    if let Err(e) = std::process::Command::new("explorer.exe").arg(path).spawn() {
         log::warn!("files: explorer: {e}");
     }
 }
 
-/// Runs the file window until it is closed.
-pub fn run(a: FileArgs) -> Result<(), slint::PlatformError> {
-    slint::BackendSelector::new()
-        .backend_name("winit".into())
-        .renderer_name("femtovg".into())
-        .select()?;
-    let ui = FileWin::new()?;
-    let p = prefs::load();
-    let dark = match p.theme.as_str() {
-        "light" => false,
-        "system" => crate::system_dark(),
-        _ => true,
+/// Runs a folder change on a thread, then shows the result and re-lists.
+fn change(
+    ui: &AppWindow,
+    ok: String,
+    work: impl FnOnce(&AdbClient, &Target) -> zenlink_android::adb::Result<()> + Send + 'static,
+) {
+    let Some(phone) = ST.with_borrow(|s| s.phone.clone()) else {
+        return;
     };
-    ui.global::<Theme>().set_dark(dark);
-    ui.global::<Theme>().set_glass(0.0);
-    ui.global::<Theme>().set_icons(crate::icon_font().into());
-    let id = p.lang.as_str() != "en";
-    ui.global::<I18n>().set_id(id);
-    ui.set_device(a.device.clone().into());
+    let weak = ui.as_weak();
+    std::thread::spawn(move || {
+        let r = work(&AdbClient::default(), &phone.target());
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            match r {
+                Ok(()) => {
+                    if !ok.is_empty() {
+                        notice(&ui, ok);
+                    }
+                }
+                Err(e) => notice(&ui, error_text(&ui, &e.to_string())),
+            }
+            go(&ui, current_path());
+        });
+    });
+}
+
+/// Registers the drawer's callbacks; call once at start.
+pub fn install(ui: &AppWindow) {
+    let f = ui.global::<Files>();
+    let id = ui.global::<I18n>().get_id();
     let places: Vec<PlaceRow> = browse::QUICK_DIRS
         .iter()
         .map(|(label, path)| {
@@ -450,253 +433,150 @@ pub fn run(a: FileArgs) -> Result<(), slint::PlatformError> {
             }
         })
         .collect();
-    ui.set_places(ModelRc::from(Rc::new(VecModel::from(places))));
+    f.set_places(ModelRc::from(Rc::new(VecModel::from(places))));
+    let tx = start_copier(ui);
+    ST.with_borrow_mut(|s| s.copier = Some(tx));
 
-    let cancel = Arc::new(AtomicBool::new(false));
-    let queued = Arc::new(AtomicUsize::new(0));
-    let copier = start_copier(&ui, &a, cancel.clone(), queued.clone());
-    let enqueue = {
-        let queued = queued.clone();
-        move |tx: &Sender<CopyJob>, job: CopyJob| {
-            queued.fetch_add(1, Ordering::Relaxed);
-            let _ = tx.send(job);
+    let weak = ui.as_weak();
+    f.on_go(move |path| {
+        if let Some(ui) = weak.upgrade() {
+            go(&ui, path.to_string());
         }
-    };
-
-    {
-        let weak = ui.as_weak();
-        let a = a.clone();
-        ui.on_go(move |path| {
-            if let Some(ui) = weak.upgrade() {
-                go(&ui, &a, path.to_string());
-            }
-        });
-    }
-    {
-        let weak = ui.as_weak();
-        let a = a.clone();
-        ui.on_up(move || {
-            let Some(ui) = weak.upgrade() else { return };
-            let path = ST.with_borrow(|s| s.path.clone());
-            if let Some(p) = browse::parent(&path) {
-                go(&ui, &a, p.to_string());
-            }
-        });
-    }
-    {
-        let weak = ui.as_weak();
-        let a = a.clone();
-        ui.on_refresh(move || {
-            if let Some(ui) = weak.upgrade() {
-                let path = ST.with_borrow(|s| s.path.clone());
-                go(&ui, &a, path);
-            }
-        });
-    }
-    {
-        let weak = ui.as_weak();
-        let a = a.clone();
-        ui.on_show_hidden(move |on| {
-            let Some(ui) = weak.upgrade() else { return };
-            ST.with_borrow_mut(|s| s.hidden = on);
-            ui.set_hidden_files(on);
-            let path = ST.with_borrow(|s| s.path.clone());
-            go(&ui, &a, path);
-        });
-    }
-    {
-        let weak = ui.as_weak();
-        let a = a.clone();
-        let tx = copier.clone();
-        let enqueue = enqueue.clone();
-        ui.on_open_row(move |i| {
-            let Some(ui) = weak.upgrade() else { return };
-            let Some((path, e)) = entry_at(i) else { return };
-            if e.is_dir() || e.is_link() {
-                go(&ui, &a, path);
-            } else {
-                enqueue(
-                    &tx,
-                    CopyJob::Pull {
-                        remote: path,
-                        size: e.size,
-                        open: true,
-                    },
-                );
-            }
-        });
-    }
-    {
-        let tx = copier.clone();
-        let enqueue = enqueue.clone();
-        ui.on_copy_to_pc(move |i| {
-            if let Some((path, e)) = entry_at(i) {
-                if !e.is_dir() {
-                    enqueue(
-                        &tx,
-                        CopyJob::Pull {
-                            remote: path,
-                            size: e.size,
-                            open: false,
-                        },
-                    );
-                }
-            }
-        });
-    }
-    {
-        let weak = ui.as_weak();
-        let a = a.clone();
-        ui.on_delete_row(move |i| {
-            let Some(ui) = weak.upgrade() else { return };
-            let Some((path, _)) = entry_at(i) else { return };
-            let weak = ui.as_weak();
-            let a = a.clone();
-            std::thread::spawn(move || {
-                let r = browse::delete(&AdbClient::default(), &a.target(), &path);
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(ui) = weak.upgrade() else { return };
-                    match r {
-                        Ok(()) => {
-                            log::info!("files: deleted {path}");
-                            ui.set_notice(tr(&ui, "Terhapus.", "Deleted.").into());
-                        }
-                        Err(e) => ui.set_notice(error_text(&ui, &e.to_string()).into()),
-                    }
-                    let cur = ST.with_borrow(|s| s.path.clone());
-                    go(&ui, &a, cur);
-                });
+    });
+    let weak = ui.as_weak();
+    f.on_up(move || {
+        let Some(ui) = weak.upgrade() else { return };
+        if let Some(p) = browse::parent(&current_path()) {
+            go(&ui, p.to_string());
+        }
+    });
+    let weak = ui.as_weak();
+    f.on_refresh(move || {
+        if let Some(ui) = weak.upgrade() {
+            go(&ui, current_path());
+        }
+    });
+    let weak = ui.as_weak();
+    f.on_show_hidden(move |on| {
+        let Some(ui) = weak.upgrade() else { return };
+        ST.with_borrow_mut(|s| s.hidden = on);
+        ui.global::<Files>().set_hidden_files(on);
+        go(&ui, current_path());
+    });
+    let weak = ui.as_weak();
+    f.on_open_row(move |i| {
+        let Some(ui) = weak.upgrade() else { return };
+        let Some((phone, path, e)) = entry_at(i) else {
+            return;
+        };
+        if e.is_dir() || e.is_link() {
+            go(&ui, path);
+        } else {
+            enqueue(CopyJob::Pull {
+                phone,
+                remote: path,
+                size: e.size,
+                open: true,
             });
-        });
-    }
-    {
-        let weak = ui.as_weak();
-        let a = a.clone();
-        ui.on_new_folder(move |name| {
-            let Some(ui) = weak.upgrade() else { return };
-            let Some(name) = zenlink_android::files::safe_name(name.as_str()) else {
-                ui.set_notice(
-                    tr(
-                        &ui,
-                        "Nama folder tidak bisa dipakai.",
-                        "That folder name cannot be used.",
-                    )
-                    .into(),
-                );
-                return;
-            };
-            let dir = browse::join(&ST.with_borrow(|s| s.path.clone()), &name);
-            let weak = ui.as_weak();
-            let a = a.clone();
-            std::thread::spawn(move || {
-                let r = browse::make_dir(&AdbClient::default(), &a.target(), &dir);
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(ui) = weak.upgrade() else { return };
-                    if let Err(e) = r {
-                        ui.set_notice(error_text(&ui, &e.to_string()).into());
-                    }
-                    let cur = ST.with_borrow(|s| s.path.clone());
-                    go(&ui, &a, cur);
+        }
+    });
+    f.on_copy_to_pc(move |i| {
+        if let Some((phone, path, e)) = entry_at(i) {
+            if !e.is_dir() {
+                enqueue(CopyJob::Pull {
+                    phone,
+                    remote: path,
+                    size: e.size,
+                    open: false,
                 });
-            });
-        });
-    }
-    {
-        let cancel = cancel.clone();
-        ui.on_cancel_job(move || cancel.store(true, Ordering::Relaxed));
-    }
-    {
-        let dir = download_dir(&a.device);
-        ui.on_open_downloads(move || {
+            }
+        }
+    });
+    let weak = ui.as_weak();
+    f.on_delete_row(move |i| {
+        let Some(ui) = weak.upgrade() else { return };
+        let Some((_, path, _)) = entry_at(i) else {
+            return;
+        };
+        log::info!("files: delete {path}");
+        let ok = tr_ui(&ui, "Terhapus.", "Deleted.");
+        change(&ui, ok, move |c, t| browse::delete(c, t, &path));
+    });
+    let weak = ui.as_weak();
+    f.on_new_folder(move |name| {
+        let Some(ui) = weak.upgrade() else { return };
+        let Some(name) = zenlink_android::files::safe_name(name.as_str()) else {
+            notice(
+                &ui,
+                tr_ui(
+                    &ui,
+                    "Nama folder tidak bisa dipakai.",
+                    "That folder name cannot be used.",
+                ),
+            );
+            return;
+        };
+        let dir = browse::join(&current_path(), &name);
+        change(&ui, String::new(), move |c, t| browse::make_dir(c, t, &dir));
+    });
+    f.on_cancel_job(|| CANCEL.store(true, Ordering::Relaxed));
+    f.on_open_downloads(|| {
+        if let Some(phone) = ST.with_borrow(|s| s.phone.clone()) {
+            let dir = download_dir(&phone.device);
             let _ = std::fs::create_dir_all(&dir);
-            open_on_pc(&dir, false);
-        });
-    }
-    // Files dragged in from Explorer go to the open folder.
-    {
-        let weak = ui.as_weak();
-        let tx = copier.clone();
-        let enqueue = enqueue.clone();
-        ui.window().on_winit_window_event(move |_, ev| match ev {
-            WindowEvent::DroppedFile(path) => {
-                if let Some(ui) = weak.upgrade() {
-                    if path.is_file() {
-                        let dir = ST.with_borrow(|s| s.path.clone());
-                        enqueue(
-                            &tx,
-                            CopyJob::Push {
-                                local: path.clone(),
-                                dir,
-                            },
-                        );
-                    } else {
-                        ui.set_notice(
-                            tr(
-                                &ui,
-                                "Folder belum bisa dikirim: pilih file-nya.",
-                                "Folders cannot be sent yet: drop the files.",
-                            )
-                            .into(),
-                        );
-                    }
-                }
-                EventResult::PreventDefault
-            }
-            _ => EventResult::Propagate,
-        });
-    }
-    {
-        let cancel = cancel.clone();
-        ui.window().on_close_requested(move || {
-            cancel.store(true, Ordering::Relaxed);
-            let _ = slint::quit_event_loop();
-            slint::CloseRequestResponse::HideWindow
-        });
-    }
+            open_on_pc(&dir);
+        }
+    });
+}
 
-    go(&ui, &a, "/sdcard".into());
-    let timer = slint::Timer::default();
-    {
-        let weak = ui.as_weak();
-        let mut dark_bar = false;
-        timer.start(
-            slint::TimerMode::Repeated,
-            Duration::from_millis(100),
-            move || {
-                if dark_bar {
-                    return;
-                }
-                if let Some(ui) = weak.upgrade() {
-                    if let Some(h) = crate::hwnd_of(ui.window()) {
-                        crate::backdrop::dark_title_bar(h, dark);
-                        dark_bar = true;
-                    }
-                }
-            },
+/// Shows `phone` in the drawer: a new phone starts at `/sdcard`, the same
+/// phone keeps its folder and refreshes.
+pub fn show(ui: &AppWindow, phone: FileArgs) {
+    let same = ST.with_borrow(|s| s.phone.as_ref().map(|p| &p.serial) == Some(&phone.serial));
+    ui.global::<Files>().set_device(phone.device.clone().into());
+    if same {
+        go(ui, current_path());
+        return;
+    }
+    ST.with_borrow_mut(|s| {
+        s.phone = Some(phone);
+        s.entries.clear();
+    });
+    notice(ui, String::new());
+    go(ui, "/sdcard".into());
+}
+
+/// A file dropped on the window while the drawer shows a phone: it goes to
+/// the open folder. False when the drawer is closed (filedrop handles it).
+pub fn dropped(ui: &AppWindow, path: &Path) -> bool {
+    if !ui.get_drawer_files() {
+        return false;
+    }
+    let Some(phone) = ST.with_borrow(|s| s.phone.clone()) else {
+        return false;
+    };
+    if path.is_file() {
+        enqueue(CopyJob::Push {
+            phone,
+            local: path.to_path_buf(),
+            dir: current_path(),
+        });
+    } else {
+        notice(
+            ui,
+            tr_ui(
+                ui,
+                "Folder belum bisa dikirim: pilih file-nya.",
+                "Folders cannot be sent yet: drop the files.",
+            ),
         );
     }
-    ui.run()?;
-    cancel.store(true, Ordering::Relaxed);
-    Ok(())
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn arguments_round_trip() {
-        let a = FileArgs {
-            serial: "192.168.1.20:37099".into(),
-            transport_id: Some(3),
-            device: "Pixel 8".into(),
-        };
-        assert_eq!(FileArgs::parse(&a.to_args()), Some(a));
-        assert_eq!(FileArgs::parse(&[ARG.into(), "serial=a b".into()]), None);
-        assert_eq!(FileArgs::parse(&["--android-app".into()]), None);
-        let b = FileArgs::parse(&[ARG.into(), "serial=X1".into()]).unwrap();
-        assert_eq!(b.device, "X1");
-    }
 
     #[test]
     fn sizes_and_dates() {

@@ -114,13 +114,15 @@ impl AppArgs {
 
 /// Opens an app window: a new ZenLink.exe process. A test prefs file
 /// (`ZL_PREFS`) is inherited with the environment.
-pub fn spawn(a: &AppArgs) -> std::io::Result<()> {
+pub fn spawn(a: &AppArgs) -> std::io::Result<std::process::Child> {
     let exe = std::env::current_exe()?;
-    std::process::Command::new(exe)
-        .args(a.to_args())
-        .spawn()
-        .map(|_| ())
+    std::process::Command::new(exe).args(a.to_args()).spawn()
 }
+
+/// Exit code of a device window whose "Merge" button was pressed: the main
+/// window takes the phone back.
+pub const MERGE_EXIT: i32 = 7;
+static MERGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Virtual display size for a picture area of `w`Ã—`h` pixels: multiples of
 /// 8 (video encoders work in blocks), within what phone encoders take.
@@ -393,6 +395,12 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
     {
         let package = a.package.clone();
         ui.on_action(move |name| {
+            if name.as_str() == "merge" {
+                MERGE.store(true, std::sync::atomic::Ordering::Relaxed);
+                stop_session();
+                let _ = slint::quit_event_loop();
+                return;
+            }
             let Some(sh) = android::active() else { return };
             match name.as_str() {
                 // "+" force-stops it first: a clean start of the app.
@@ -440,6 +448,9 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
     ui.run()?;
     stop_session();
     ST.with_borrow_mut(|s| s.view = None);
+    if MERGE.load(std::sync::atomic::Ordering::Relaxed) {
+        std::process::exit(MERGE_EXIT);
+    }
     Ok(())
 }
 

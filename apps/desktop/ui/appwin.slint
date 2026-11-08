@@ -59,6 +59,13 @@ export component AppWin inherits Window {
                         vertical-alignment: center;
                         overflow: elide;
                     }
+                    // Back into the main window (like dropping a Chrome tab back).
+                    if root.screen: GlassButton {
+                        icon: "\u{E8A0}";
+                        label: I18n.t("Gabung", "Merge");
+                        tip: I18n.t("Kembalikan HP ini ke jendela utama ZenLink", "Move this phone back into the main ZenLink window");
+                        clicked => { root.action("merge"); }
+                    }
                     if !root.screen: Text {
                         text: root.device;
                         font-size: 11px;

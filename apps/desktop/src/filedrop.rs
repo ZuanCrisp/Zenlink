@@ -181,7 +181,7 @@ pub fn install(ui: &AppWindow) {
                 ui.set_drop_ok(if apple {
                     ui.get_mode_active().as_str() == "apple"
                 } else {
-                    phone().is_some()
+                    phone().is_some() || ui.get_drawer_files()
                 });
                 EventResult::PreventDefault
             }
@@ -200,6 +200,10 @@ pub fn install(ui: &AppWindow) {
 }
 
 fn drop_file(ui: &AppWindow, path: PathBuf) {
+    // The Files drawer is open: the file goes to the folder it shows.
+    if crate::filewin::dropped(ui, &path) {
+        return;
+    }
     if ui.get_screen().as_str() != "android" {
         ios::dropped(ui, path);
         return;

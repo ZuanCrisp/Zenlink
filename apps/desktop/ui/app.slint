@@ -7,7 +7,9 @@ import { Theme, I18n } from "theme.slint";
 import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip, Tip, UiTest } from "widgets.slint";
 // v2.5.1: an Android app in its own window (ZenLink.exe --android-app).
 export { AppWin } from "appwin.slint";
-export { FileWin, FileRow, PlaceRow } from "filewin.slint";
+import { FilePane, Files, FileRow, PlaceRow } from "filewin.slint";
+import { DeviceRail, RailDev } from "devices.slint";
+export { Files, FileRow, PlaceRow, RailDev }
 
 export { Theme, I18n, UiTest }
 
@@ -115,7 +117,9 @@ component TopBar inherits Rectangle {
     in property <string> link;
     in property <string> stats;
     in property <bool> settings-open;
+    in property <bool> menu-open;
     in property <bool> muted;
+    callback menu();
     callback start();
     callback stop();
     callback restart();
@@ -257,6 +261,13 @@ component TopBar inherits Rectangle {
             active: root.fullscreen;
             tip: root.fullscreen ? I18n.t("Keluar dari fullscreen", "Exit full screen") : I18n.t("Fullscreen", "Full screen");
             clicked => { root.window-action("fullscreen"); }
+        }
+        GlassButton {
+            y: (parent.height - self.height) / 2;
+            icon: "\u{E700}";
+            active: menu-open;
+            tip: I18n.t("Menu perangkat", "Device menu");
+            clicked => { root.menu(); }
         }
         GlassButton {
             y: (parent.height - self.height) / 2;
@@ -825,15 +836,17 @@ component ModeChooser inherits Rectangle {
     property <string> pick: active;
     property <string> link-pick: link;
     property <bool> keep: remember;
+    // Inside the stage (v2.6 HOME): no dimmed backdrop, the stage glass shows.
+    in property <bool> inline;
     property <float> t: 0;
     init => { self.t = 1; }
     animate t { duration: 380ms; easing: cubic-bezier(0.05, 0.7, 0.1, 1); }
-    background: #000000.with-alpha(0.5 * t);
+    background: root.inline ? transparent : #000000.with-alpha(0.5 * t);
     TouchArea { } // swallow clicks behind the sheet
     sheet := Glass {
-        strong: true;
+        strong: !root.inline;
         // A modal sheet stays readable at any glass thickness.
-        background: Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
+        background: root.inline ? transparent : Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
         border-radius: 22px;
         width: min(parent.width - 24px, 560px);
         height: min(parent.height - 24px, col.preferred-height + 2px);
@@ -1063,14 +1076,16 @@ component PlatformSelector inherits Rectangle {
         I18n.t("Lewat ADB dan scrcpy, tanpa aplikasi di HP", "Through ADB and scrcpy, no app on the phone"),
         I18n.t("Kabel atau Wi-Fi, semua merek Android", "Cable or Wi-Fi, any Android brand"),
     ];
+    // Inside the stage (v2.6 HOME): no dimmed backdrop, the stage glass shows.
+    in property <bool> inline;
     property <float> t: 0;
     init => { self.t = 1; }
     animate t { duration: 380ms; easing: cubic-bezier(0.05, 0.7, 0.1, 1); }
-    background: #000000.with-alpha(0.5 * t);
+    background: root.inline ? transparent : #000000.with-alpha(0.5 * t);
     TouchArea { } // swallow clicks behind the sheet
     sheet := Glass {
-        strong: true;
-        background: Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
+        strong: !root.inline;
+        background: root.inline ? transparent : Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
         border-radius: 22px;
         width: min(parent.width - 24px, 640px);
         height: min(parent.height - 24px, col.preferred-height + 2px);
@@ -1363,9 +1378,6 @@ component AndroidHome inherits Rectangle {
     callback back();
     callback start-device(int);
     callback start-device-via(int, string);
-    // v2.6 multi-device: this phone in its own window; its files.
-    callback window-device(int);
-    callback files-device(int);
     // Phase A6: Android over Wi-Fi.
     in property <bool> wifi-busy;
     // Current Wi-Fi step while busy ("Reading the phone's Wi-Fi address…").
@@ -1469,22 +1481,6 @@ component AndroidHome inherits Rectangle {
                             enabled: !root.wifi-busy;
                             tip: I18n.t("Pindah ke Wi-Fi: setelah tersambung, kabel boleh dicabut", "Switch to Wi-Fi: once connected, you can unplug the cable");
                             clicked => { root.wifi-device(i); }
-                        }
-                    }
-                    if d.ok: VerticalLayout {
-                        alignment: center;
-                        GlassButton {
-                            icon: "\u{E8B7}";
-                            tip: I18n.t("File di HP ini: lihat, salin ke PC, kirim dari PC", "Files on this phone: browse, copy to the PC, send from the PC");
-                            clicked => { root.files-device(i); }
-                        }
-                    }
-                    if d.ok: VerticalLayout {
-                        alignment: center;
-                        GlassButton {
-                            icon: "\u{E8A7}";
-                            tip: I18n.t("Buka HP ini di jendela sendiri (bisa beberapa HP sekaligus, tiap jendela jadi sumber OBS)", "Open this phone in its own window (several phones at once, each window an OBS source)");
-                            clicked => { root.window-device(i); }
                         }
                     }
                     if d.ok && !d.both && root.phase != "connecting": VerticalLayout {
@@ -2425,8 +2421,21 @@ export component AppWindow inherits Window {
     in property <bool> hevc-ok;
     callback android-start(int);
     callback android-start-via(int, string);
-    callback android-window(int);
-    callback android-files(int);
+    // v2.6 device menu (left) and the drawer under the picture.
+    in property <[RailDev]> rail-devices;
+    in-out property <bool> menu-open: true;
+    // Menu slide, 0 = closed, 1 = open (driven from Rust like `sp`).
+    in property <float> mp: 1;
+    // Side panel next to the menu (Screen settings or Files, one at a time).
+    in property <float> pp: 0;
+    in-out property <bool> drawer-screen;
+    in-out property <bool> drawer-files;
+    callback rail-pick(int);
+    callback rail-pop(int);
+    callback rail-connect();
+    callback menu-toggled(bool);
+    callback files-toggled(bool);
+    callback panel-toggled(bool);
     in property <bool> android-wifi-busy;
     in property <string> android-wifi-status;
     callback android-wifi-device(int);
@@ -2501,7 +2510,7 @@ export component AppWindow inherits Window {
     in property <float> sp: 1;
     // Materialize curves (shayann07/liquidglass, Apache-2.0): in 320 ms,
     // out 240 ms.
-    out property <length> chrome-w: 16px + 368px * sp;
+    out property <length> chrome-w: 16px + 368px * sp + 216px * mp + 448px * pp;
     out property <length> chrome-h: 16px + 46px + 8px + 8px + 46px;
 
     callback start-cast();
@@ -2579,6 +2588,11 @@ export component AppWindow inherits Window {
                     if root.screen == "apple" { root.restart(); }
                     if root.on-android { root.android-restart(); }
                 }
+                menu-open: root.menu-open;
+                menu => {
+                    root.menu-open = !root.menu-open;
+                    root.menu-toggled(root.menu-open);
+                }
                 settings => {
                     root.settings-open = !root.settings-open;
                     root.settings-toggled(root.settings-open);
@@ -2593,13 +2607,74 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 vertical-stretch: 1;
                 spacing: 0px;
+                // Device menu: slides in from the left edge while the window grows.
+                if root.mp > 0.001: Rectangle {
+                    width: 216px * root.mp;
+                    clip: true;
+                    DeviceRail {
+                        x: (root.mp - 1) * 28px;
+                        width: 208px;
+                        height: parent.height;
+                        opacity: min(1, root.mp * 1.6);
+                        devices: root.rail-devices;
+                        screen-on: root.drawer-screen;
+                        files-on: root.drawer-files;
+                        pick(i) => { root.rail-pick(i); }
+                        pop(i) => { root.rail-pop(i); }
+                        connect => { root.rail-connect(); }
+                        home-on: root.screen == "platform";
+                        home => { if root.screen != "platform" { root.change-platform(); } }
+                        screen => {
+                            root.drawer-screen = !root.drawer-screen;
+                            root.drawer-files = false;
+                            root.panel-toggled(root.drawer-screen);
+                        }
+                        files => {
+                            root.drawer-files = !root.drawer-files;
+                            root.drawer-screen = false;
+                            root.files-toggled(root.drawer-files);
+                            root.panel-toggled(root.drawer-files);
+                        }
+                    }
+                }
+                // Side panel: the selected phone's Screen settings or Files.
+                if root.pp > 0.001: Rectangle {
+                    width: 448px * root.pp;
+                    clip: true;
+                    if root.drawer-screen: Rectangle {
+                        x: (root.pp - 1) * 28px;
+                        width: 440px;
+                        height: parent.height;
+                        opacity: min(1, root.pp * 1.6);
+                        ScrollView {
+                            AndroidVideoCard {
+                                prefs: root.prefs;
+                                hevc-ok: root.hevc-ok;
+                                changed(p) => { root.prefs = p; root.prefs-changed(p); }
+                            }
+                        }
+                    }
+                    if root.drawer-files: FilePane {
+                        x: (root.pp - 1) * 28px;
+                        width: 440px;
+                        height: parent.height;
+                        opacity: min(1, root.pp * 1.6);
+                        close => {
+                            root.drawer-files = false;
+                            root.files-toggled(false);
+                            root.panel-toggled(false);
+                        }
+                    }
+                }
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 8px;
                     stage := Rectangle {
                         vertical-stretch: 1;
                         border-radius: 22px;
-                        background: root.picture ? Theme.stage : Theme.panel;
+                        // Same glass while mirroring (owner, 2026-11-09): no black
+                        // around the picture; only the animated dots stay idle-only.
+                        background: Theme.panel;
                         border-width: 1px;
                         border-color: Theme.edge;
                         clip: true;
@@ -2621,8 +2696,6 @@ export component AppWindow inherits Window {
                             back => { root.change-platform(); }
                             start-device(i) => { root.android-start(i); }
                             start-device-via(i, v) => { root.android-start-via(i, v); }
-                            window-device(i) => { root.android-window(i); }
-                            files-device(i) => { root.android-files(i); }
                             wifi-busy: root.android-wifi-busy;
                             wifi-status: root.android-wifi-status;
                             wifi-device(i) => { root.android-wifi-device(i); }
@@ -2638,7 +2711,34 @@ export component AppWindow inherits Window {
                             install-adb => { root.install-adb(); }
                             wifi-qr-cancel => { root.android-wifi-qr-cancel(); }
                         }
-                        if root.screen == "apple" && root.phase != "streaming": Placeholder {
+                        // HOME (v2.6): device type and Apple mode are chosen inside the stage.
+                        if root.screen == "platform": PlatformSelector {
+                            inline: true;
+                            width: parent.width;
+                            height: parent.height;
+                            picked: root.prefs.platform;
+                            remember: root.prefs.remember-platform;
+                            apple-detected: root.apple-detected;
+                            android-count: root.android-count;
+                            prefs: root.prefs;
+                            prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
+                            choose(p, r) => { root.choose-platform(p, r); }
+                        }
+                        if root.chooser-open && root.screen == "apple": ModeChooser {
+                            inline: true;
+                            width: parent.width;
+                            height: parent.height;
+                            cancelable: root.chooser-cancelable;
+                            active: root.mode-active;
+                            link: root.mode-link;
+                            remember: root.mode-remember;
+                            prefs: root.prefs;
+                            prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
+                            choose(m, l, r) => { root.chooser-open = false; root.choose-mode(m, l, r); }
+                            cancel => { root.chooser-open = false; }
+                            back => { root.change-platform(); }
+                        }
+                        if root.screen == "apple" && root.phase != "streaming" && !root.chooser-open: Placeholder {
                             phase: root.phase;
                             device: root.device;
                             message: root.message;
@@ -2727,32 +2827,6 @@ export component AppWindow inherits Window {
                     root.window-action("resize-" + e.id);
                 }
             }
-        }
-        if root.screen == "platform": PlatformSelector {
-            width: parent.width;
-            height: parent.height;
-            border-radius: root.edge ? 0px : 12px;
-            picked: root.prefs.platform;
-            remember: root.prefs.remember-platform;
-            apple-detected: root.apple-detected;
-            android-count: root.android-count;
-            prefs: root.prefs;
-            prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
-            choose(p, r) => { root.choose-platform(p, r); }
-        }
-        if root.chooser-open && root.screen == "apple": ModeChooser {
-            width: parent.width;
-            height: parent.height;
-            border-radius: root.edge ? 0px : 12px;
-            cancelable: root.chooser-cancelable;
-            active: root.mode-active;
-            link: root.mode-link;
-            remember: root.mode-remember;
-            prefs: root.prefs;
-            prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
-            choose(m, l, r) => { root.chooser-open = false; root.choose-mode(m, l, r); }
-            cancel => { root.chooser-open = false; }
-            back => { root.change-platform(); }
         }
         if root.sheet-open: NoticeSheet {
             width: parent.width;
