@@ -48,9 +48,20 @@ export global Theme {
 }
 
 export global I18n {
-    // Indonesian is the default language.
-    in-out property <bool> id: true;
-    public pure function t(id-text: string, en-text: string) -> string {
-        return self.id ? id-text : en-text;
+    // UI language code; "en" shows the English texts as written. The texts are
+    // English keys that Rust looks up in the language file (src/i18n.rs).
+    in-out property <string> lang: "en";
+    // Languages found (code, own name) for the pickers.
+    in-out property <[string]> codes: ["en"];
+    in-out property <[string]> names: ["English"];
+    // (text, lang, value for a {placeholder}) -> translated text. lang is passed so
+    // a language change redraws every text.
+    pure callback lookup(string, string, string) -> string;
+    public pure function t(text: string) -> string {
+        return self.lookup(text, self.lang, "");
+    }
+    // One {placeholder} filled with `value`: I18n.f("{device} ready", name).
+    public pure function f(text: string, value: string) -> string {
+        return self.lookup(text, self.lang, value);
     }
 }

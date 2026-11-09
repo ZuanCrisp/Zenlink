@@ -16,23 +16,26 @@ fn path() -> Option<std::path::PathBuf> {
     Some(dir.join("next-prefs.json"))
 }
 
-/// Indonesian when Windows lists Indonesian among the user's languages (or
-/// uses an Indonesian locale), English otherwise. Only the first-run default:
-/// a language picked in the app is saved and wins.
-pub fn system_lang() -> &'static str {
-    lang_from(&windows_languages())
+/// A language ZenLink has a file for that Windows lists among the user's
+/// languages (or uses as its locale), English otherwise. Only the first-run
+/// default: a language picked in the app is saved and wins.
+pub fn system_lang() -> String {
+    let have: Vec<String> = crate::i18n::languages()
+        .into_iter()
+        .map(|(c, _)| c)
+        .collect();
+    lang_from(&windows_languages(), &have)
 }
 
-fn lang_from(tags: &[String]) -> &'static str {
-    let indonesian = tags.iter().any(|t| {
-        let t = t.to_ascii_lowercase();
-        t == "id" || t.starts_with("id-") || t == "in" || t.starts_with("in-")
-    });
-    if indonesian {
-        "id"
-    } else {
-        "en"
-    }
+fn lang_from(tags: &[String], have: &[String]) -> String {
+    tags.iter()
+        .map(|t| t.to_ascii_lowercase())
+        .map(|t| match t.split('-').next().unwrap_or("") {
+            "in" => "id".to_string(), // the old code for Indonesian
+            base => base.to_string(),
+        })
+        .find(|base| base != "en" && have.contains(base))
+        .unwrap_or_else(|| "en".into())
 }
 
 /// Language tags from HKCU\Control Panel\International: the user's
@@ -339,15 +342,14 @@ mod tests {
     #[test]
     fn language_follows_windows() {
         let tags = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(lang_from(&tags(&["en-US", "id-ID"])), "id");
-        assert_eq!(lang_from(&tags(&["id"])), "id");
-        assert_eq!(lang_from(&tags(&["en-US", "ja-JP"])), "en");
-        assert_eq!(
-            lang_from(&tags(&["it-IT"])),
-            "en",
-            "Italian is not Indonesian"
-        );
-        assert_eq!(lang_from(&[]), "en");
+        let have = tags(&["en", "id"]);
+        assert_eq!(lang_from(&tags(&["en-US", "id-ID"]), &have), "id");
+        assert_eq!(lang_from(&tags(&["id"]), &have), "id");
+        assert_eq!(lang_from(&tags(&["in-ID"]), &have), "id");
+        assert_eq!(lang_from(&tags(&["en-US", "ja-JP"]), &have), "en");
+        assert_eq!(lang_from(&tags(&["it-IT"]), &have), "en", "no Italian file");
+        assert_eq!(lang_from(&tags(&["it-IT"]), &tags(&["en", "it"])), "it");
+        assert_eq!(lang_from(&[], &have), "en");
     }
 
     #[test]
@@ -355,7 +357,7 @@ mod tests {
         let p = defaults();
         assert_eq!(
             p.lang.as_str(),
-            system_lang(),
+            system_lang().as_str(),
             "the Windows language on a fresh install"
         );
         assert_eq!(p.theme.as_str(), "dark", "Liquid Glass Dark by default");

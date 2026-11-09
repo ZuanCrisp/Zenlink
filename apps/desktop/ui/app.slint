@@ -149,7 +149,7 @@ component TopBar inherits Rectangle {
             border-width: 1px;
             border-color: Theme.line;
             pillT := Text {
-                text: live ? I18n.t("Mirroring", "Mirroring") : listening ? I18n.t("Menunggu perangkat", "Waiting for the device") : busy ? I18n.t("Menyambung…", "Connecting…") : blocked ? I18n.t("Perlu tindakan", "Action needed") : I18n.t("Siap", "Ready");
+                text: live ? I18n.t("Mirroring") : listening ? I18n.t("Waiting for the device") : busy ? I18n.t("Connecting…") : blocked ? I18n.t("Action needed") : I18n.t("Ready");
                 font-size: 11px;
                 font-weight: 600;
                 color: live ? Theme.accent : Theme.text-2;
@@ -163,7 +163,7 @@ component TopBar inherits Rectangle {
             horizontal-stretch: 1;
             min-width: 0px;
             if !compact: Text {
-                text: device == "" ? I18n.t("Belum ada perangkat", "No device") : device + (link == "" ? "" : "  ·  " + link);
+                text: device == "" ? I18n.t("No device") : device + (link == "" ? "" : "  ·  " + link);
                 font-size: 11.5px;
                 color: Theme.text-2;
                 overflow: elide;
@@ -173,29 +173,29 @@ component TopBar inherits Rectangle {
         GlassButton {
             y: (parent.height - self.height) / 2;
             icon: "\u{E72C}";
-            label: compact ? "" : I18n.t("Mulai ulang", "Restart");
-            tip: I18n.t("Mulai ulang koneksi", "Restart the connection");
+            label: compact ? "" : I18n.t("Restart");
+            tip: I18n.t("Restart the connection");
             clicked => { root.restart(); }
         }
         if !live && !busy: GlassButton {
             y: (parent.height - self.height) / 2;
             primary: true;
             icon: "\u{E768}";
-            label: compact ? "" : I18n.t("Mulai", "Start");
-            tip: I18n.t("Mulai mirroring", "Start mirroring");
+            label: compact ? "" : I18n.t("Start");
+            tip: I18n.t("Start mirroring");
             clicked => { root.start(); }
         }
         if live || busy: GlassButton {
             y: (parent.height - self.height) / 2;
             icon: "\u{E71A}";
             label: compact ? "" : "Stop";
-            tip: I18n.t("Hentikan mirroring", "Stop mirroring");
+            tip: I18n.t("Stop mirroring");
             clicked => { root.stop(); }
         }
         GlassButton {
             y: (parent.height - self.height) / 2;
             icon: muted ? "\u{E74F}" : "\u{E767}";
-            tip: muted ? I18n.t("Suara mati — klik untuk nyalakan", "Sound off — click to turn on") : I18n.t("Suara di PC — klik untuk bisukan", "Sound on PC — click to mute");
+            tip: muted ? I18n.t("Sound off — click to turn on") : I18n.t("Sound on PC — click to mute");
             active: !muted;
             clicked => { root.mute(); }
         }
@@ -203,12 +203,12 @@ component TopBar inherits Rectangle {
             y: (parent.height - self.height) / 2;
             icon: "\u{E7AD}";
             clicked => { root.rotate(); }
-            tip: I18n.t("Putar tampilan", "Rotate view");
+            tip: I18n.t("Rotate view");
         }
         if !compact: GlassButton {
             y: (parent.height - self.height) / 2;
             label: fit == "contain" ? "AUTO" : fit == "cover" ? "EDGE" : "FILL";
-            tip: I18n.t("Mode tampilan: Auto-Fit / Edge-to-Edge / Stretch", "View mode: Auto-Fit / Edge-to-Edge / Stretch");
+            tip: I18n.t("View mode: Auto-Fit / Edge-to-Edge / Stretch");
             active: true;
             clicked => { root.fit-next(); }
         }
@@ -216,21 +216,21 @@ component TopBar inherits Rectangle {
             y: (parent.height - self.height) / 2;
             icon: root.fullscreen ? "\u{E73F}" : "\u{E740}";
             active: root.fullscreen;
-            tip: root.fullscreen ? I18n.t("Keluar dari fullscreen", "Exit full screen") : I18n.t("Fullscreen", "Full screen");
+            tip: root.fullscreen ? I18n.t("Exit full screen") : I18n.t("Full screen");
             clicked => { root.window-action("fullscreen"); }
         }
         GlassButton {
             y: (parent.height - self.height) / 2;
             icon: "\u{E700}";
             active: menu-open;
-            tip: I18n.t("Menu perangkat", "Device menu");
+            tip: I18n.t("Device menu");
             clicked => { root.menu(); }
         }
         GlassButton {
             y: (parent.height - self.height) / 2;
             icon: "\u{E713}";
             active: settings-open;
-            tip: I18n.t("Pengaturan", "Settings");
+            tip: I18n.t("Settings");
             clicked => { root.settings(); }
         }
         Rectangle {
@@ -269,19 +269,19 @@ component BottomBar inherits Rectangle {
                 padding-right: 9px;
                 spacing: 6px;
                 alignment: center;
-                if !root.android: Chip { icon: "\u{E76B}"; tip: I18n.t("Geser dari tepi kanan ke kiri (maju)", "Swipe from the right edge (forward)"); label: compact ? "" : I18n.t("Geser kiri", "Swipe left"); clicked => { root.action("swipe-left"); } }
-                if root.android: Chip { icon: "\u{E72B}"; tip: I18n.t("Kembali (klik kanan juga bisa)", "Back (right click works too)"); label: compact ? "" : I18n.t("Kembali", "Back"); clicked => { root.action("back"); } }
-                Chip { icon: "\u{E80F}"; tip: I18n.t("Home", "Home screen"); label: compact ? "" : "Home"; clicked => { root.action("home"); } }
-                Chip { icon: "\u{E8A9}"; tip: I18n.t("Recent Apps", "Recent apps"); label: compact ? "" : "Recent"; clicked => { root.action("switcher"); } }
-                if !root.android: Chip { icon: "\u{E76C}"; tip: I18n.t("Geser dari tepi kiri ke kanan (kembali, juga Alt+←)", "Swipe from the left edge (back, also Alt+←)"); label: compact ? "" : I18n.t("Geser kanan", "Swipe right"); clicked => { root.action("swipe-right"); } }
+                if !root.android: Chip { icon: "\u{E76B}"; tip: I18n.t("Swipe from the right edge (forward)"); label: compact ? "" : I18n.t("Swipe left"); clicked => { root.action("swipe-left"); } }
+                if root.android: Chip { icon: "\u{E72B}"; tip: I18n.t("Back (right click works too)"); label: compact ? "" : I18n.t("Back"); clicked => { root.action("back"); } }
+                Chip { icon: "\u{E80F}"; tip: I18n.t("Home screen"); label: compact ? "" : "Home"; clicked => { root.action("home"); } }
+                Chip { icon: "\u{E8A9}"; tip: I18n.t("Recent apps"); label: compact ? "" : "Recent"; clicked => { root.action("switcher"); } }
+                if !root.android: Chip { icon: "\u{E76C}"; tip: I18n.t("Swipe from the left edge (back, also Alt+←)"); label: compact ? "" : I18n.t("Swipe right"); clicked => { root.action("swipe-right"); } }
                 Rectangle { width: 1px; background: Theme.dark ? #ffffff1f : #0000001a; }
-                if !root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Control Center", "Control Center"); label: compact ? "" : "Control"; clicked => { root.action("control-center"); } }
-                if root.android: Chip { icon: "\u{E71D}"; tip: I18n.t("Aplikasi HP (buka di layar HP atau jendela baru)", "Phone apps (open on the phone or in a new window)"); label: compact ? "" : I18n.t("Aplikasi", "Apps"); clicked => { root.action("apps"); } }
-                if root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Quick Settings", "Quick Settings"); label: compact ? "" : "Quick"; clicked => { root.action("quick-settings"); } }
-                Chip { icon: "\u{EA8F}"; tip: I18n.t("Notifikasi", "Notifications"); label: compact ? "" : I18n.t("Notifikasi", "Alerts"); clicked => { root.action("notifications"); } }
-                if root.android: Chip { icon: "\u{E993}"; tip: I18n.t("Volume HP turun", "Phone volume down"); label: ""; clicked => { root.action("vol-down"); } }
-                if root.android: Chip { icon: "\u{E995}"; tip: I18n.t("Volume HP naik", "Phone volume up"); label: ""; clicked => { root.action("vol-up"); } }
-                Chip { icon: "\u{E72E}"; tip: root.android ? I18n.t("Tombol daya (kunci / nyalakan layar)", "Power button (lock / wake the screen)") : I18n.t("Kunci layar", "Lock screen"); label: compact ? "" : I18n.t("Kunci", "Lock"); clicked => { root.action("lock"); } }
+                if !root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Control Center"); label: compact ? "" : "Control"; clicked => { root.action("control-center"); } }
+                if root.android: Chip { icon: "\u{E71D}"; tip: I18n.t("Phone apps (open on the phone or in a new window)"); label: compact ? "" : I18n.t("Apps"); clicked => { root.action("apps"); } }
+                if root.android: Chip { icon: "\u{E9E9}"; tip: I18n.t("Quick Settings"); label: compact ? "" : "Quick"; clicked => { root.action("quick-settings"); } }
+                Chip { icon: "\u{EA8F}"; tip: I18n.t("Notifications"); label: compact ? "" : I18n.t("Alerts"); clicked => { root.action("notifications"); } }
+                if root.android: Chip { icon: "\u{E993}"; tip: I18n.t("Phone volume down"); label: ""; clicked => { root.action("vol-down"); } }
+                if root.android: Chip { icon: "\u{E995}"; tip: I18n.t("Phone volume up"); label: ""; clicked => { root.action("vol-up"); } }
+                Chip { icon: "\u{E72E}"; tip: root.android ? I18n.t("Power button (lock / wake the screen)") : I18n.t("Lock screen"); label: compact ? "" : I18n.t("Lock"); clicked => { root.action("lock"); } }
             }
         }
     }
@@ -412,58 +412,58 @@ component Placeholder inherits Rectangle {
     callback set-link(string);
     callback change-mode();
     property <bool> card: flow-step >= 0;
-    property <string> s-same-wifi: I18n.t("Sambungkan iPhone/iPad dan PC ke Wi-Fi yang sama.", "Connect the iPhone/iPad and the PC to the same Wi-Fi.");
-    property <string> s-cc: I18n.t("Di iPhone/iPad, buka Pusat Kontrol: usap ke bawah dari pojok kanan atas layar.", "On the iPhone/iPad, open Control Center: swipe down from the top-right corner of the screen.");
-    property <string> s-tap: I18n.t("Ketuk Pencerminan Layar (ikon dua kotak bertumpuk).", "Tap Screen Mirroring (the two stacked rectangles).");
-    property <string> s-pick: I18n.t("Pilih ZenLinkStudio. Layarnya muncul di sini.", "Pick ZenLinkStudio. The screen shows up here.");
-    property <string> s-start: I18n.t("Tekan Mulai di bawah.", "Press Start below.");
+    property <string> s-same-wifi: I18n.t("Connect the iPhone/iPad and the PC to the same Wi-Fi.");
+    property <string> s-cc: I18n.t("On the iPhone/iPad, open Control Center: swipe down from the top-right corner of the screen.");
+    property <string> s-tap: I18n.t("Tap Screen Mirroring (the two stacked rectangles).");
+    property <string> s-pick: I18n.t("Pick ZenLinkStudio. The screen shows up here.");
+    property <string> s-start: I18n.t("Press Start below.");
     // How to connect, step by step, while no device is there yet.
     property <[string]> steps: listening ? [s-same-wifi, s-cc, s-tap, s-pick]
         : device != "" ? []
         : air && mode == "usbdirect" ? [s-start, s-same-wifi, s-cc, s-tap, s-pick]
         : air ? [s-same-wifi,
-            I18n.t("Pertama kali saja: colok kabel USB, lalu tekan Atur Wi-Fi di Pengaturan › Koneksi & driver.", "First time only: plug in the USB cable, then press Set up Wi-Fi in Settings › Connection & driver."),
-            I18n.t("Buka kunci iPhone/iPad, lalu tekan Mulai.", "Unlock the iPhone/iPad, then press Start.")]
-        : [I18n.t("Colok iPhone/iPad ke PC pakai kabel USB.", "Plug the iPhone/iPad into the PC with a USB cable."),
-            I18n.t("Buka kunci layarnya.", "Unlock its screen."),
-            I18n.t("Kalau muncul \"Percayai komputer ini?\", ketuk Percayai lalu masukkan kode sandi.", "If it asks \"Trust this computer?\", tap Trust and enter the passcode."),
+            I18n.t("First time only: plug in the USB cable, then press Set up Wi-Fi in Settings › Connection & driver."),
+            I18n.t("Unlock the iPhone/iPad, then press Start.")]
+        : [I18n.t("Plug the iPhone/iPad into the PC with a USB cable."),
+            I18n.t("Unlock its screen."),
+            I18n.t("If it asks \"Trust this computer?\", tap Trust and enter the passcode."),
             s-start];
     property <bool> show-steps: message == "" && !(device != "" && need != "") && steps.length > 0;
     property <bool> air: link == "wireless";
     property <color> tone: device == "" ? Theme.text-3 : need != "" ? Theme.warn : Theme.ok;
-    property <string> need-label: need == "trust" ? I18n.t("Perlu Trust", "Needs Trust")
-        : need == "wifi" ? I18n.t("Wi-Fi belum siap", "Wi-Fi not set up")
-        : need == "mode" ? I18n.t("Pilih mode", "Choose a mode")
-        : I18n.t("Perlu driver", "Needs a driver");
-    property <string> need-title: need == "restore" ? I18n.t("Kembalikan driver Apple", "Restore the Apple driver")
-        : need == "bind" ? I18n.t("Pasang driver ZenLink Studio", "Install the ZenLink Studio driver")
-        : need == "package" ? I18n.t("libusb-win32 belum terpasang", "libusb-win32 is not installed")
-        : need == "removefilter" ? I18n.t("Hapus filter libusb0 dulu", "Remove the libusb0 filter first")
-        : need == "mode" ? I18n.t("Pilih mode koneksi", "Choose a connection mode")
-        : need == "wifi" ? I18n.t("Wi-Fi belum diatur", "Wi-Fi is not set up yet")
-        : I18n.t("Buka kunci dan tekan Percayai", "Unlock it and tap Trust");
-    property <string> need-hint: need == "restore" ? I18n.t("Perangkat ini memakai driver ZenLink Studio, jadi mode Apple tidak bisa melihatnya. Kembalikan driver Apple, atau ganti ke mode ZenLink Studio.", "This device uses the ZenLink Studio driver, so Apple mode cannot see it. Restore the Apple driver, or switch to ZenLink Studio.")
-        : need == "bind" ? I18n.t("ZenLink Studio memakai driver libusb0 di perangkat. Pasang drivernya, atau ganti ke mode Apple Driver.", "ZenLink Studio uses the libusb0 driver on the device. Install it, or switch to Apple Driver mode.")
-        : need == "package" ? I18n.t("Pasang driver iOS TikTok LIVE Studio atau libusb-win32 sekali, lalu tekan Periksa driver. Atau pakai mode Apple Driver.", "Install the iOS driver of TikTok LIVE Studio or libusb-win32 once, then press Check drivers. Or use Apple Driver mode.")
-        : need == "removefilter" ? I18n.t("Filter libusb0 menumpuk di driver Apple. Ini bisa membuat Windows crash.", "A libusb0 filter is stacked on the Apple driver. It can crash Windows.")
-        : need == "mode" ? I18n.t("Pilih Apple Driver atau ZenLink Studio untuk lanjut.", "Pick Apple Driver or ZenLink Studio to continue.")
-        : need == "wifi" ? I18n.t("Colokkan kabel sekali, lalu tekan Atur Wi-Fi di Pengaturan. Atau pilih Kabel.", "Plug in the cable once, then press Set up Wi-Fi in Settings. Or choose Cable.")
-        : I18n.t("Buka kunci perangkat, tekan Percayai (Trust) kalau muncul, lalu coba lagi.", "Unlock the device, tap Trust if it asks, then try again.");
+    property <string> need-label: need == "trust" ? I18n.t("Needs Trust")
+        : need == "wifi" ? I18n.t("Wi-Fi not set up")
+        : need == "mode" ? I18n.t("Choose a mode")
+        : I18n.t("Needs a driver");
+    property <string> need-title: need == "restore" ? I18n.t("Restore the Apple driver")
+        : need == "bind" ? I18n.t("Install the ZenLink Studio driver")
+        : need == "package" ? I18n.t("libusb-win32 is not installed")
+        : need == "removefilter" ? I18n.t("Remove the libusb0 filter first")
+        : need == "mode" ? I18n.t("Choose a connection mode")
+        : need == "wifi" ? I18n.t("Wi-Fi is not set up yet")
+        : I18n.t("Unlock it and tap Trust");
+    property <string> need-hint: need == "restore" ? I18n.t("This device uses the ZenLink Studio driver, so Apple mode cannot see it. Restore the Apple driver, or switch to ZenLink Studio.")
+        : need == "bind" ? I18n.t("ZenLink Studio uses the libusb0 driver on the device. Install it, or switch to Apple Driver mode.")
+        : need == "package" ? I18n.t("Install the iOS driver of TikTok LIVE Studio or libusb-win32 once, then press Check drivers. Or use Apple Driver mode.")
+        : need == "removefilter" ? I18n.t("A libusb0 filter is stacked on the Apple driver. It can crash Windows.")
+        : need == "mode" ? I18n.t("Pick Apple Driver or ZenLink Studio to continue.")
+        : need == "wifi" ? I18n.t("Plug in the cable once, then press Set up Wi-Fi in Settings. Or choose Cable.")
+        : I18n.t("Unlock the device, tap Trust if it asks, then try again.");
     property <[[string]]> texts: flow-kind == "usbdirect" ? [
-            [I18n.t("Deteksi perangkat", "Detect device"), I18n.t("Ditemukan di USB lewat driver libusb0", "Found on USB through the libusb0 driver")],
-            [I18n.t("Buka perangkat", "Open the device"), I18n.t("Mengalihkan ke mode tangkap layar", "Switching it to its screen-capture mode")],
-            [I18n.t("Cek kepercayaan", "Check trust"), I18n.t("Biarkan tidak terkunci sementara ZenLink membuktikan PC ini dipercaya", "Keep it unlocked while ZenLink proves this PC is trusted")],
-            [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar lewat ZenLink Studio", "Receiving the screen over ZenLink Studio")]]
+            [I18n.t("Detect device"), I18n.t("Found on USB through the libusb0 driver")],
+            [I18n.t("Open the device"), I18n.t("Switching it to its screen-capture mode")],
+            [I18n.t("Check trust"), I18n.t("Keep it unlocked while ZenLink proves this PC is trusted")],
+            [I18n.t("Start stream"), I18n.t("Receiving the screen over ZenLink Studio")]]
         : flow-kind == "airplay" ? [
-            [I18n.t("Perangkat tersambung", "Device connected"), I18n.t("iPhone/iPad memilih ZenLinkStudio di Pencerminan Layar", "Your iPhone/iPad chose ZenLinkStudio in Screen Mirroring")],
-            [I18n.t("Koneksi aman", "Secure connection"), I18n.t("Pairing AirPlay dan pertukaran kunci FairPlay", "AirPlay pairing and FairPlay key exchange")],
-            [I18n.t("Terima video", "Receive video"), I18n.t("Mendekripsi stream AirPlay", "Decrypting the AirPlay stream")],
-            [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar lewat Wi-Fi", "Receiving the screen over Wi-Fi")]]
+            [I18n.t("Device connected"), I18n.t("Your iPhone/iPad chose ZenLinkStudio in Screen Mirroring")],
+            [I18n.t("Secure connection"), I18n.t("AirPlay pairing and FairPlay key exchange")],
+            [I18n.t("Receive video"), I18n.t("Decrypting the AirPlay stream")],
+            [I18n.t("Start stream"), I18n.t("Receiving the screen over Wi-Fi")]]
         : [
-            [I18n.t("Deteksi perangkat", "Detect device"), I18n.t("Ditemukan lewat Apple Mobile Device Service", "Found through Apple Mobile Device Service")],
-            [I18n.t("Koneksi aman", "Secure connection"), wifi ? I18n.t("Membuka tunnel Wi-Fi terenkripsi ke perangkat", "Opening an encrypted Wi-Fi tunnel to the device") : I18n.t("Membuka tunnel USB terenkripsi ke perangkat", "Opening an encrypted USB tunnel to the device")],
-            [I18n.t("Siapkan perangkat", "Prepare the device"), I18n.t("Biarkan tidak terkunci. Pertama kali, image developer kecil dipasang.", "Keep it unlocked. The first time, a small developer image is installed.")],
-            [I18n.t("Mulai stream", "Start stream"), I18n.t("Menerima layar dalam HEVC", "Receiving the screen in HEVC")]];
+            [I18n.t("Detect device"), I18n.t("Found through Apple Mobile Device Service")],
+            [I18n.t("Secure connection"), wifi ? I18n.t("Opening an encrypted Wi-Fi tunnel to the device") : I18n.t("Opening an encrypted USB tunnel to the device")],
+            [I18n.t("Prepare the device"), I18n.t("Keep it unlocked. The first time, a small developer image is installed.")],
+            [I18n.t("Start stream"), I18n.t("Receiving the screen in HEVC")]];
     property <float> pct: max(0, min(flow-step, 4)) / 4;
     animate pct { duration: 420ms; easing: ease-out; }
     function st(i: int) -> string {
@@ -520,13 +520,13 @@ component Placeholder inherits Rectangle {
                     }
                     Text { text: device; font-size: 12px; font-weight: 600; color: Theme.text; vertical-alignment: center; }
                     Text { text: "·"; color: Theme.text-3; vertical-alignment: center; }
-                    Text { text: need != "" ? root.need-label : wifi ? I18n.t("Siap · Wi-Fi", "Ready · Wi-Fi") : I18n.t("Siap", "Ready"); font-size: 12px; font-weight: 600; color: root.tone; vertical-alignment: center; }
+                    Text { text: need != "" ? root.need-label : wifi ? I18n.t("Ready · Wi-Fi") : I18n.t("Ready"); font-size: 12px; font-weight: 600; color: root.tone; vertical-alignment: center; }
                 }
             }
         }
         Text {
-            text: listening ? I18n.t("Menunggu iPhone / iPad", "Waiting for the iPhone / iPad")
-                : device == "" ? I18n.t("Colokkan iPhone atau iPad", "Plug in an iPhone or iPad") : need != "" ? root.need-title : I18n.t(device + " siap", device + " ready");
+            text: listening ? I18n.t("Waiting for the iPhone / iPad")
+                : device == "" ? I18n.t("Plug in an iPhone or iPad") : need != "" ? root.need-title : I18n.f("{device} ready", device);
             font-size: 20px;
             font-weight: 700;
             color: Theme.text;
@@ -535,7 +535,7 @@ component Placeholder inherits Rectangle {
         if !show-steps: Text {
             text: message != "" ? message
                 : device != "" && need != "" ? root.need-hint
-                : I18n.t("Buka kunci, lalu tekan Mulai mirroring.", "Unlock it, then press Start mirroring.");
+                : I18n.t("Unlock it, then press Start mirroring.");
             font-size: 12.5px;
             color: message != "" ? #ff8a80 : Theme.text-2;
             horizontal-alignment: center;
@@ -558,14 +558,14 @@ component Placeholder inherits Rectangle {
                     padding: 12px;
                     spacing: 8px;
                     Text {
-                        text: I18n.t("Windows Firewall memblokir ZenLink, jadi iPhone/iPad tidak bisa tersambung. Tekan tombol di bawah, lalu pilih Ya.", "Windows Firewall blocks ZenLink, so the iPhone/iPad cannot connect. Press the button below, then choose Yes.");
+                        text: I18n.t("Windows Firewall blocks ZenLink, so the iPhone/iPad cannot connect. Press the button below, then choose Yes.");
                         font-size: 12px;
                         color: Theme.text;
                         wrap: word-wrap;
                     }
                     HorizontalLayout {
                         alignment: LayoutAlignment.start;
-                        GlassButton { primary: true; icon: "\u{E83D}"; label: I18n.t("Izinkan ZenLink di jaringan", "Allow ZenLink on the network"); clicked => { root.allow-network(); } }
+                        GlassButton { primary: true; icon: "\u{E83D}"; label: I18n.t("Allow ZenLink on the network"); clicked => { root.allow-network(); } }
                     }
                     if firewall-msg != "": Text { text: firewall-msg; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
                 }
@@ -637,38 +637,38 @@ component Placeholder inherits Rectangle {
             padding-top: 4px;
             GlassButton {
                 icon: "\u{E8AB}";
-                label: (mode == "usbdirect" ? "ZenLink Studio" : "Apple Driver") + " · " + I18n.t("Ganti", "Change");
-                tip: I18n.t("Pilih Apple Driver atau ZenLink Studio", "Choose Apple Driver or ZenLink Studio");
+                label: (mode == "usbdirect" ? "ZenLink Studio" : "Apple Driver") + " · " + I18n.t("Change");
+                tip: I18n.t("Choose Apple Driver or ZenLink Studio");
                 clicked => { root.change-mode(); }
             }
             Seg {
                 width: 190px;
                 height: 32px;
                 options: ["wired", "wireless"];
-                labels: [I18n.t("Kabel (USB)", "Cable (USB)"), "Wi-Fi"];
+                labels: [I18n.t("Cable (USB)"), "Wi-Fi"];
                 value: root.link;
                 changed(v) => { root.set-link(v); }
             }
         }
         if listening: HorizontalLayout {
             alignment: center;
-            GlassButton { icon: "\u{E71A}"; label: I18n.t("Berhenti menunggu", "Stop waiting"); clicked => { root.stop(); } }
+            GlassButton { icon: "\u{E71A}"; label: I18n.t("Stop waiting"); clicked => { root.stop(); } }
         }
         if device == "" && !listening: HorizontalLayout {
             alignment: center;
-            GlassButton { primary: true; icon: "\u{E768}"; label: I18n.t("Mulai", "Start"); clicked => { root.start(); } }
+            GlassButton { primary: true; icon: "\u{E768}"; label: I18n.t("Start"); clicked => { root.start(); } }
         }
         if device != "" && !listening: HorizontalLayout {
             alignment: center;
-            if need == "" || need == "trust": GlassButton { primary: true; icon: "\u{E768}"; label: need == "" ? I18n.t("Mulai mirroring", "Start mirroring") : I18n.t("Coba lagi", "Try again"); clicked => { root.start(); } }
+            if need == "" || need == "trust": GlassButton { primary: true; icon: "\u{E768}"; label: need == "" ? I18n.t("Start mirroring") : I18n.t("Try again"); clicked => { root.start(); } }
             if need != "" && need != "trust": GlassButton {
                 primary: true;
                 icon: "\u{E90F}";
-                label: need == "restore" ? I18n.t("Kembalikan driver Apple", "Restore Apple driver")
-                    : need == "bind" ? I18n.t("Pasang driver", "Install driver")
-                    : need == "removefilter" ? I18n.t("Hapus filter", "Remove filter")
-                    : need == "mode" ? I18n.t("Pilih mode", "Choose mode")
-                    : I18n.t("Buka pengaturan", "Open settings");
+                label: need == "restore" ? I18n.t("Restore Apple driver")
+                    : need == "bind" ? I18n.t("Install driver")
+                    : need == "removefilter" ? I18n.t("Remove filter")
+                    : need == "mode" ? I18n.t("Choose mode")
+                    : I18n.t("Open settings");
                 clicked => { root.fix(); }
             }
         }
@@ -691,10 +691,10 @@ component Placeholder inherits Rectangle {
             spacing: 6px;
             HorizontalLayout {
                 Text {
-                    text: flow-failed ? I18n.t("Tidak bisa tersambung", "Couldn't connect")
-                        : flow-step >= 4 ? I18n.t("Tersambung", "Connected")
-                        : device != "" ? I18n.t("Menyambungkan ke " + device, "Connecting to " + device)
-                        : I18n.t("Menyambungkan", "Connecting");
+                    text: flow-failed ? I18n.t("Couldn't connect")
+                        : flow-step >= 4 ? I18n.t("Connected")
+                        : device != "" ? I18n.f("Connecting to {device}", device)
+                        : I18n.t("Connecting");
                     font-size: 17px;
                     font-weight: 700;
                     color: Theme.text;
@@ -729,8 +729,8 @@ component Placeholder inherits Rectangle {
                 HorizontalLayout {
                     alignment: end;
                     spacing: 8px;
-                    GlassButton { label: I18n.t("Tutup", "Close"); clicked => { root.dismiss(); } }
-                    GlassButton { primary: true; icon: "\u{E72C}"; label: I18n.t("Coba lagi", "Try again"); clicked => { root.start(); } }
+                    GlassButton { label: I18n.t("Close"); clicked => { root.dismiss(); } }
+                    GlassButton { primary: true; icon: "\u{E72C}"; label: I18n.t("Try again"); clicked => { root.start(); } }
                 }
             }
         }
@@ -891,10 +891,10 @@ component CloseDialog inherits Rectangle {
             HorizontalLayout {
                 spacing: 12px;
                 Image { source: @image-url("../../../ZenshiroDev/resources/assets/logo-256.png"); width: 36px; height: 36px; }
-                Text { text: I18n.t("Tutup ZenLink?", "Close ZenLink?"); font-size: 16px; font-weight: 800; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+                Text { text: I18n.t("Close ZenLink?"); font-size: 16px; font-weight: 800; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
             }
             Text {
-                text: I18n.t("ZenLink bisa tetap berjalan di system tray agar perangkat tetap terhubung.", "ZenLink can keep running in the system tray so your devices stay connected.");
+                text: I18n.t("ZenLink can keep running in the system tray so your devices stay connected.");
                 font-size: 12px;
                 color: Theme.text-2;
                 wrap: word-wrap;
@@ -904,7 +904,7 @@ component CloseDialog inherits Rectangle {
                 height: rrow.preferred-height;
                 accessible-role: checkbox;
                 accessible-checked: root.remember;
-                accessible-label: I18n.t("Ingat pilihan saya", "Remember my choice");
+                accessible-label: I18n.t("Remember my choice");
                 TouchArea { mouse-cursor: pointer; clicked => { root.remember = !root.remember; } }
             rrow := HorizontalLayout {
                 spacing: 8px;
@@ -919,20 +919,20 @@ component CloseDialog inherits Rectangle {
                     border-color: Theme.text-3;
                     if root.remember: Icon { text: "\u{E73E}"; font-size: 11px; color: white; }
                 }
-                Text { text: I18n.t("Ingat pilihan saya", "Remember my choice"); font-size: 12px; color: Theme.text; vertical-alignment: center; }
+                Text { text: I18n.t("Remember my choice"); font-size: 12px; color: Theme.text; vertical-alignment: center; }
             }
             }
             if root.remember: Text {
-                text: I18n.t("Bisa diubah di Pengaturan.", "You can change this in Settings.");
+                text: I18n.t("You can change this in Settings.");
                 font-size: 11px;
                 color: Theme.text-3;
             }
             HorizontalLayout {
                 spacing: 8px;
-                GlassButton { label: I18n.t("Batal", "Cancel"); clicked => { root.choose("", false); } }
+                GlassButton { label: I18n.t("Cancel"); clicked => { root.choose("", false); } }
                 Rectangle { horizontal-stretch: 1; }
-                GlassButton { label: I18n.t("Keluar dari ZenLink", "Quit ZenLink"); clicked => { root.choose("quit", root.remember); } }
-                GlassButton { primary: true; icon: "\u{E73F}"; label: I18n.t("Kecilkan ke tray", "Minimize to tray"); clicked => { root.choose("tray", root.remember); } }
+                GlassButton { label: I18n.t("Quit ZenLink"); clicked => { root.choose("quit", root.remember); } }
+                GlassButton { primary: true; icon: "\u{E73F}"; label: I18n.t("Minimize to tray"); clicked => { root.choose("tray", root.remember); } }
             }
         }
     }
@@ -982,10 +982,10 @@ component ModeChooser inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
-                        Text { text: I18n.t("ZenLink mau tersambung lewat apa?", "How should ZenLink connect?"); font-size: 16px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
-                        Text { text: I18n.t("Belum ada yang tersambung dan driver tidak diubah sampai kamu lanjut.", "Nothing connects and no driver changes until you continue."); font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                        Text { text: I18n.t("How should ZenLink connect?"); font-size: 16px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
+                        Text { text: I18n.t("Nothing connects and no driver changes until you continue."); font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
                     }
-                    if root.cancelable: VerticalLayout { alignment: start; GlassButton { icon: "\u{E711}"; tip: I18n.t("Batal", "Cancel"); clicked => { root.cancel(); } } }
+                    if root.cancelable: VerticalLayout { alignment: start; GlassButton { icon: "\u{E711}"; tip: I18n.t("Cancel"); clicked => { root.cancel(); } } }
                 }
                 // Inline on Home the language lives in Settings; keeps the stage uncrowded.
                 if !root.inline: HorizontalLayout {
@@ -993,8 +993,8 @@ component ModeChooser inherits Rectangle {
                     Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
                     Seg {
                         width: 190px;
-                        options: ["id", "en"];
-                        labels: ["Indonesia", "English"];
+                        options: I18n.codes; // shortcut: Seg shows 6 at most, a dropdown when more languages arrive
+                        labels: I18n.names;
                         value: root.prefs.lang;
                         changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
                     }
@@ -1003,16 +1003,16 @@ component ModeChooser inherits Rectangle {
                     icon: "\u{E83D}";
                     tint: #22c55e;
                     title: "Apple Driver";
-                    tag: I18n.t("Standar · kontrol penuh", "Standard · full control");
-                    badge: I18n.t("Disarankan", "Recommended");
-                    desc: I18n.t("Pakai driver bawaan Apple. Paling kompatibel, stabil dan gampang.", "Uses Apple's own driver. Most compatible, stable and easy.");
+                    tag: I18n.t("Standard · full control");
+                    badge: I18n.t("Recommended");
+                    desc: I18n.t("Uses Apple's own driver. Most compatible, stable and easy.");
                     points: [
-                        { ok: true, text: I18n.t("Sampai 60 fps, HEVC (bitrate dibatasi perangkat, sekitar 4–6 Mbps)", "Up to 60 fps, HEVC (device-limited bitrate, about 4–6 Mbps)") },
-                        { ok: true, text: I18n.t("Sentuh pakai mouse, keyboard, gestur dan tombol", "Mouse touch, keyboard, gestures and buttons") },
-                        { ok: true, text: I18n.t("Driver Apple sendiri, tidak perlu pasang apa-apa", "Apple's own driver, nothing to install") },
-                        { ok: true, text: I18n.t("Kabel atau Wi-Fi (setelah setup sekali pakai kabel)", "Cable or Wi-Fi (after a one-time setup with the cable)") },
-                        { ok: true, text: I18n.t("iOS 17–26: Hybrid Control (eksperimental)", "iOS 17–26: Hybrid Control (experimental)") },
-                        { ok: false, text: I18n.t("iOS 16 ke bawah: pakai ZenLink Studio", "iOS 16 or older: use ZenLink Studio") },
+                        { ok: true, text: I18n.t("Up to 60 fps, HEVC (device-limited bitrate, about 4–6 Mbps)") },
+                        { ok: true, text: I18n.t("Mouse touch, keyboard, gestures and buttons") },
+                        { ok: true, text: I18n.t("Apple's own driver, nothing to install") },
+                        { ok: true, text: I18n.t("Cable or Wi-Fi (after a one-time setup with the cable)") },
+                        { ok: true, text: I18n.t("iOS 17–26: Hybrid Control (experimental)") },
+                        { ok: false, text: I18n.t("iOS 16 or older: use ZenLink Studio") },
                     ];
                     selected: root.pick == "apple";
                     pick => { root.pick = "apple"; }
@@ -1021,50 +1021,49 @@ component ModeChooser inherits Rectangle {
                     icon: "\u{E945}";
                     tint: #ff5fa8;
                     title: "ZenLink Studio";
-                    tag: I18n.t("Untuk live streaming", "For live streaming");
-                    desc: I18n.t("Kualitas terbaik untuk streaming: bitrate tinggi (terukur 12–30 Mbps), sampai 60 fps, latensi sangat rendah. Butuh driver libusb0.", "Best quality for streaming: high bitrate (measured 12–30 Mbps), up to 60 fps, very low latency. Needs the libusb0 driver.");
+                    tag: I18n.t("For live streaming");
+                    desc: I18n.t("Best quality for streaming: high bitrate (measured 12–30 Mbps), up to 60 fps, very low latency. Needs the libusb0 driver.");
                     points: [
-                        { ok: true, text: I18n.t("Sampai 60 fps, resolusi native penuh lewat kabel, H.264 bitrate tinggi", "Up to 60 fps, full native resolution over the cable, high-bitrate H.264") },
-                        { ok: true, text: I18n.t("Kabel (USB) atau Wi-Fi (AirPlay, tanpa driver)", "Cable (USB) or Wi-Fi (AirPlay, no driver)") },
-                        { ok: false, text: I18n.t("Gambar dan suara saja: tanpa sentuh, keyboard, gestur", "Picture and sound only: no touch, keyboard or gestures") },
-                        { ok: false, text: I18n.t("Aplikasi Apple tidak melihat perangkat sampai balik ke Apple Driver", "Apple apps can't see the device until you switch back") },
+                        { ok: true, text: I18n.t("Up to 60 fps, full native resolution over the cable, high-bitrate H.264") },
+                        { ok: true, text: I18n.t("Cable (USB) or Wi-Fi (AirPlay, no driver)") },
+                        { ok: false, text: I18n.t("Picture and sound only: no touch, keyboard or gestures") },
+                        { ok: false, text: I18n.t("Apple apps can't see the device until you switch back") },
                     ];
                     selected: root.pick == "usbdirect";
                     pick => { root.pick = "usbdirect"; }
                 }
                 HorizontalLayout {
                     spacing: 10px;
-                    Text { text: I18n.t("Sambungan", "Connection"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Text { text: I18n.t("Connection"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
                     Seg {
                         width: 240px;
                         options: ["wired", "wireless"];
-                        labels: [I18n.t("Kabel", "Cable"), "Wi-Fi"];
+                        labels: [I18n.t("Cable"), "Wi-Fi"];
                         value: root.link-pick;
                         changed(v) => { root.link-pick = v; }
                     }
                 }
                 HorizontalLayout {
                     spacing: 10px;
-                    Text { text: I18n.t("Ingat pilihan ini", "Remember my choice"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Text { text: I18n.t("Remember my choice"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
                     Toggle { checked: root.keep; toggled(v) => { root.keep = v; } }
                 }
                 if !root.inline: Text {
-                    text: I18n.t("Bisa diganti kapan saja di Pengaturan › Koneksi & driver. Ganti mode bisa perlu restart app dan colok ulang kabel.",
-                        "You can change it any time in Settings › Connection & driver. Changing it may need an app restart and reconnecting the cable.");
+                    text: I18n.t("You can change it any time in Settings › Connection & driver. Changing it may need an app restart and reconnecting the cable.");
                     font-size: 11px;
                     color: Theme.text-3;
                     wrap: word-wrap;
                 }
                 HorizontalLayout {
                     spacing: 8px;
-                    GlassButton { icon: "\u{E72B}"; label: I18n.t("Kembali", "Back"); tip: I18n.t("Ganti jenis perangkat", "Change device type"); clicked => { root.back(); } }
+                    GlassButton { icon: "\u{E72B}"; label: I18n.t("Back"); tip: I18n.t("Change device type"); clicked => { root.back(); } }
                     Rectangle { horizontal-stretch: 1; }
-                    if root.cancelable: GlassButton { label: I18n.t("Batal", "Cancel"); clicked => { root.cancel(); } }
+                    if root.cancelable: GlassButton { label: I18n.t("Cancel"); clicked => { root.cancel(); } }
                     GlassButton {
                         primary: true;
                         enabled: root.pick != "";
                         icon: "\u{E72A}";
-                        label: I18n.t("Lanjut", "Continue");
+                        label: I18n.t("Continue");
                         clicked => { root.choose(root.pick, root.link-pick, root.keep); }
                     }
                 }
@@ -1183,18 +1182,18 @@ component PlatformSelector inherits Rectangle {
     callback choose(string, bool);
     property <string> pick: picked;
     property <bool> keep: remember;
-    property <string> apple-badge: root.apple-detected ? I18n.t("Terdeteksi", "Detected") : "";
-    property <string> android-badge: root.android-count > 0 ? (root.android-count + I18n.t(" terdeteksi", " detected")) : "";
-    property <string> apple-desc: I18n.t("Mirroring dan kontrol perangkat Apple lewat USB atau Wi-Fi.", "Mirror and control compatible Apple devices using USB or Wi-Fi.");
-    property <string> android-title: I18n.t("Smartphone / Tablet Android", "Android Smartphone / Tablet");
-    property <string> android-desc: I18n.t("Mirroring dan kontrol Android berperforma tinggi lewat USB atau Wi-Fi.", "High-performance Android mirroring and control over USB or Wi-Fi.");
+    property <string> apple-badge: root.apple-detected ? I18n.t("Detected") : "";
+    property <string> android-badge: root.android-count > 0 ? (root.android-count + I18n.t(" detected")) : "";
+    property <string> apple-desc: I18n.t("Mirror and control compatible Apple devices using USB or Wi-Fi.");
+    property <string> android-title: I18n.t("Android Smartphone / Tablet");
+    property <string> android-desc: I18n.t("High-performance Android mirroring and control over USB or Wi-Fi.");
     property <[string]> apple-points: [
-        I18n.t("Apple Driver atau ZenLink Studio", "Apple Driver or ZenLink Studio"),
-        I18n.t("Kabel atau Wi-Fi", "Cable or Wi-Fi"),
+        I18n.t("Apple Driver or ZenLink Studio"),
+        I18n.t("Cable or Wi-Fi"),
     ];
     property <[string]> android-points: [
-        I18n.t("Lewat ADB dan scrcpy, tanpa aplikasi di HP", "Through ADB and scrcpy, no app on the phone"),
-        I18n.t("Kabel atau Wi-Fi, semua merek Android", "Cable or Wi-Fi, any Android brand"),
+        I18n.t("Through ADB and scrcpy, no app on the phone"),
+        I18n.t("Cable or Wi-Fi, any Android brand"),
     ];
     // Inside the stage (v2.6 HOME): no dimmed backdrop, the stage glass shows.
     in property <bool> inline;
@@ -1229,10 +1228,10 @@ component PlatformSelector inherits Rectangle {
                         HorizontalLayout {
                             alignment: start;
                             spacing: 6px;
-                            Text { text: I18n.t("Selamat datang di ZenLink", "Welcome to ZenLink"); font-size: 12px; font-weight: 600; color: Theme.accent; vertical-alignment: center; }
+                            Text { text: I18n.t("Welcome to ZenLink"); font-size: 12px; font-weight: 600; color: Theme.accent; vertical-alignment: center; }
                             Text { text: "v" + AppInfo.version; font-size: 9.5px; font-weight: 700; letter-spacing: 1px; color: Theme.text-2; vertical-alignment: center; }
                         }
-                        Text { text: I18n.t("Perangkat apa yang ingin kamu sambungkan?", "Which device would you like to connect?"); font-size: 18px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
+                        Text { text: I18n.t("Which device would you like to connect?"); font-size: 18px; font-weight: 800; color: Theme.text; wrap: word-wrap; }
                     }
                 }
                 HorizontalLayout {
@@ -1240,8 +1239,8 @@ component PlatformSelector inherits Rectangle {
                     Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
                     Seg {
                         width: 190px;
-                        options: ["id", "en"];
-                        labels: ["Indonesia", "English"];
+                        options: I18n.codes; // shortcut: Seg shows 6 at most, a dropdown when more languages arrive
+                        labels: I18n.names;
                         value: root.prefs.lang;
                         changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
                     }
@@ -1303,18 +1302,18 @@ component PlatformSelector inherits Rectangle {
                     }
                 }
                 if root.apple-detected && root.android-count > 0: Text {
-                    text: I18n.t("Perangkat Apple dan Android sama-sama tersambung. Pilih yang ingin dicerminkan.", "Apple and Android devices are both connected. Choose the one to mirror.");
+                    text: I18n.t("Apple and Android devices are both connected. Choose the one to mirror.");
                     font-size: 11.5px;
                     color: Theme.warn;
                     wrap: word-wrap;
                 }
                 HorizontalLayout {
                     spacing: 10px;
-                    Text { text: I18n.t("Ingat jenis perangkat", "Remember device type"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+                    Text { text: I18n.t("Remember device type"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
                     Toggle { checked: root.keep; toggled(v) => { root.keep = v; } }
                 }
                 Text {
-                    text: I18n.t("Bisa diganti kapan saja lewat Pengaturan › Jenis perangkat atau tombol Kembali.", "You can change it any time in Settings › Device type or with the Back button.");
+                    text: I18n.t("You can change it any time in Settings › Device type or with the Back button.");
                     font-size: 11px;
                     color: Theme.text-3;
                     wrap: word-wrap;
@@ -1325,7 +1324,7 @@ component PlatformSelector inherits Rectangle {
                         primary: true;
                         enabled: root.pick != "";
                         icon: "\u{E72A}";
-                        label: I18n.t("Lanjut", "Continue");
+                        label: I18n.t("Continue");
                         clicked => { root.choose(root.pick, root.keep); }
                     }
                 }
@@ -1425,12 +1424,11 @@ component AndroidVideoCard inherits Card {
     // Windows can decode H.265 (HEVC Video Extensions or a GPU driver decoder).
     in property <bool> hevc-ok;
     callback changed(Prefs);
-    title: I18n.t("Video Android", "Android video");
+    title: I18n.t("Android video");
     icon: "\u{E714}";
     tint-a: #3ddc84;
     tint-b: #1f9d55;
-    info: I18n.t("Profile mengisi resolusi, FPS, bitrate dan codec; ubah satu nilai dan profile jadi Custom. Setiap HP menyimpan pengaturannya sendiri (USB dan Wi-Fi sama). Encoder dibaca dari HP saat mirroring pertama; kalau encoder pilihan gagal, ZenLink mencoba encoder hardware lain lalu H.264, paling banyak 4 kali, dan pilihanmu tetap disimpan.",
-        "A profile fills in resolution, FPS, bitrate and codec; change one value and the profile becomes Custom. Each phone keeps its own settings (the same over USB and Wi-Fi). Encoders are read from the phone on the first mirroring; if the chosen encoder fails, ZenLink tries another hardware encoder, then H.264, at most 4 times, and keeps your choice.");
+    info: I18n.t("A profile fills in resolution, FPS, bitrate and codec; change one value and the profile becomes Custom. Each phone keeps its own settings (the same over USB and Wi-Fi). Encoders are read from the phone on the first mirroring; if the chosen encoder fails, ZenLink tries another hardware encoder, then H.264, at most 4 times, and keeps your choice.");
     Row { label: "Profile"; }
     Seg {
         options: ["low-latency", "balanced", "high-quality", "streaming", "custom"];
@@ -1438,14 +1436,14 @@ component AndroidVideoCard inherits Card {
         value: prefs.android-profile;
         changed(v) => { root.prefs.android-profile = v; root.changed(root.prefs); }
     }
-    Row { label: I18n.t("Resolusi", "Resolution"); hint: I18n.t("Sisi terpanjang.", "Longest side."); }
+    Row { label: I18n.t("Resolution"); hint: I18n.t("Longest side."); }
     Seg {
         options: ["1280", "1920", "2560", "0"];
         labels: ["720p", "1080p", "1440p", "Native"];
         value: prefs.android-max-size;
         changed(v) => { root.prefs.android-max-size = v; root.changed(root.prefs); }
     }
-    Row { label: "FPS"; hint: I18n.t("Batas atas; HP tidak melebihi refresh rate layarnya.", "A cap; the phone never goes above its refresh rate."); }
+    Row { label: "FPS"; hint: I18n.t("A cap; the phone never goes above its refresh rate."); }
     Seg {
         options: ["30", "60", "90", "120", "144"];
         labels: ["30", "60", "90", "120", "144"];
@@ -1464,9 +1462,9 @@ component AndroidVideoCard inherits Card {
     property <bool> h265-ok: AndroidEnc.codecs.length > 0 ? (AndroidEnc.codecs.length > 1 && AndroidEnc.codecs[1] == "h265") : root.hevc-ok;
     Row {
         label: "Codec";
-        hint: !root.hevc-ok ? I18n.t("H.265 butuh HEVC Video Extensions di Windows.", "H.265 needs HEVC Video Extensions on Windows.")
-            : AndroidEnc.codecs.length == 1 ? I18n.t("HP ini tidak punya encoder H.265.", "This phone has no H.265 encoder.")
-            : I18n.t("Auto = H.264, latency paling rendah.", "Auto = H.264, the lowest latency.");
+        hint: !root.hevc-ok ? I18n.t("H.265 needs HEVC Video Extensions on Windows.")
+            : AndroidEnc.codecs.length == 1 ? I18n.t("This phone has no H.265 encoder.")
+            : I18n.t("Auto = H.264, the lowest latency.");
     }
     Seg {
         options: root.h265-ok ? ["auto", "h264", "h265"] : ["auto", "h264"];
@@ -1476,7 +1474,7 @@ component AndroidVideoCard inherits Card {
     }
     Row {
         label: "Encoder";
-        hint: AndroidEnc.detected != "" ? AndroidEnc.detected : I18n.t("Terdeteksi saat mirroring pertama.", "Detected on the first mirroring.");
+        hint: AndroidEnc.detected != "" ? AndroidEnc.detected : I18n.t("Detected on the first mirroring.");
     }
     if AndroidEnc.options.length > 1: Seg {
         options: AndroidEnc.options;
@@ -1485,7 +1483,7 @@ component AndroidVideoCard inherits Card {
         changed(v) => { root.prefs.android-encoder = v; root.changed(root.prefs); }
     }
     if AndroidEnc.using != "": Row {
-        label: I18n.t("Sedang dipakai", "In use");
+        label: I18n.t("In use");
         hint: AndroidEnc.using;
     }
 }
@@ -1514,25 +1512,25 @@ component AndroidWifiCard inherits Rectangle {
         padding: 14px;
         spacing: 10px;
         Text {
-            text: I18n.t("Sudah pakai kabel? Tekan tombol Wi-Fi di samping nama HP, selesai. Tanpa kabel (Android 11+):", "Already on the cable? Press the Wi-Fi button next to the phone's name, done. Without a cable (Android 11+):");
+            text: I18n.t("Already on the cable? Press the Wi-Fi button next to the phone's name, done. Without a cable (Android 11+):");
             font-size: 11.5px;
             color: Theme.text-2;
             wrap: word-wrap;
         }
         if !root.qr-on: VerticalLayout {
             spacing: 6px;
-            Text { text: I18n.t("Cara 1 · Pindai QR (paling mudah)", "Option 1 · Scan a QR code (easiest)"); font-size: 12.5px; font-weight: 650; color: Theme.text; }
-            StepRow { text: "1.  " + I18n.t("HP dan PC tersambung ke Wi-Fi yang sama.", "The phone and the PC are on the same Wi-Fi."); }
-            StepRow { text: "2.  " + I18n.t("Di HP: Pengaturan › Opsi pengembang › Debugging nirkabel (Wireless debugging) › aktifkan.", "On the phone: Settings › Developer options › Wireless debugging › turn it on."); }
-            StepRow { text: "3.  " + I18n.t("Tekan tombol di bawah, lalu di HP ketuk \"Sambungkan perangkat dengan kode QR\" dan pindai.", "Press the button below, then on the phone tap \"Pair device with QR code\" and scan."); }
+            Text { text: I18n.t("Option 1 · Scan a QR code (easiest)"); font-size: 12.5px; font-weight: 650; color: Theme.text; }
+            StepRow { text: "1.  " + I18n.t("The phone and the PC are on the same Wi-Fi."); }
+            StepRow { text: "2.  " + I18n.t("On the phone: Settings › Developer options › Wireless debugging › turn it on."); }
+            StepRow { text: "3.  " + I18n.t("Press the button below, then on the phone tap \"Pair device with QR code\" and scan."); }
             HorizontalLayout {
                 alignment: start;
                 GlassButton {
                     primary: true;
                     icon: "\u{ED14}";
-                    label: I18n.t("Tampilkan QR", "Show QR code");
+                    label: I18n.t("Show QR code");
                     enabled: !root.wifi-busy;
-                    tip: I18n.t("Tampilkan QR untuk dipindai di HP", "Show a QR code to scan on the phone");
+                    tip: I18n.t("Show a QR code to scan on the phone");
                     clicked => { root.wifi-qr(); }
                 }
             }
@@ -1556,7 +1554,7 @@ component AndroidWifiCard inherits Rectangle {
                 }
             }
             Text {
-                text: I18n.t("Di HP: Debugging nirkabel › \"Sambungkan perangkat dengan kode QR\", lalu pindai kode ini.", "On the phone: Wireless debugging › \"Pair device with QR code\", then scan this code.");
+                text: I18n.t("On the phone: Wireless debugging › \"Pair device with QR code\", then scan this code.");
                 font-size: 11.5px;
                 color: Theme.text-2;
                 wrap: word-wrap;
@@ -1574,7 +1572,7 @@ component AndroidWifiCard inherits Rectangle {
                 alignment: center;
                 GlassButton {
                     icon: "\u{E711}";
-                    label: I18n.t("Batal", "Cancel");
+                    label: I18n.t("Cancel");
                     clicked => { root.wifi-qr-cancel(); }
                 }
             }
@@ -1582,27 +1580,27 @@ component AndroidWifiCard inherits Rectangle {
         Rectangle { height: 1px; background: Theme.line; }
         HorizontalLayout {
             spacing: 8px;
-            Text { text: I18n.t("Cara 2 · Kode pairing atau alamat IP", "Option 2 · Pairing code or IP address"); font-size: 12.5px; font-weight: 650; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
+            Text { text: I18n.t("Option 2 · Pairing code or IP address"); font-size: 12.5px; font-weight: 650; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
             GlassButton {
-                label: root.code-open ? I18n.t("Tutup", "Hide") : I18n.t("Buka", "Show");
+                label: root.code-open ? I18n.t("Hide") : I18n.t("Show");
                 clicked => { root.code-open = !root.code-open; }
             }
         }
         if root.code-open: VerticalLayout {
             spacing: 6px;
-            StepRow { text: "1.  " + I18n.t("Di Debugging nirkabel, ketuk \"Sambungkan perangkat dengan kode penyambungan\".", "In Wireless debugging, tap \"Pair device with pairing code\"."); }
-            StepRow { text: "2.  " + I18n.t("Isi alamat IP:port dan kode 6 digit yang tampil di jendela itu, tekan Pair.", "Enter the IP:port and the 6-digit code shown in that window, press Pair."); }
-            StepRow { text: "3.  " + I18n.t("Isi alamat IP:port dari layar utama Debugging nirkabel (port-nya beda), tekan Sambung. Sudah pernah pairing? Langsung langkah 3.", "Enter the IP:port from the main Wireless debugging screen (a different port), press Connect. Paired before? Go straight to step 3."); }
+            StepRow { text: "1.  " + I18n.t("In Wireless debugging, tap \"Pair device with pairing code\"."); }
+            StepRow { text: "2.  " + I18n.t("Enter the IP:port and the 6-digit code shown in that window, press Pair."); }
+            StepRow { text: "3.  " + I18n.t("Enter the IP:port from the main Wireless debugging screen (a different port), press Connect. Paired before? Go straight to step 3."); }
             HorizontalLayout {
                 spacing: 8px;
                 addr := Field {
-                    placeholder: I18n.t("IP:port, mis. 192.168.1.20:37099", "IP:port, e.g. 192.168.1.20:37099");
+                    placeholder: I18n.t("IP:port, e.g. 192.168.1.20:37099");
                     accepted => { if !root.wifi-busy { root.wifi-connect(self.text); } }
                 }
                 code := Field {
                     horizontal-stretch: 0;
                     width: 96px;
-                    placeholder: I18n.t("Kode 6 digit", "6-digit code");
+                    placeholder: I18n.t("6-digit code");
                     input-type: InputType.number;
                     accepted => { if !root.wifi-busy { root.wifi-pair(addr.text, self.text); } }
                 }
@@ -1614,15 +1612,15 @@ component AndroidWifiCard inherits Rectangle {
                     icon: "\u{E8D7}";
                     label: "Pair";
                     enabled: !root.wifi-busy && code.text != "";
-                    tip: I18n.t("Langkah 2: pairing sekali dengan kode dari HP", "Step 2: pair once with the code from the phone");
+                    tip: I18n.t("Step 2: pair once with the code from the phone");
                     clicked => { root.wifi-pair(addr.text, code.text); }
                 }
                 GlassButton {
                     primary: true;
                     icon: "\u{E71B}";
-                    label: I18n.t("Sambung", "Connect");
+                    label: I18n.t("Connect");
                     enabled: !root.wifi-busy && addr.text != "";
-                    tip: I18n.t("Langkah 3: sambung ke alamat ini (adb connect)", "Step 3: connect to this address (adb connect)");
+                    tip: I18n.t("Step 3: connect to this address (adb connect)");
                     clicked => { root.wifi-connect(addr.text); }
                 }
             }
@@ -1683,15 +1681,14 @@ component AndroidHome inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
-                        Text { text: I18n.t("Smartphone / Tablet Android", "Android Smartphone / Tablet"); font-size: 15px; font-weight: 800; color: Theme.text; }
+                        Text { text: I18n.t("Android Smartphone / Tablet"); font-size: 15px; font-weight: 800; color: Theme.text; }
                         Text { text: root.status; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
                     }
                 }
                 if root.adb-missing: VerticalLayout {
                     spacing: 8px;
                     Text {
-                        text: I18n.t("Android butuh adb, alat resmi Google (sekitar 8 MB). ZenLink mengunduh dan memasangnya untukmu, sekali saja.",
-                                     "Android needs adb, Google's official tool (about 8 MB). ZenLink downloads and installs it for you, once.");
+                        text: I18n.t("Android needs adb, Google's official tool (about 8 MB). ZenLink downloads and installs it for you, once.");
                         font-size: 12px; color: Theme.text; wrap: word-wrap;
                     }
                     if root.adb-progress >= 0: Rectangle {
@@ -1709,7 +1706,7 @@ component AndroidHome inherits Rectangle {
                         }
                     }
                     if root.adb-progress >= 0: Text {
-                        text: I18n.t("Mengunduh adb… ", "Downloading adb… ") + round(root.adb-progress * 100) + "%";
+                        text: I18n.t("Downloading adb… ") + round(root.adb-progress * 100) + "%";
                         font-size: 11px; color: Theme.text-2;
                     }
                     if root.adb-error != "": Text { text: root.adb-error; font-size: 11px; color: Theme.warn; wrap: word-wrap; }
@@ -1718,8 +1715,8 @@ component AndroidHome inherits Rectangle {
                         GlassButton {
                             primary: true;
                             icon: "\u{E896}";
-                            label: I18n.t("Pasang adb", "Install adb");
-                            tip: I18n.t("Unduh dari dl.google.com, dicek SHA-256", "Download from dl.google.com, checked with SHA-256");
+                            label: I18n.t("Install adb");
+                            tip: I18n.t("Download from dl.google.com, checked with SHA-256");
                             clicked => { root.install-adb(); }
                         }
                     }
@@ -1742,7 +1739,7 @@ component AndroidHome inherits Rectangle {
                             icon: "\u{E701}";
                             label: "Wi-Fi";
                             enabled: !root.wifi-busy;
-                            tip: I18n.t("Pindah ke Wi-Fi: setelah tersambung, kabel boleh dicabut", "Switch to Wi-Fi: once connected, you can unplug the cable");
+                            tip: I18n.t("Switch to Wi-Fi: once connected, you can unplug the cable");
                             clicked => { root.wifi-device(i); }
                         }
                     }
@@ -1751,8 +1748,8 @@ component AndroidHome inherits Rectangle {
                         GlassButton {
                             primary: true;
                             icon: "\u{E768}";
-                            label: I18n.t("Mulai", "Start");
-                            tip: I18n.t("Mulai mirroring perangkat ini", "Start mirroring this device");
+                            label: I18n.t("Start");
+                            tip: I18n.t("Start mirroring this device");
                             clicked => { root.start-device(i); }
                         }
                     }
@@ -1764,20 +1761,20 @@ component AndroidHome inherits Rectangle {
                             primary: true;
                             icon: "\u{E768}";
                             label: "USB";
-                            tip: I18n.t("Mulai lewat kabel USB (paling stabil, delay terendah)", "Start over the USB cable (most stable, lowest delay)");
+                            tip: I18n.t("Start over the USB cable (most stable, lowest delay)");
                             clicked => { root.start-device-via(i, "usb"); }
                         }
                         GlassButton {
                             primary: true;
                             icon: "\u{E701}";
                             label: "Wi-Fi";
-                            tip: I18n.t("Mulai lewat Wi-Fi (kabel boleh dicabut)", "Start over Wi-Fi (you can unplug the cable)");
+                            tip: I18n.t("Start over Wi-Fi (you can unplug the cable)");
                             clicked => { root.start-device-via(i, "wifi"); }
                         }
                     }
                 }
                 if root.phase == "connecting": Text {
-                    text: I18n.t("Menyambung… HP akan memulai server scrcpy.", "Connecting… the phone starts the scrcpy server.");
+                    text: I18n.t("Connecting… the phone starts the scrcpy server.");
                     font-size: 11.5px;
                     color: Theme.accent;
                     wrap: word-wrap;
@@ -1794,7 +1791,7 @@ component AndroidHome inherits Rectangle {
                     spacing: 6px;
                     BusyBar { }
                     Text {
-                        text: root.wifi-status != "" ? root.wifi-status : I18n.t("Memproses…", "Working…");
+                        text: root.wifi-status != "" ? root.wifi-status : I18n.t("Working…");
                         font-size: 11.5px;
                         color: Theme.accent;
                         wrap: word-wrap;
@@ -1804,9 +1801,9 @@ component AndroidHome inherits Rectangle {
                     spacing: 8px;
                     GlassButton {
                         icon: "\u{E701}";
-                        label: I18n.t("Sambung lewat Wi-Fi", "Connect over Wi-Fi");
+                        label: I18n.t("Connect over Wi-Fi");
                         active: root.wifi-open;
-                        tip: I18n.t("Pindai QR, kode pairing, atau alamat IP:port", "Scan a QR code, a pairing code or an IP:port address");
+                        tip: I18n.t("Scan a QR code, a pairing code or an IP:port address");
                         clicked => { root.wifi-open = !root.wifi-open; }
                     }
                     Rectangle { horizontal-stretch: 1; }
@@ -1827,30 +1824,30 @@ component AndroidHome inherits Rectangle {
                     changed(p) => { root.prefs-changed(p); }
                 }
                 FlowStep {
-                    title: I18n.t("Aktifkan Debugging USB", "Turn on USB debugging");
-                    sub: I18n.t("Pengaturan › Tentang ponsel › ketuk Nomor bentukan 7×, lalu Opsi pengembang › Debugging USB.", "Settings › About phone › tap Build number 7×, then Developer options › USB debugging.");
+                    title: I18n.t("Turn on USB debugging");
+                    sub: I18n.t("Settings › About phone › tap Build number 7×, then Developer options › USB debugging.");
                     state: "todo";
                 }
                 FlowStep {
-                    title: I18n.t("Colok kabel USB", "Plug in the USB cable");
-                    sub: I18n.t("Pakai kabel data, bukan kabel isi daya saja.", "Use a data cable, not a charge-only cable.");
+                    title: I18n.t("Plug in the USB cable");
+                    sub: I18n.t("Use a data cable, not a charge-only cable.");
                     state: "todo";
                 }
                 FlowStep {
-                    title: I18n.t("Izinkan di HP", "Allow it on the phone");
-                    sub: I18n.t("Ketuk Izinkan pada pesan Izinkan debugging USB.", "Tap Allow on the Allow USB debugging prompt.");
+                    title: I18n.t("Allow it on the phone");
+                    sub: I18n.t("Tap Allow on the Allow USB debugging prompt.");
                     state: "todo";
                     last: true;
                 }
                 Text {
-                    text: I18n.t("Beta: gambar, suara (Android 11+) dan kontrol dari PC. Tidak ada driver yang dipasang atau diubah.", "Beta: picture, sound (Android 11+) and control from the PC. No driver is installed or changed.");
+                    text: I18n.t("Beta: picture, sound (Android 11+) and control from the PC. No driver is installed or changed.");
                     font-size: 11px;
                     color: Theme.text-3;
                     wrap: word-wrap;
                 }
                 HorizontalLayout {
                     alignment: start;
-                    GlassButton { icon: "\u{E72B}"; label: I18n.t("Ganti jenis perangkat", "Change device type"); clicked => { root.back(); } }
+                    GlassButton { icon: "\u{E72B}"; label: I18n.t("Change device type"); clicked => { root.back(); } }
                 }
             }
         }
@@ -1959,18 +1956,18 @@ component AddDevice inherits Rectangle {
                     VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 1;
-                        Text { text: I18n.t("Sambung perangkat baru", "Connect a new device"); font-size: 15px; font-weight: 800; color: Theme.text; }
-                        Text { text: I18n.t("Setelah tersambung, perangkat muncul di menu kiri.", "Once connected, the device shows up in the menu on the left."); font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                        Text { text: I18n.t("Connect a new device"); font-size: 15px; font-weight: 800; color: Theme.text; }
+                        Text { text: I18n.t("Once connected, the device shows up in the menu on the left."); font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
                     }
-                    VerticalLayout { alignment: start; GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup", "Close"); clicked => { root.close(); } } }
+                    VerticalLayout { alignment: start; GlassButton { icon: "\u{E711}"; tip: I18n.t("Close"); clicked => { root.close(); } } }
                 }
                 HorizontalLayout {
                     spacing: 10px;
                     Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; horizontal-stretch: 1; }
                     Seg {
                         width: 190px;
-                        options: ["id", "en"];
-                        labels: ["Indonesia", "English"];
+                        options: I18n.codes; // shortcut: Seg shows 6 at most, a dropdown when more languages arrive
+                        labels: I18n.names;
                         value: root.prefs.lang;
                         changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
                     }
@@ -1983,7 +1980,7 @@ component AddDevice inherits Rectangle {
                         glyph: Glyphs.android;
                         tint: #3ddc84;
                         title: "Android";
-                        sub: I18n.t("HP & tablet, semua merek", "Phones & tablets, any brand");
+                        sub: I18n.t("Phones & tablets, any brand");
                         selected: root.kind == "android";
                         pick => { root.kind = "android"; }
                     }
@@ -1993,7 +1990,7 @@ component AddDevice inherits Rectangle {
                         glyph: Glyphs.apple;
                         tint: #5ac8fa;
                         title: "iPhone / iPad";
-                        sub: I18n.t("Kabel, lalu Wi-Fi", "Cable, then Wi-Fi");
+                        sub: I18n.t("Cable, then Wi-Fi");
                         selected: root.kind == "apple";
                         pick => { root.kind = "apple"; }
                     }
@@ -2002,8 +1999,8 @@ component AddDevice inherits Rectangle {
                     spacing: 10px;
                     if root.adb-missing: HorizontalLayout {
                         spacing: 8px;
-                        Text { text: I18n.t("Android butuh adb (sekitar 8 MB, sekali saja).", "Android needs adb (about 8 MB, once)."); font-size: 12px; color: Theme.text; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
-                        GlassButton { primary: true; icon: "\u{E896}"; label: I18n.t("Pasang adb", "Install adb"); clicked => { root.install-adb(); } }
+                        Text { text: I18n.t("Android needs adb (about 8 MB, once)."); font-size: 12px; color: Theme.text; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
+                        GlassButton { primary: true; icon: "\u{E896}"; label: I18n.t("Install adb"); clicked => { root.install-adb(); } }
                     }
                     // One way at a time keeps the card short at normal window size.
                     HorizontalLayout {
@@ -2013,8 +2010,8 @@ component AddDevice inherits Rectangle {
                             icon: "\u{E88E}";
                             glyph: Glyphs.usb;
                             tint: #f472b6;
-                            title: I18n.t("Kabel USB", "USB cable");
-                            sub: I18n.t("Paling stabil", "Most stable");
+                            title: I18n.t("USB cable");
+                            sub: I18n.t("Most stable");
                             selected: root.way == "usb";
                             pick => { root.way = "usb"; }
                         }
@@ -2024,26 +2021,26 @@ component AddDevice inherits Rectangle {
                             glyph: Glyphs.wifi;
                             tint: #a78bfa;
                             title: "Wi-Fi";
-                            sub: I18n.t("Tanpa kabel · Android 11+", "No cable · Android 11+");
+                            sub: I18n.t("No cable · Android 11+");
                             selected: root.way == "wifi";
                             pick => { root.way = "wifi"; }
                         }
                     }
                     if root.way == "usb": FlowStep {
-                        title: I18n.t("Aktifkan Debugging USB", "Turn on USB debugging");
-                        sub: I18n.t("Pengaturan › Tentang ponsel › ketuk Nomor bentukan 7×, lalu Opsi pengembang › Debugging USB.", "Settings › About phone › tap Build number 7×, then Developer options › USB debugging.");
+                        title: I18n.t("Turn on USB debugging");
+                        sub: I18n.t("Settings › About phone › tap Build number 7×, then Developer options › USB debugging.");
                         state: "todo";
                     }
                     if root.way == "usb": FlowStep {
-                        title: I18n.t("Colok kabel data", "Plug in a data cable");
-                        sub: I18n.t("Lalu ketuk Izinkan di HP. HP langsung muncul di menu.", "Then tap Allow on the phone. It shows up in the menu right away.");
+                        title: I18n.t("Plug in a data cable");
+                        sub: I18n.t("Then tap Allow on the phone. It shows up in the menu right away.");
                         state: "todo";
                         last: true;
                     }
                     if root.way == "wifi" && root.wifi-busy: VerticalLayout {
                         spacing: 6px;
                         BusyBar { }
-                        Text { text: root.wifi-status != "" ? root.wifi-status : I18n.t("Memproses…", "Working…"); font-size: 11.5px; color: Theme.accent; wrap: word-wrap; }
+                        Text { text: root.wifi-status != "" ? root.wifi-status : I18n.t("Working…"); font-size: 11.5px; color: Theme.accent; wrap: word-wrap; }
                     }
                     if root.way == "wifi": AndroidWifiCard {
                         wifi-busy: root.wifi-busy;
@@ -2059,18 +2056,18 @@ component AddDevice inherits Rectangle {
                 if root.kind == "apple": VerticalLayout {
                     spacing: 10px;
                     FlowStep {
-                        title: I18n.t("Colok kabel ke PC", "Plug the cable into the PC");
-                        sub: I18n.t("Buka kunci iPhone/iPad dulu.", "Unlock the iPhone/iPad first.");
+                        title: I18n.t("Plug the cable into the PC");
+                        sub: I18n.t("Unlock the iPhone/iPad first.");
                         state: "todo";
                     }
                     FlowStep {
-                        title: I18n.t("Ketuk Percayai, masukkan kode sandi", "Tap Trust, enter the passcode");
-                        sub: I18n.t("Perangkat muncul di menu kiri. Pilih untuk mulai.", "The device shows up in the menu on the left. Pick it to start.");
+                        title: I18n.t("Tap Trust, enter the passcode");
+                        sub: I18n.t("The device shows up in the menu on the left. Pick it to start.");
                         state: "todo";
                     }
                     FlowStep {
-                        title: I18n.t("Wi-Fi (opsional)", "Wi-Fi (optional)");
-                        sub: I18n.t("Setelah sekali lewat kabel, perangkat di Wi-Fi yang sama ikut muncul tanpa kabel.", "After one cable setup, the device on the same Wi-Fi shows up without the cable.");
+                        title: I18n.t("Wi-Fi (optional)");
+                        sub: I18n.t("After one cable setup, the device on the same Wi-Fi shows up without the cable.");
                         state: "todo";
                         last: true;
                     }
@@ -2148,7 +2145,7 @@ component SettingsPanel inherits Glass {
                 alignment: center;
                 horizontal-stretch: 1;
                 Text { text: "ZenLink"; font-size: 15px; font-weight: 800; color: Theme.text; }
-                Text { text: I18n.t("Pengaturan & kontrol", "Settings & controls"); font-size: 11px; color: Theme.accent; font-weight: 600; }
+                Text { text: I18n.t("Settings & controls"); font-size: 11px; color: Theme.accent; font-weight: 600; }
             }
             GlassButton { icon: "\u{E711}"; clicked => { root.close(); } }
         }
@@ -2160,15 +2157,14 @@ component SettingsPanel inherits Glass {
                 spacing: 10px;
 
                 Card {
-                    title: I18n.t("Tampilan", "Appearance");
+                    title: I18n.t("Appearance");
                     icon: "\u{E790}";
                     tint-a: #f472b6;
                     tint-b: #db2777;
-                    info: I18n.t("Liquid Glass memperlihatkan desktop di belakang jendela secara nyata. Ketebalan 0% = bening total tanpa blur, makin tinggi makin buram (blur asli Windows). Matikan untuk jendela solid tanpa kerja GPU tambahan.",
-                        "Liquid Glass shows the real desktop behind the window. Thickness 0% = fully clear with no blur, higher = more frosted (Windows' own blur). Turn it off for a solid window with no extra GPU work.");
+                    info: I18n.t("Liquid Glass shows the real desktop behind the window. Thickness 0% = fully clear with no blur, higher = more frosted (Windows' own blur). Turn it off for a solid window with no extra GPU work.");
                     Seg {
                         options: ["light", "dark", "system"];
-                        labels: [I18n.t("Terang", "Light"), I18n.t("Gelap", "Dark"), I18n.t("Sistem", "System")];
+                        labels: [I18n.t("Light"), I18n.t("Dark"), I18n.t("System")];
                         value: prefs.theme;
                         changed(v) => { root.prefs.theme = v; root.changed(root.prefs); }
                     }
@@ -2177,8 +2173,8 @@ component SettingsPanel inherits Glass {
                         Toggle { checked: prefs.glass-on; toggled(v) => { root.prefs.glass-on = v; root.changed(root.prefs); } }
                     }
                     if prefs.glass-on: Row {
-                        label: I18n.t("Ketebalan kaca", "Glass thickness");
-                        Text { text: round(prefs.glass) + "%" + (prefs.glass < 1 ? I18n.t(" · bening", " · clear") : ""); font-size: 12px; color: Theme.text-2; vertical-alignment: center; }
+                        label: I18n.t("Glass thickness");
+                        Text { text: round(prefs.glass) + "%" + (prefs.glass < 1 ? I18n.t(" · clear") : ""); font-size: 12px; color: Theme.text-2; vertical-alignment: center; }
                     }
                     if prefs.glass-on: GlassSlider {
                         step: 5;
@@ -2186,15 +2182,15 @@ component SettingsPanel inherits Glass {
                         changed(v) => { root.prefs.glass = v; root.changed(root.prefs); }
                     }
                     Row {
-                        label: I18n.t("Latar animasi", "Animated background");
+                        label: I18n.t("Animated background");
                         Toggle { checked: prefs.dots; toggled(v) => { root.prefs.dots = v; root.changed(root.prefs); } }
                     }
                     Row {
-                        label: I18n.t("Bahasa", "Language");
+                        label: I18n.t("Language");
                         Seg {
                             width: 150px;
-                            options: ["id", "en"];
-                            labels: ["Indonesia", "English"];
+                            options: I18n.codes; // shortcut: Seg shows 6 at most, a dropdown when more languages arrive
+                            labels: I18n.names;
                             value: prefs.lang;
                             changed(v) => { root.prefs.lang = v; root.changed(root.prefs); }
                         }
@@ -2202,12 +2198,11 @@ component SettingsPanel inherits Glass {
                 }
 
                 Card {
-                    title: I18n.t("Layar & rasio", "Display & aspect");
+                    title: I18n.t("Display & aspect");
                     icon: "\u{E7F4}";
                     tint-a: #a78bfa;
                     tint-b: #7c3aed;
-                    info: I18n.t("Auto-Fit menampilkan seluruh layar perangkat. Edge-to-Edge mengisi area dan memotong pinggir. Jendela otomatis mengikuti ukuran dan orientasi (potret/lanskap) perangkat.",
-                        "Auto-Fit shows the whole device screen. Edge-to-Edge fills the area and crops the sides. The window follows the device's size and orientation (portrait / landscape).");
+                    info: I18n.t("Auto-Fit shows the whole device screen. Edge-to-Edge fills the area and crops the sides. The window follows the device's size and orientation (portrait / landscape).");
                     Seg {
                         options: ["contain", "cover", "fill"];
                         labels: ["Auto-Fit", "Edge-to-Edge", "Stretch"];
@@ -2215,11 +2210,11 @@ component SettingsPanel inherits Glass {
                         changed(v) => { root.prefs.fit = v; root.changed(root.prefs); }
                     }
                     Row {
-                        label: I18n.t("Jendela ikut ukuran layar", "Window follows the screen");
-                        hint: I18n.t("Potret / lanskap otomatis", "Portrait / landscape automatically");
+                        label: I18n.t("Window follows the screen");
+                        hint: I18n.t("Portrait / landscape automatically");
                         Toggle { checked: prefs.fit-window; toggled(v) => { root.prefs.fit-window = v; root.changed(root.prefs); } }
                     }
-                    Text { text: I18n.t("Rotasi", "Rotation"); font-size: 12.5px; color: Theme.text; }
+                    Text { text: I18n.t("Rotation"); font-size: 12.5px; color: Theme.text; }
                     Seg {
                         options: ["auto", "0", "90", "180", "270"];
                         labels: ["Auto", "0°", "90°", "180°", "270°"];
@@ -2230,15 +2225,13 @@ component SettingsPanel inherits Glass {
 
 
                 Card {
-                    title: I18n.t("Rekam / live di OBS", "Record / stream in OBS");
+                    title: I18n.t("Record / stream in OBS");
                     icon: "\u{E714}";
                     tint-a: #f87171;
                     tint-b: #dc2626;
-                    info: I18n.t("Game Capture mengambil gambar langsung dari GPU: tajam, tanpa bingkai jendela, dan tetap jalan walau ZenLink tertutup jendela lain. Window Capture juga bisa, tapi ikut menangkap bingkai jendela.",
-                        "Game Capture takes the picture straight from the GPU: sharp, no window frame, and it keeps working when ZenLink is behind other windows. Window Capture also works, but it picks up the window frame too.");
+                    info: I18n.t("Game Capture takes the picture straight from the GPU: sharp, no window frame, and it keeps working when ZenLink is behind other windows. Window Capture also works, but it picks up the window frame too.");
                     Text {
-                        text: I18n.t("Di OBS, tambah sumber Game Capture → Mode: tangkap jendela tertentu → pilih [ZenLink.exe]: ZenLink. Lalu pilih sumbernya dan tekan Ctrl+F (Fit to screen): gambar potret/lanskap otomatis pas di tengah.",
-                            "In OBS, add a Game Capture source → Mode: capture specific window → pick [ZenLink.exe]: ZenLink. Then select it and press Ctrl+F (Fit to screen): portrait / landscape stays centred automatically.");
+                        text: I18n.t("In OBS, add a Game Capture source → Mode: capture specific window → pick [ZenLink.exe]: ZenLink. Then select it and press Ctrl+F (Fit to screen): portrait / landscape stays centred automatically.");
                         font-size: 11.5px;
                         color: Theme.text-2;
                         wrap: word-wrap;
@@ -2246,34 +2239,33 @@ component SettingsPanel inherits Glass {
                 }
 
                 Card {
-                    title: I18n.t("Audio perangkat → PC", "Device audio → PC");
+                    title: I18n.t("Device audio → PC");
                     icon: "\u{E767}";
                     tint-a: #fb923c;
                     tint-b: #ea580c;
-                    info: I18n.t("Suara diputar lewat WASAPI di PC ini. Lip sync menahan gambar sedikit supaya pas dengan suara. Buffer rendah = lebih rapat, tinggi = lebih tahan gangguan.",
-                        "Sound plays through WASAPI on this PC. Lip sync holds the picture a little so it matches the sound. Low buffer is tighter, high rides out hiccups.");
+                    info: I18n.t("Sound plays through WASAPI on this PC. Lip sync holds the picture a little so it matches the sound. Low buffer is tighter, high rides out hiccups.");
                     Seg {
                         options: ["pc", "device", "both"];
-                        labels: ["Windows", I18n.t("Perangkat", "Device"), I18n.t("Keduanya", "Both")];
+                        labels: ["Windows", I18n.t("Device"), I18n.t("Both")];
                         value: prefs.audio-out;
                         changed(v) => { root.prefs.audio-out = v; root.changed(root.prefs); }
                     }
                     Text {
                         text: prefs.audio-out == "pc"
-                            ? I18n.t("Suara hanya di Windows; perangkat diam.", "Sound on Windows only; the device stays silent.")
+                            ? I18n.t("Sound on Windows only; the device stays silent.")
                             : prefs.audio-out == "device"
-                            ? I18n.t("Suara hanya di perangkat; Windows diam.", "Sound on the device only; Windows stays silent.")
+                            ? I18n.t("Sound on the device only; Windows stays silent.")
                             : root.studio
-                            ? I18n.t("ZenLink Studio lewat kabel tidak bisa memutar di dua tempat: suara diputar di Windows.", "ZenLink Studio over the cable can't play in both places: the sound plays on Windows.")
+                            ? I18n.t("ZenLink Studio over the cable can't play in both places: the sound plays on Windows.")
                             : root.screen == "android"
-                            ? I18n.t("Suara di Windows dan HP (Android 13+; HP lama: hanya Windows).", "Sound on Windows and the phone (Android 13+; older phones: Windows only).")
-                            : I18n.t("Suara di Windows dan di perangkat.", "Sound on Windows and on the device.");
+                            ? I18n.t("Sound on Windows and the phone (Android 13+; older phones: Windows only).")
+                            : I18n.t("Sound on Windows and on the device.");
                         font-size: 11px;
                         color: Theme.text-2;
                         wrap: word-wrap;
                     }
                     Row {
-                        label: I18n.t("Volume PC", "PC volume");
+                        label: I18n.t("PC volume");
                         Text { text: round(prefs.volume) + "%"; font-size: 12px; color: Theme.text-2; vertical-alignment: center; }
                     }
                     GlassSlider { value: prefs.volume; changed(v) => { root.prefs.volume = v; root.changed(root.prefs); } }
@@ -2283,25 +2275,23 @@ component SettingsPanel inherits Glass {
                     }
                     Seg {
                         options: ["low", "normal", "high"];
-                        labels: [I18n.t("Rendah", "Low"), "Normal", I18n.t("Tinggi", "High")];
+                        labels: [I18n.t("Low"), "Normal", I18n.t("High")];
                         value: prefs.audio-buffer;
                         changed(v) => { root.prefs.audio-buffer = v; root.changed(root.prefs); }
                     }
                 }
 
                 if !root.studio: Card {
-                    title: I18n.t("Kontrol", "Control");
+                    title: I18n.t("Control");
                     icon: "\u{E765}";
                     tint-a: #38bdf8;
                     tint-b: #0284c7;
                     info: root.screen == "android"
-                        ? I18n.t("Klik = tap, seret = swipe, scroll = scroll di HP. Klik kanan = Back, klik tengah = Home. Klik gambar dulu supaya keyboard PC mengetik di HP.",
-                            "Click = tap, drag = swipe, scroll = scroll on the phone. Right click = Back, middle click = Home. Click the picture first so the PC keyboard types on the phone.")
-                        : I18n.t("Klik dan seret = sentuh. Tombol Back mouse = swipe Back. Keyboard PC dipakai sebagai keyboard hardware di Apple Driver mode; klik gambar dulu.",
-                            "Click and drag = touch. Mouse Back button = swipe back. The PC keyboard works as a hardware keyboard in Apple Driver mode; click the picture first.");
-                    Row { label: I18n.t("Sentuh dengan mouse", "Touch with the mouse"); Toggle { checked: prefs.touch; toggled(v) => { root.prefs.touch = v; root.changed(root.prefs); } } }
-                    Row { label: I18n.t("Keyboard PC ke perangkat", "PC keyboard to the device"); Toggle { checked: prefs.keyboard; toggled(v) => { root.prefs.keyboard = v; root.changed(root.prefs); } } }
-                    if root.screen != "android": Row { label: I18n.t("Gesture (scroll, tombol Back mouse)", "Gestures (scroll, mouse Back button)"); Toggle { checked: prefs.gestures; toggled(v) => { root.prefs.gestures = v; root.changed(root.prefs); } } }
+                        ? I18n.t("Click = tap, drag = swipe, scroll = scroll on the phone. Right click = Back, middle click = Home. Click the picture first so the PC keyboard types on the phone.")
+                        : I18n.t("Click and drag = touch. Mouse Back button = swipe back. The PC keyboard works as a hardware keyboard in Apple Driver mode; click the picture first.");
+                    Row { label: I18n.t("Touch with the mouse"); Toggle { checked: prefs.touch; toggled(v) => { root.prefs.touch = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("PC keyboard to the device"); Toggle { checked: prefs.keyboard; toggled(v) => { root.prefs.keyboard = v; root.changed(root.prefs); } } }
+                    if root.screen != "android": Row { label: I18n.t("Gestures (scroll, mouse Back button)"); Toggle { checked: prefs.gestures; toggled(v) => { root.prefs.gestures = v; root.changed(root.prefs); } } }
                 }
 
                 Card {
@@ -2309,30 +2299,29 @@ component SettingsPanel inherits Glass {
                     icon: "\u{E92E}";
                     tint-a: #a78bfa;
                     tint-b: #7c3aed;
-                    info: I18n.t("Saat keyboard PC sedang mengetik ke perangkat, tombol tunggal (Space, M) masuk ke perangkat; shortcut Alt dan Ctrl tetap untuk ZenLink.",
-                        "While the PC keyboard types on the device, single keys (Space, M) go to the device; Alt and Ctrl shortcuts stay with ZenLink.");
-                    KeyRow { keys: "Alt + M"; text: I18n.t("Suara di PC on / off", "Sound on the PC on / off"); }
-                    KeyRow { keys: "F11 · Esc"; text: I18n.t("Fullscreen / keluar", "Full screen / leave"); }
-                    KeyRow { keys: "Ctrl + ,"; text: I18n.t("Buka / tutup Pengaturan", "Open / close Settings"); }
-                    KeyRow { keys: "Alt + H"; text: I18n.t("Putar tampilan (Auto, 90°, 180°, 270°, 0°)", "Rotate the view (Auto, 90°, 180°, 270°, 0°)"); }
+                    info: I18n.t("While the PC keyboard types on the device, single keys (Space, M) go to the device; Alt and Ctrl shortcuts stay with ZenLink.");
+                    KeyRow { keys: "Alt + M"; text: I18n.t("Sound on the PC on / off"); }
+                    KeyRow { keys: "F11 · Esc"; text: I18n.t("Full screen / leave"); }
+                    KeyRow { keys: "Ctrl + ,"; text: I18n.t("Open / close Settings"); }
+                    KeyRow { keys: "Alt + H"; text: I18n.t("Rotate the view (Auto, 90°, 180°, 270°, 0°)"); }
                     if !root.studio: KeyRow { keys: "Alt + ←"; text: "Back"; }
-                    KeyRow { keys: "Alt + C"; text: I18n.t("Salin teks di layar perangkat ke PC (OCR)", "Copy the text on the device screen to the PC (OCR)"); }
-                    KeyRow { keys: "Alt + R"; text: I18n.t("Hapus riwayat teks yang disalin", "Clear the copied-text history"); }
-                    if !root.studio: KeyRow { keys: "Alt + L"; text: root.screen == "android" ? I18n.t("Tombol power (kunci / nyalakan layar)", "Power button (lock / wake the screen)") : I18n.t("Kunci perangkat", "Lock the device"); }
-                    if root.screen == "android": KeyRow { keys: "Ctrl + V"; text: I18n.t("Paste clipboard PC di HP", "Paste the PC clipboard on the phone"); }
-                    if root.screen == "android": KeyRow { keys: "Ctrl + C / X / A / Z"; text: I18n.t("Copy, cut, select all, undo di HP", "Copy, cut, select all, undo on the phone"); }
-                    if !root.studio: KeyRow { keys: "Alt + N"; text: root.screen == "android" ? "Notifications" : I18n.t("Pusat Notifikasi (buka / tutup)", "Notification Center (open / close)"); }
-                    if !root.studio: KeyRow { keys: "Alt + Q"; text: root.screen == "android" ? "Quick Settings" : I18n.t("Pusat Kontrol (buka / tutup)", "Control Center (open / close)"); }
+                    KeyRow { keys: "Alt + C"; text: I18n.t("Copy the text on the device screen to the PC (OCR)"); }
+                    KeyRow { keys: "Alt + R"; text: I18n.t("Clear the copied-text history"); }
+                    if !root.studio: KeyRow { keys: "Alt + L"; text: root.screen == "android" ? I18n.t("Power button (lock / wake the screen)") : I18n.t("Lock the device"); }
+                    if root.screen == "android": KeyRow { keys: "Ctrl + V"; text: I18n.t("Paste the PC clipboard on the phone"); }
+                    if root.screen == "android": KeyRow { keys: "Ctrl + C / X / A / Z"; text: I18n.t("Copy, cut, select all, undo on the phone"); }
+                    if !root.studio: KeyRow { keys: "Alt + N"; text: root.screen == "android" ? "Notifications" : I18n.t("Notification Center (open / close)"); }
+                    if !root.studio: KeyRow { keys: "Alt + Q"; text: root.screen == "android" ? "Quick Settings" : I18n.t("Control Center (open / close)"); }
                     if root.screen == "android": KeyRow { keys: "Alt + S"; text: "Recent Apps"; }
-                    if root.screen == "android": KeyRow { keys: "Alt + ↑ / ↓"; text: I18n.t("Volume HP naik / turun", "Phone volume up / down"); }
-                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + U"; text: I18n.t("Wake & unlock (passcode tersimpan)", "Wake & unlock (saved passcode)"); }
-                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + D"; text: I18n.t("Stealth dim: layar perangkat 0% / pulihkan", "Stealth dim: device screen to 0% / restore"); }
-                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + V"; text: I18n.t("Ketik teks clipboard PC di perangkat", "Type the PC clipboard text on the device"); }
-                    if root.screen != "android" && !root.studio: KeyRow { keys: "Ctrl + K"; text: I18n.t("Keyboard di layar on / off", "Show / hide the on-screen keyboard"); }
-                    if root.screen != "android" && !root.studio: KeyRow { keys: "Ctrl + C / X / V / A / Z"; text: I18n.t("Copy, cut, paste, select all, undo di iOS", "Copy, cut, paste, select all, undo in iOS"); }
+                    if root.screen == "android": KeyRow { keys: "Alt + ↑ / ↓"; text: I18n.t("Phone volume up / down"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + U"; text: I18n.t("Wake & unlock (saved passcode)"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + D"; text: I18n.t("Stealth dim: device screen to 0% / restore"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Alt + V"; text: I18n.t("Type the PC clipboard text on the device"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Ctrl + K"; text: I18n.t("Show / hide the on-screen keyboard"); }
+                    if root.screen != "android" && !root.studio: KeyRow { keys: "Ctrl + C / X / V / A / Z"; text: I18n.t("Copy, cut, paste, select all, undo in iOS"); }
                     if root.screen != "android": Text {
-                        text: root.studio ? I18n.t("ZenLink Studio hanya gambar dan suara: kontrol perangkat dan shortcut-nya ada di Apple Driver mode.", "ZenLink Studio is picture and sound only: device control and its shortcuts are in Apple Driver mode.")
-                            : I18n.t("Shortcut perangkat Apple jalan di Apple Driver mode saat mirroring.", "Apple device shortcuts work in Apple Driver mode while mirroring.");
+                        text: root.studio ? I18n.t("ZenLink Studio is picture and sound only: device control and its shortcuts are in Apple Driver mode.")
+                            : I18n.t("Apple device shortcuts work in Apple Driver mode while mirroring.");
                         font-size: 11px;
                         color: Theme.text-3;
                         wrap: word-wrap;
@@ -2340,20 +2329,19 @@ component SettingsPanel inherits Glass {
                 }
 
                 Card {
-                    title: I18n.t("Jenis perangkat", "Device type");
+                    title: I18n.t("Device type");
                     icon: "\u{E8EA}";
                     tint-a: #5ac8fa;
                     tint-b: #0a84ff;
-                    info: I18n.t("Pilih iPhone / iPad atau Android. Sesi yang berjalan dihentikan dulu dengan aman. Pengaturan Apple dan Android tetap tersimpan terpisah.",
-                        "Choose iPhone / iPad or Android. A running session is stopped safely first. Apple and Android settings are kept separately.");
-                    Text { text: root.screen == "android" ? I18n.t("Smartphone / Tablet Android", "Android Smartphone / Tablet") : "iPhone / iPad"; font-size: 12.5px; font-weight: 600; color: Theme.text; }
+                    info: I18n.t("Choose iPhone / iPad or Android. A running session is stopped safely first. Apple and Android settings are kept separately.");
+                    Text { text: root.screen == "android" ? I18n.t("Android Smartphone / Tablet") : "iPhone / iPad"; font-size: 12.5px; font-weight: 600; color: Theme.text; }
                     Row {
-                        label: I18n.t("Ingat jenis perangkat", "Remember device type");
+                        label: I18n.t("Remember device type");
                         Toggle { checked: prefs.remember-platform; toggled(v) => { root.prefs.remember-platform = v; root.changed(root.prefs); } }
                     }
                     HorizontalLayout {
                         alignment: start;
-                        GlassButton { icon: "\u{E72B}"; label: I18n.t("Ganti jenis perangkat", "Change device type"); clicked => { root.driver-action("platform"); } }
+                        GlassButton { icon: "\u{E72B}"; label: I18n.t("Change device type"); clicked => { root.driver-action("platform"); } }
                     }
                 }
 
@@ -2364,14 +2352,13 @@ component SettingsPanel inherits Glass {
                 }
 
                 if root.screen != "android" && !root.studio: Card {
-                    title: I18n.t("Buka kunci otomatis", "Auto unlock");
+                    title: I18n.t("Auto unlock");
                     icon: "\u{E72E}";
                     tint-a: #a78bfa;
                     tint-b: #7c3aed;
-                    info: I18n.t("Hanya Apple Driver mode (tidak di ZenLink Studio). ZenLink membangunkan iPhone/iPad, mengusap ke atas dan mengetik kode atau kata sandimu. Kode disimpan terenkripsi (Windows DPAPI) hanya di akun Windows ini dan tidak pernah dikirim ke mana pun. Alt+U membuka kunci kapan saja.",
-                        "Apple Driver mode only (not ZenLink Studio). ZenLink wakes the iPhone/iPad, swipes up and types your passcode or password. It is stored encrypted (Windows DPAPI) for this Windows account only and never sent anywhere. Alt+U unlocks at any time.");
+                    info: I18n.t("Apple Driver mode only (not ZenLink Studio). ZenLink wakes the iPhone/iPad, swipes up and types your passcode or password. It is stored encrypted (Windows DPAPI) for this Windows account only and never sent anywhere. Alt+U unlocks at any time.");
                     Text {
-                        text: root.passcode-set ? I18n.t("Kode tersimpan di PC ini.", "A passcode is saved on this PC.") : I18n.t("Belum ada kode tersimpan.", "No passcode saved yet.");
+                        text: root.passcode-set ? I18n.t("A passcode is saved on this PC.") : I18n.t("No passcode saved yet.");
                         font-size: 12.5px;
                         font-weight: 600;
                         color: root.passcode-set ? Theme.ok : Theme.text-2;
@@ -2379,100 +2366,97 @@ component SettingsPanel inherits Glass {
                     HorizontalLayout {
                         spacing: 8px;
                         pc := Field {
-                            placeholder: I18n.t("Kode atau kata sandi perangkat", "Device passcode or password");
+                            placeholder: I18n.t("Device passcode or password");
                             input-type: InputType.password;
                             accepted => { root.save-passcode(self.text); self.text = ""; }
                         }
                         GlassButton {
                             primary: true;
-                            label: I18n.t("Simpan", "Save");
+                            label: I18n.t("Save");
                             enabled: pc.text != "";
                             clicked => { root.save-passcode(pc.text); pc.text = ""; }
                         }
                         if root.passcode-set: GlassButton {
-                            label: I18n.t("Hapus", "Remove");
+                            label: I18n.t("Remove");
                             clicked => { root.save-passcode(""); }
                         }
                     }
                     Row {
-                        label: I18n.t("Buka kunci saat mirroring mulai", "Unlock when mirroring starts");
-                        hint: I18n.t("Juga Alt+U kapan saja", "Also Alt+U at any time");
+                        label: I18n.t("Unlock when mirroring starts");
+                        hint: I18n.t("Also Alt+U at any time");
                         Toggle { checked: prefs.auto-unlock; toggled(v) => { root.prefs.auto-unlock = v; root.changed(root.prefs); } }
                     }
                     Row {
-                        label: I18n.t("Buka kunci lagi saat layar terkunci", "Unlock again when the screen locks");
-                        hint: I18n.t("Mode Apple Driver, pakai kode sandi tersimpan", "Apple Driver mode, uses the saved passcode");
+                        label: I18n.t("Unlock again when the screen locks");
+                        hint: I18n.t("Apple Driver mode, uses the saved passcode");
                         Toggle { checked: prefs.unlock-on-lock; toggled(v) => { root.prefs.unlock-on-lock = v; root.changed(root.prefs); } }
                     }
                     if prefs.unlock-on-lock: Row {
-                        label: I18n.t("Batasi buka kunci otomatis", "Limit automatic unlocks");
-                        hint: I18n.t("Paling banyak 3 kali dalam 30 detik, agar kode sandi salah tidak berulang", "At most 3 times in 30 seconds, so a wrong passcode cannot repeat");
+                        label: I18n.t("Limit automatic unlocks");
+                        hint: I18n.t("At most 3 times in 30 seconds, so a wrong passcode cannot repeat");
                         Toggle { checked: prefs.unlock-limit; toggled(v) => { root.prefs.unlock-limit = v; root.changed(root.prefs); } }
                     }
                 }
 
                 if root.screen != "android": Card {
-                    title: I18n.t("Koneksi & driver", "Connection & driver");
+                    title: I18n.t("Connection & driver");
                     icon: "\u{E88E}";
                     tint-a: #34d399;
                     tint-b: #059669;
-                    info: I18n.t("Apple Driver memakai driver bawaan Apple. ZenLink Studio memakai libusb0 untuk bitrate tinggi. Perubahan driver selalu minta konfirmasi dan izin administrator.",
-                        "Apple Driver uses Apple's own driver. ZenLink Studio uses libusb0 for high bitrate. Driver changes always ask for confirmation and administrator approval.");
+                    info: I18n.t("Apple Driver uses Apple's own driver. ZenLink Studio uses libusb0 for high bitrate. Driver changes always ask for confirmation and administrator approval.");
                     Text { text: connection; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
                     Text { text: driver-text; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
                     Row {
-                        label: I18n.t("Sambungan", "Connection");
+                        label: I18n.t("Connection");
                         Seg {
                             width: 170px;
                             options: ["wired", "wireless"];
-                            labels: [I18n.t("Kabel (USB)", "Cable (USB)"), "Wi-Fi"];
+                            labels: [I18n.t("Cable (USB)"), "Wi-Fi"];
                             value: root.link;
                             changed(v) => { root.set-link(v); }
                         }
                     }
                     Text {
                         text: root.mode == "usbdirect"
-                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pilih ZenLinkStudio di Pencerminan Layar pada perangkat.", "Wi-Fi: pick ZenLinkStudio in Screen Mirroring on the device.") : I18n.t("Kabel: lewat driver libusb0, bitrate tinggi.", "Cable: through the libusb0 driver, high bitrate."))
-                            : (root.link == "wireless" ? I18n.t("Wi-Fi: tekan Atur Wi-Fi sekali dengan kabel tersambung. Perangkat yang dicolok tetap jalan lewat kabel.", "Wi-Fi: press Set up Wi-Fi once with the cable in. A plugged-in device still works over the cable.") : I18n.t("Kabel: lewat driver Apple.", "Cable: through Apple's driver."));
+                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pick ZenLinkStudio in Screen Mirroring on the device.") : I18n.t("Cable: through the libusb0 driver, high bitrate."))
+                            : (root.link == "wireless" ? I18n.t("Wi-Fi: press Set up Wi-Fi once with the cable in. A plugged-in device still works over the cable.") : I18n.t("Cable: through Apple's driver."));
                         font-size: 11px;
                         color: Theme.text-3;
                         wrap: word-wrap;
                     }
                     HorizontalLayout {
                         spacing: 6px;
-                        GlassButton { label: I18n.t("Ganti mode", "Change mode"); tip: I18n.t("Pilih Apple Driver atau ZenLink Studio", "Choose Apple Driver or ZenLink Studio"); clicked => { root.driver-action("mode"); } }
-                        GlassButton { label: I18n.t("Periksa driver", "Check drivers"); clicked => { root.driver-action("refresh"); } }
-                        if !root.studio: GlassButton { label: I18n.t("Atur Wi-Fi", "Set up Wi-Fi"); clicked => { root.driver-action("wifi"); } }
+                        GlassButton { label: I18n.t("Change mode"); tip: I18n.t("Choose Apple Driver or ZenLink Studio"); clicked => { root.driver-action("mode"); } }
+                        GlassButton { label: I18n.t("Check drivers"); clicked => { root.driver-action("refresh"); } }
+                        if !root.studio: GlassButton { label: I18n.t("Set up Wi-Fi"); clicked => { root.driver-action("wifi"); } }
                     }
                     if root.drv-filter || (root.drv-restore && !root.studio) || (root.drv-bind && root.studio): HorizontalLayout {
                         spacing: 6px;
-                        if root.drv-filter: GlassButton { primary: true; label: I18n.t("Hapus filter libusb0", "Remove libusb0 filter"); clicked => { root.driver-action("removefilter"); } }
-                        if root.drv-restore && !root.studio: GlassButton { label: I18n.t("Kembalikan driver Apple", "Restore Apple driver"); clicked => { root.driver-action("restore"); } }
-                        if root.drv-bind && root.studio: GlassButton { label: I18n.t("Pasang driver ZenLink Studio", "Install ZenLink Studio driver"); clicked => { root.driver-action("bind"); } }
+                        if root.drv-filter: GlassButton { primary: true; label: I18n.t("Remove libusb0 filter"); clicked => { root.driver-action("removefilter"); } }
+                        if root.drv-restore && !root.studio: GlassButton { label: I18n.t("Restore Apple driver"); clicked => { root.driver-action("restore"); } }
+                        if root.drv-bind && root.studio: GlassButton { label: I18n.t("Install ZenLink Studio driver"); clicked => { root.driver-action("bind"); } }
                     }
                 }
 
                 Card {
-                    title: I18n.t("Pembaruan", "Updates");
+                    title: I18n.t("Updates");
                     icon: "\u{E895}";
                     tint-a: #34d399;
                     tint-b: #059669;
-                    info: AppInfo.store ? I18n.t("Versi ini dipasang dari Microsoft Store, jadi Microsoft Store yang mengunduh dan memasang pembaruan. Pengaturan Anda tetap.",
-                        "This copy was installed from the Microsoft Store, so the Microsoft Store downloads and installs updates. Your settings stay.") : I18n.t("ZenLink hanya mengunduh setelah Anda menekan Perbarui, langsung dari rilis GitHub resmi, dan memeriksa SHA-256 file sebelum menjalankannya. Pengaturan Anda tetap. Beta dan Stabil adalah dua aplikasi terpisah: pindah kanal memasang edisi lain di sebelahnya.",
-                        "ZenLink downloads only after you press Update, straight from the official GitHub release, and checks the file's SHA-256 before running it. Your settings stay. Beta and Stable are separate apps: switching channel installs the other edition next to this one.");
+                    info: AppInfo.store ? I18n.t("This copy was installed from the Microsoft Store, so the Microsoft Store downloads and installs updates. Your settings stay.") : I18n.t("ZenLink downloads only after you press Update, straight from the official GitHub release, and checks the file's SHA-256 before running it. Your settings stay. Beta and Stable are separate apps: switching channel installs the other edition next to this one.");
                     Text { text: "ZenLink v" + AppInfo.version; font-size: 12.5px; font-weight: 700; color: Theme.text; }
                     if AppInfo.store: Text {
-                        text: I18n.t("Versi Microsoft Store: pembaruan dipasang oleh Microsoft Store.", "Microsoft Store edition: updates are installed by the Microsoft Store.");
+                        text: I18n.t("Microsoft Store edition: updates are installed by the Microsoft Store.");
                         font-size: 11.5px; color: Theme.text-2; wrap: word-wrap;
                     }
-                    if AppInfo.store: GlassButton { label: I18n.t("Buka di Microsoft Store", "Open in the Microsoft Store"); clicked => { root.update-action("store"); } }
-                    if !AppInfo.store: Row { label: I18n.t("Cek otomatis saat mulai", "Check at start"); Toggle { checked: prefs.update-check; toggled(v) => { root.prefs.update-check = v; root.changed(root.prefs); } } }
+                    if AppInfo.store: GlassButton { label: I18n.t("Open in the Microsoft Store"); clicked => { root.update-action("store"); } }
+                    if !AppInfo.store: Row { label: I18n.t("Check at start"); Toggle { checked: prefs.update-check; toggled(v) => { root.prefs.update-check = v; root.changed(root.prefs); } } }
                     if !AppInfo.store: Row {
-                        label: I18n.t("Kanal", "Channel");
+                        label: I18n.t("Channel");
                         Seg {
                             width: 150px;
                             options: ["stable", "beta"];
-                            labels: [I18n.t("Stabil", "Stable"), "Beta"];
+                            labels: [I18n.t("Stable"), "Beta"];
                             value: prefs.update-channel == "" ? root.upd-channel-own : prefs.update-channel;
                             changed(v) => { root.prefs.update-channel = v == root.upd-channel-own ? "" : v; root.changed(root.prefs); root.update-action("check"); }
                         }
@@ -2497,66 +2481,64 @@ component SettingsPanel inherits Glass {
                     if root.upd-version != "": GlassButton {
                         primary: true;
                         enabled: !root.upd-busy;
-                        label: (root.upd-switch ? I18n.t("Pasang v", "Install v") : I18n.t("Perbarui ke v", "Update to v")) + root.upd-version;
+                        label: (root.upd-switch ? I18n.t("Install v") : I18n.t("Update to v")) + root.upd-version;
                         clicked => { root.update-action("install"); }
                     }
                     if !AppInfo.store: HorizontalLayout {
                         spacing: 6px;
-                        GlassButton { enabled: !root.upd-busy; label: I18n.t("Cek update", "Check for updates"); clicked => { root.update-action("check"); } }
-                        if root.upd-version != "": GlassButton { label: I18n.t("Catatan rilis", "Release notes"); clicked => { root.update-action("notes"); } }
+                        GlassButton { enabled: !root.upd-busy; label: I18n.t("Check for updates"); clicked => { root.update-action("check"); } }
+                        if root.upd-version != "": GlassButton { label: I18n.t("Release notes"); clicked => { root.update-action("notes"); } }
                     }
                 }
 
                 Card {
-                    title: I18n.t("Startup & penutupan", "Startup & closing");
+                    title: I18n.t("Startup & closing");
                     icon: "\u{E7E8}";
                     tint-a: #60a5fa;
                     tint-b: #2563eb;
-                    if !AppInfo.store: Row { label: I18n.t("Mulai bersama Windows", "Start with Windows"); Toggle { checked: prefs.start-with-windows; toggled(v) => { root.prefs.start-with-windows = v; root.changed(root.prefs); } } }
-                    Text { text: I18n.t("Saat menutup jendela", "When closing the window"); font-size: 12px; color: Theme.text; }
+                    if !AppInfo.store: Row { label: I18n.t("Start with Windows"); Toggle { checked: prefs.start-with-windows; toggled(v) => { root.prefs.start-with-windows = v; root.changed(root.prefs); } } }
+                    Text { text: I18n.t("When closing the window"); font-size: 12px; color: Theme.text; }
                     Seg {
                         options: ["ask", "tray", "quit"];
-                        labels: [I18n.t("Selalu tanya", "Ask every time"), I18n.t("Kecilkan ke tray", "Minimize to tray"), I18n.t("Keluar", "Quit")];
+                        labels: [I18n.t("Ask every time"), I18n.t("Minimize to tray"), I18n.t("Quit")];
                         value: prefs.close-action;
                         changed(v) => { root.prefs.close-action = v; root.changed(root.prefs); }
                     }
                 }
 
                 Card {
-                    title: I18n.t("Lanjutan", "Advanced");
+                    title: I18n.t("Advanced");
                     icon: "\u{E713}";
                     tint-a: #a1a1aa;
                     tint-b: #52525b;
-                    Row { label: I18n.t("Selalu di atas", "Always on top"); Toggle { checked: prefs.on-top; toggled(v) => { root.prefs.on-top = v; root.changed(root.prefs); } } }
-                    Row { label: I18n.t("Statistik di header", "Stats in the header"); Toggle { checked: prefs.stats; toggled(v) => { root.prefs.stats = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("Always on top"); Toggle { checked: prefs.on-top; toggled(v) => { root.prefs.on-top = v; root.changed(root.prefs); } } }
+                    Row { label: I18n.t("Stats in the header"); Toggle { checked: prefs.stats; toggled(v) => { root.prefs.stats = v; root.changed(root.prefs); } } }
                 }
 
                 Card {
-                    title: I18n.t("Statistik (terukur)", "Stats (measured)");
+                    title: I18n.t("Stats (measured)");
                     icon: "\u{E9D9}";
                     tint-a: #facc15;
                     tint-b: #ca8a04;
-                    info: I18n.t("Semua angka diukur langsung: fps decode, fps tampil, frame terlewat (diganti frame lebih baru sebelum tampil), waktu decode frame terakhir.",
-                        "All numbers are measured: decoded fps, presented fps, skipped frames (replaced by a newer frame before display), last frame decode time.");
+                    info: I18n.t("All numbers are measured: decoded fps, presented fps, skipped frames (replaced by a newer frame before display), last frame decode time.");
                     Text { text: stats-full; font-size: 11.5px; color: Theme.text-2; font-family: "Cascadia Mono"; wrap: word-wrap; }
                 }
                 Card {
-                    title: I18n.t("Potong tepi (halus)", "Edge crop (fine)");
+                    title: I18n.t("Edge crop (fine)");
                     icon: "\u{E7A8}";
                     tint-a: #94a3b8;
                     tint-b: #64748b;
-                    info: I18n.t("Buang garis hitam atau pinggiran dari gambar, dalam piksel asli perangkat. Sentuhan tetap tepat di posisinya.",
-                        "Trim black bars or borders off the picture, in device pixels. Touches still land in the right place.");
+                    info: I18n.t("Trim black bars or borders off the picture, in device pixels. Touches still land in the right place.");
                     for side[i] in [
-                        { key: "t", id: "Atas", en: "Top" },
-                        { key: "b", id: "Bawah", en: "Bottom" },
-                        { key: "l", id: "Kiri", en: "Left" },
-                        { key: "r", id: "Kanan", en: "Right" },
+                        { key: "t", en: "Top" },
+                        { key: "b", en: "Bottom" },
+                        { key: "l", en: "Left" },
+                        { key: "r", en: "Right" },
                     ]: VerticalLayout {
                         spacing: 2px;
                         property <float> v: side.key == "t" ? prefs.crop-t : side.key == "b" ? prefs.crop-b : side.key == "l" ? prefs.crop-l : prefs.crop-r;
                         Row {
-                            label: I18n.t(side.id, side.en);
+                            label: I18n.t(side.en);
                             Text { text: round(v) + " px"; font-size: 12px; color: Theme.text-2; vertical-alignment: center; }
                         }
                         GlassSlider {
@@ -2575,7 +2557,7 @@ component SettingsPanel inherits Glass {
                     HorizontalLayout {
                         alignment: end;
                         GlassButton {
-                            label: I18n.t("Reset (0 px)", "Reset (0 px)");
+                            label: I18n.t("Reset (0 px)");
                             clicked => {
                                 root.prefs.crop-t = 0; root.prefs.crop-b = 0; root.prefs.crop-l = 0; root.prefs.crop-r = 0;
                                 root.changed(root.prefs);
@@ -2584,7 +2566,7 @@ component SettingsPanel inherits Glass {
                     }
                 }
                 Card {
-                    title: I18n.t("Tentang & kredit", "About & credits");
+                    title: I18n.t("About & credits");
                     icon: "\u{E946}";
                     tint-a: #ec4899;
                     tint-b: #a855f7;
@@ -2598,27 +2580,25 @@ component SettingsPanel inherits Glass {
                         alignment: start;
                         GlassButton {
                             icon: "\u{E8B7}";
-                            label: I18n.t("Buka folder log", "Open log folder");
-                            tip: I18n.t("Log ZenLink untuk laporan bug (%LOCALAPPDATA%\\ZenLink-Next\\logs)", "ZenLink logs for bug reports (%LOCALAPPDATA%\\ZenLink-Next\\logs)");
+                            label: I18n.t("Open log folder");
+                            tip: I18n.t("ZenLink logs for bug reports (%LOCALAPPDATA%\\ZenLink-Next\\logs)");
                             clicked => { root.driver-action("logs"); }
                         }
                     }
                     Text {
-                        text: I18n.t("© 2026 Zenvy Zenshiro · GPL-3.0-or-later · tanpa garansi.", "© 2026 Zenvy Zenshiro · GPL-3.0-or-later · no warranty.");
+                        text: I18n.t("© 2026 Zenvy Zenshiro · GPL-3.0-or-later · no warranty.");
                         font-size: 11px;
                         color: Theme.text-2;
                         wrap: word-wrap;
                     }
                     Text {
-                        text: I18n.t(
-                            "Android: server scrcpy (Genymobile & Romain Vimont, Apache-2.0) dan adb resmi Google (Android platform-tools, tidak diubah; NOTICE.txt di third_party). Apple: pymobiledevice3 (GPL-3.0), pane-iphone-mirror-windows (GPL-3.0), quicktime_video_hack (MIT), libusb-win32, UxPlay/playfair (GPL-3.0). Suara AAC: FFmpeg (LGPL). Detail: README dan docs/THIRD_PARTY.md.",
-                            "Android: the scrcpy server (Genymobile & Romain Vimont, Apache-2.0) and Google's official adb (Android platform-tools, unmodified; NOTICE.txt in third_party). Apple: pymobiledevice3 (GPL-3.0), pane-iphone-mirror-windows (GPL-3.0), quicktime_video_hack (MIT), libusb-win32, UxPlay/playfair (GPL-3.0). AAC sound: FFmpeg (LGPL). Details: README and docs/THIRD_PARTY.md.");
+                        text: I18n.t("Android: the scrcpy server (Genymobile & Romain Vimont, Apache-2.0) and Google's official adb (Android platform-tools, unmodified; NOTICE.txt in third_party). Apple: pymobiledevice3 (GPL-3.0), pane-iphone-mirror-windows (GPL-3.0), quicktime_video_hack (MIT), libusb-win32, UxPlay/playfair (GPL-3.0). AAC sound: FFmpeg (LGPL). Details: README and docs/THIRD_PARTY.md.");
                         font-size: 11px;
                         color: Theme.text-2;
                         wrap: word-wrap;
                     }
                     Text {
-                        text: I18n.t("Android adalah merek dagang Google LLC. iPhone, iPad dan AirPlay adalah merek dagang Apple Inc. ZenLink tidak berafiliasi dengan Google atau Apple.", "Android is a trademark of Google LLC. iPhone, iPad and AirPlay are trademarks of Apple Inc. ZenLink is not affiliated with Google or Apple.");
+                        text: I18n.t("Android is a trademark of Google LLC. iPhone, iPad and AirPlay are trademarks of Apple Inc. ZenLink is not affiliated with Google or Apple.");
                         font-size: 10.5px;
                         color: Theme.text-3;
                         wrap: word-wrap;
@@ -2671,14 +2651,14 @@ component AppLauncher inherits Rectangle {
             if root.window-ok: Seg {
                 width: 210px;
                 options: ["phone", "window"];
-                labels: [I18n.t("Di layar HP", "On the phone"), I18n.t("Jendela baru", "New window")];
+                labels: [I18n.t("On the phone"), I18n.t("New window")];
                 value: root.open-in;
                 changed(v) => { root.open-in = v; }
             }
-            GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup", "Close"); clicked => { root.close(); } }
+            GlassButton { icon: "\u{E711}"; tip: I18n.t("Close"); clicked => { root.close(); } }
         }
         if !root.busy && root.searchable: Field {
-            placeholder: I18n.t("Cari app…", "Search apps…");
+            placeholder: I18n.t("Search apps…");
             edited(v) => { root.filter(v); }
         }
         if root.busy: BusyBar { }
@@ -3390,7 +3370,7 @@ export component AppWindow inherits Window {
                     horizontal-alignment: center;
                 }
                 Text {
-                    text: root.drop-ok ? I18n.t("Lepas untuk kirim ke perangkat", "Drop to send to the device") : root.drop-apple ? I18n.t("Kirim file butuh mode Apple Driver", "Sending files needs Apple Driver mode") : I18n.t("Belum ada HP Android yang di-mirror", "No Android phone is being mirrored");
+                    text: root.drop-ok ? I18n.t("Drop to send to the device") : root.drop-apple ? I18n.t("Sending files needs Apple Driver mode") : I18n.t("No Android phone is being mirrored");
                     font-size: 16px;
                     font-weight: 700;
                     color: Theme.text;
@@ -3399,9 +3379,9 @@ export component AppWindow inherits Window {
                 }
                 Text {
                     text: root.drop-apple
-                        ? (root.drop-ok ? I18n.t("Lalu pilih app tujuan di iPhone/iPad (mis. VLC, Documents). File juga terlihat di app Files › Di iPhone Saya.", "Then pick the app on the iPhone/iPad (e.g. VLC, Documents). The file also shows in Files › On My iPhone.")
-                                        : I18n.t("ZenLink Studio mengganti driver USB Apple, jadi tidak bisa kirim file. Ganti ke Apple Driver di Pengaturan.", "ZenLink Studio replaces Apple's USB driver, so it cannot send files. Switch to Apple Driver in Settings."))
-                        : root.drop-ok ? I18n.t("File .apk dipasang. File lain masuk ke folder Download di HP.", "An .apk file is installed. Other files go to the phone's Download folder.") : I18n.t("Mulai mirroring HP Android, lalu tarik file ke sini.", "Start mirroring an Android phone, then drop files here.");
+                        ? (root.drop-ok ? I18n.t("Then pick the app on the iPhone/iPad (e.g. VLC, Documents). The file also shows in Files › On My iPhone.")
+                                        : I18n.t("ZenLink Studio replaces Apple's USB driver, so it cannot send files. Switch to Apple Driver in Settings."))
+                        : root.drop-ok ? I18n.t("An .apk file is installed. Other files go to the phone's Download folder.") : I18n.t("Start mirroring an Android phone, then drop files here.");
                     font-size: 12px;
                     color: Theme.text-2;
                     horizontal-alignment: center;

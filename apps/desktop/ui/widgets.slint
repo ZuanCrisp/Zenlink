@@ -465,8 +465,8 @@ export component TrafficLights inherits HorizontalLayout {
             clicked => { Tip.shown = false; root.act(b.id); }
             changed has-hover => {
                 if self.has-hover {
-                    Tip.text = b.id == "min" ? I18n.t("Kecilkan", "Minimise") : b.id == "close" ? I18n.t("Tutup", "Close")
-                        : root.maximized ? I18n.t("Pulihkan", "Restore") : I18n.t("Perbesar", "Maximise");
+                    Tip.text = b.id == "min" ? I18n.t("Minimise") : b.id == "close" ? I18n.t("Close")
+                        : root.maximized ? I18n.t("Restore") : I18n.t("Maximise");
                     Tip.x = self.absolute-position.x + self.width / 2;
                     Tip.top = self.absolute-position.y;
                     Tip.bottom = self.absolute-position.y + self.height;

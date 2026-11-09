@@ -1,6 +1,8 @@
 #![windows_subsystem = "windows"]
 //! ZenLink (v2.5, generation "Next"): Rust shell (ADR-0001 Stage 1).
 
+#[macro_use]
+mod i18n;
 mod aac;
 mod airplay;
 mod android;
@@ -402,7 +404,7 @@ fn apply_look(ui: &AppWindow) {
     let glass_on = p.glass_on && level_on;
     ui.global::<Theme>()
         .set_glass(if glass_on { 1.0 - 0.75 * thick } else { 0.0 });
-    ui.global::<I18n>().set_id(p.lang.as_str() != "en");
+    set_lang(&ui.global::<I18n>(), p.lang.as_str());
     let glass_k = thick;
     // Square corners in full screen / maximised (rounded ones show the desktop).
     let full = is_full();
@@ -453,21 +455,14 @@ fn passcode_query(ui: &AppWindow, save: Option<String>) {
                     ui.set_passcode_set(s);
                     if save.is_some() {
                         let msg = if s {
-                            tr_ui(
-                                &ui,
-                                "Kode tersimpan (terenkripsi di PC ini)",
-                                "Passcode saved (encrypted on this PC)",
-                            )
+                            i18n::tr("Passcode saved (encrypted on this PC)")
                         } else {
-                            tr_ui(&ui, "Kode dihapus", "Passcode removed")
+                            i18n::tr("Passcode removed")
                         };
                         show_toast(&ui, msg);
                     }
                 }
-                None if save.is_some() => show_toast(
-                    &ui,
-                    tr_ui(&ui, "Gagal menyimpan kode", "Couldn't save the passcode"),
-                ),
+                None if save.is_some() => show_toast(&ui, i18n::tr("Couldn't save the passcode")),
                 None => APP.with_borrow_mut(|a| a.passcode_asked = false),
             }
         });
@@ -489,77 +484,46 @@ fn str_of<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
     cur.as_str()
 }
 
-fn tr_ui(ui: &AppWindow, id: &str, en: &str) -> String {
-    if ui.global::<I18n>().get_id() {
-        id.into()
+/// Loads language `code` and points a window's texts at it (each window has
+/// its own I18n global). An unknown code falls back to English.
+pub fn set_lang(g: &I18n, code: &str) {
+    let langs = i18n::languages();
+    let code = if langs.iter().any(|(c, _)| c == code) {
+        code
     } else {
-        en.into()
-    }
+        "en"
+    };
+    i18n::set(code);
+    let list = |f: fn(&(String, String)) -> &String| {
+        let v: Vec<slint::SharedString> = langs.iter().map(|l| f(l).into()).collect();
+        slint::ModelRc::new(slint::VecModel::from(v))
+    };
+    g.set_codes(list(|l| &l.0));
+    g.set_names(list(|l| &l.1));
+    g.on_lookup(|text, _lang, value| {
+        let s = i18n::tr(&text);
+        match (s.find('{'), s.find('}')) {
+            (Some(a), Some(b)) if !value.is_empty() && a < b => {
+                format!("{}{value}{}", &s[..a], &s[b + 1..])
+            }
+            _ => s,
+        }
+        .into()
+    });
+    g.set_lang(code.into());
 }
 
-/// Backend messages are English; show the common ones in Indonesian.
-fn tr_backend(ui: &AppWindow, en: &str) -> String {
-    if !ui.global::<I18n>().get_id() {
-        return en.into();
+/// Backend messages are English; the language file translates them.
+fn tr_backend(en: &str) -> String {
+    match en.strip_prefix("Wi-Fi setup failed: ") {
+        Some(reason) => trf!("Wi-Fi setup failed: {reason}", reason = reason),
+        None => i18n::tr(en),
     }
-    const MAP: &[(&str, &str)] = &[
-        ("Administrator permission was not given. Nothing was changed.", "Izin administrator tidak diberikan. Tidak ada yang diubah."),
-        ("The device was disconnected. Plug it back in and try again.", "Perangkat terputus. Colok lagi, lalu coba lagi."),
-        (
-            "Another app is using the device's screen (Xcode, QuickTime, TikTok LIVE Studio). Close it and try again.",
-            "Aplikasi lain sedang memakai layar perangkat (Xcode, QuickTime, TikTok LIVE Studio). Tutup dulu, lalu coba lagi.",
-        ),
-        ("Unlock the device and tap Trust, then try again.", "Buka kunci perangkat dan tekan Percayai (Trust), lalu coba lagi."),
-        ("Connect the device with the cable, unlock it and tap Trust first.", "Colokkan perangkat pakai kabel, buka kunci, lalu tekan Percayai (Trust) dulu."),
-        ("Wi-Fi is already set up.", "Wi-Fi sudah siap. Bisa tanpa kabel."),
-        ("Wi-Fi needs Apple Driver mode.", "Wi-Fi butuh mode Apple Driver."),
-        ("Stop casting first.", "Hentikan mirroring dulu."),
-        (
-            zenlink_apple::mirror::IN_CALL,
-            "iPhone/iPad sedang dalam panggilan (telepon atau video call). Akhiri panggilan dulu, lalu coba lagi.",
-        ),
-        ("Choose a connection mode first.", "Pilih mode koneksi dulu."),
-        ("Connect an iPhone or iPad with a USB cable.", "Colokkan iPhone atau iPad pakai kabel USB."),
-        (
-            "This device uses the ZenLink Studio driver, so Apple mode can't see it. Press Restore Apple driver in Settings > Connection & Drivers, or switch to ZenLink Studio.",
-            "Perangkat ini memakai driver ZenLink Studio, jadi mode Apple tidak bisa melihatnya. Tekan Kembalikan driver Apple di Pengaturan > Koneksi & driver, atau ganti ke ZenLink Studio.",
-        ),
-        (
-            "ZenLink Studio needs its driver on this device. Press Install ZenLink Studio driver in Settings > Connection & Drivers, or switch to Apple Driver mode.",
-            "ZenLink Studio butuh drivernya di perangkat ini. Tekan Pasang driver ZenLink Studio di Pengaturan > Koneksi & driver, atau ganti ke mode Apple Driver.",
-        ),
-        (
-            "A libusb0 filter is stacked on Apple's driver. Press Remove libusb0 filter in Settings > Connection & Drivers first.",
-            "Filter libusb0 menumpuk di driver Apple. Tekan Hapus filter libusb0 di Pengaturan > Koneksi & driver dulu.",
-        ),
-        (
-            "The ZenLink Studio driver is installed, but Windows hasn't attached it to the device yet. Unplug the cable and plug it in again (restart Windows if that doesn't help).",
-            "Driver ZenLink Studio sudah terpasang, tapi Windows belum memakainya untuk perangkat ini. Cabut lalu colok lagi kabelnya (restart Windows kalau belum berhasil).",
-        ),
-        (
-            "The USB Direct driver isn't installed for this device yet. Open Settings > Connection & Drivers and press Install USB Direct driver, then reconnect the cable.",
-            "Driver ZenLink Studio belum terpasang di perangkat ini. Buka Pengaturan > Koneksi & driver, tekan Pasang driver ZenLink Studio, lalu colok ulang kabelnya.",
-        ),
-        ("Stop casting before changing drivers.", "Hentikan mirroring dulu sebelum mengganti driver."),
-        ("Another driver change is running.", "Penggantian driver lain sedang berjalan."),
-        (
-            "The device isn't on Wi-Fi yet. Press Set up Wi-Fi in Settings with the cable connected, keep both on the same network, or switch to Wired.",
-            "Perangkat belum tersambung Wi-Fi. Tekan Atur Wi-Fi saat kabel tersambung, pastikan di jaringan yang sama, atau pilih Kabel.",
-        ),
-    ];
-    if let Some((_, id)) = MAP.iter().find(|(e, _)| *e == en) {
-        return (*id).into();
-    }
-    if let Some(rest) = en.strip_prefix("Wi-Fi setup failed: ") {
-        return format!("Wi-Fi gagal disiapkan: {rest}");
-    }
-    en.into()
 }
 
 /// The Apple device list: connected devices first, then devices trusted
 /// before that are not connected now. `current` is the one Start uses.
 fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
-    let tr = |id: &str, en: &str| tr_ui(ui, id, en);
     let mut rows = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for d in st
@@ -581,12 +545,12 @@ fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
         let need = str_of(d, &["need"]).unwrap_or("");
         let how = if wifi { "Wi-Fi" } else { "USB" };
         let status = match need {
-            "" if ready => tr("siap", "ready"),
-            "" | "trust" => tr("buka kunci + Percayai", "unlock + Trust"),
-            "wifi" => tr("Wi-Fi belum diatur", "Wi-Fi not set up"),
-            "mode" => tr("pilih mode", "choose a mode"),
-            "restore" => tr("driver ZenLink Studio", "ZenLink Studio driver"),
-            _ => tr("perlu driver", "needs a driver"),
+            "" if ready => i18n::tr("ready"),
+            "" | "trust" => i18n::tr("unlock + Trust"),
+            "wifi" => i18n::tr("Wi-Fi not set up"),
+            "mode" => i18n::tr("choose a mode"),
+            "restore" => i18n::tr("ZenLink Studio driver"),
+            _ => i18n::tr("needs a driver"),
         };
         let os = str_of(d, &["os"])
             .map(|v| format!(" · iOS {v}"))
@@ -627,20 +591,14 @@ fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
         let model = str_of(d, &["name"]).unwrap_or("iPhone/iPad");
         let title = str_of(d, &["deviceName"]).unwrap_or(model);
         let where_ = if ui.get_mode_link().as_str() == "wireless" {
-            tr("tidak terlihat di Wi-Fi", "not seen on Wi-Fi")
+            i18n::tr("not seen on Wi-Fi")
         } else {
-            tr("tidak tersambung", "not connected")
+            i18n::tr("not connected")
         };
         let sub = if title == model {
-            tr(
-                &format!("Tersimpan · {where_}"),
-                &format!("Saved · {where_}"),
-            )
+            trf!("Saved · {where_}", where_ = where_)
         } else {
-            tr(
-                &format!("{model} · tersimpan · {where_}"),
-                &format!("{model} · saved · {where_}"),
-            )
+            trf!("{model} · saved · {where_}", model = model, where_ = where_)
         };
         rows.push(AppleDev {
             id: id.into(),
@@ -693,13 +651,6 @@ pub fn cast_stop_all() {
 
 /// Backend state -> UI. Runs on the UI thread.
 fn on_state(ui: &AppWindow, st: &Value) {
-    let tr = |id: &str, en: &str| -> String {
-        if ui.global::<I18n>().get_id() {
-            id.into()
-        } else {
-            en.into()
-        }
-    };
     let phase = str_of(st, &["phase"]).unwrap_or("idle").to_string();
     // The backend starts the picked device when it is connected, otherwise
     // the first ready one; show that one.
@@ -736,7 +687,7 @@ fn on_state(ui: &AppWindow, st: &Value) {
         _ => String::new(),
     };
     let message = if phase == "error" {
-        tr_backend(ui, str_of(st, &["error"]).unwrap_or(""))
+        tr_backend(str_of(st, &["error"]).unwrap_or(""))
     } else {
         String::new()
     };
@@ -759,9 +710,9 @@ fn on_state(ui: &AppWindow, st: &Value) {
     ui.set_link(link.into());
     ui.set_message(message.into());
     let conn = match str_of(st, &["connection", "active"]) {
-        Some("apple") => tr("Apple Driver (Standar)", "Apple Driver (Standard)"),
+        Some("apple") => i18n::tr("Apple Driver (Standard)"),
         Some("usbdirect") => "ZenLink Studio".into(),
-        _ => tr("Belum dipilih", "Not chosen yet"),
+        _ => i18n::tr("Not chosen yet"),
     };
     ui.set_connection(conn.into());
     // Connection mode chooser: nothing connects until a mode is chosen.
@@ -829,26 +780,17 @@ fn on_state(ui: &AppWindow, st: &Value) {
             open_sheet(
                 ui,
                 "restart",
-                tr(
-                    "Mulai ulang untuk ganti mode",
-                    "Restart to switch the mode",
-                ),
-                tr(
-                    &format!("{name} dipakai setelah layanan ZenLink dimulai ulang. Mirroring yang berjalan akan berhenti."),
-                    &format!("{name} is used after the ZenLink service restarts. Mirroring that is running stops."),
-                ),
-                tr("Mulai ulang sekarang", "Restart now"),
-                tr("Nanti", "Later"),
+                i18n::tr("Restart to switch the mode"),
+                trf!("{name} is used after the ZenLink service restarts. Mirroring that is running stops.", name = name),
+                i18n::tr("Restart now"),
+                i18n::tr("Later"),
             );
         }
         ui.set_connection(
             format!(
                 "{} · {}",
                 ui.get_connection(),
-                tr(
-                    &format!("{name} aktif setelah restart app"),
-                    &format!("{name} after an app restart")
-                )
+                trf!("{name} after an app restart", name = name)
             )
             .into(),
         );
@@ -868,15 +810,15 @@ fn on_state(ui: &AppWindow, st: &Value) {
         format!(
             "Apple Mobile Device Service: {}\n{}: {}{checked}",
             if service {
-                tr("berjalan", "running")
+                i18n::tr("running")
             } else {
-                tr("tidak berjalan", "not running")
+                i18n::tr("not running")
             },
-            tr("Audio native", "Native audio"),
+            i18n::tr("Native audio"),
             if native_audio {
-                tr("tersedia", "available")
+                i18n::tr("available")
             } else {
-                tr("tidak tersedia", "not available")
+                i18n::tr("not available")
             },
         )
         .into(),
@@ -1199,8 +1141,7 @@ fn show_toast(ui: &AppWindow, text: String) {
 }
 
 /// "Check drivers" result, one line per device.
-fn drivers_summary(ui: &AppWindow, d: &Value) -> String {
-    let id = ui.global::<I18n>().get_id();
+fn drivers_summary(d: &Value) -> String {
     let mut lines = Vec::new();
     for dev in d
         .get("devices")
@@ -1215,29 +1156,13 @@ fn drivers_summary(ui: &AppWindow, d: &Value) -> String {
         let mode = match dev.get("mode").and_then(Value::as_str).unwrap_or("") {
             "apple" => "Apple Driver",
             "replaced" => "ZenLink Studio (libusb0)",
-            "coexist" => {
-                if id {
-                    "campuran, perlu diperbaiki"
-                } else {
-                    "mixed, needs repair"
-                }
-            }
-            _ => {
-                if id {
-                    "tidak dikenal"
-                } else {
-                    "unknown"
-                }
-            }
+            "coexist" => &i18n::tr("mixed, needs repair"),
+            _ => &i18n::tr("unknown"),
         };
         lines.push(format!("{fam}: {mode}"));
     }
     if lines.is_empty() {
-        lines.push(if id {
-            "Tidak ada iPhone/iPad di USB".into()
-        } else {
-            "No iPhone/iPad on USB".into()
-        });
+        lines.push(i18n::tr("No iPhone/iPad on USB"));
     }
     lines.join("\n")
 }
@@ -1257,14 +1182,10 @@ fn check_media_foundation(ui: &AppWindow) {
     open_sheet(
         ui,
         "mfp",
-        tr_ui(ui, "Media Feature Pack belum terpasang", "The Media Feature Pack is missing"),
-        tr_ui(
-            ui,
-            "Windows ini (edisi N atau KN) tidak punya komponen video Windows, jadi ZenLink tidak bisa menampilkan gambar. Pasang \"Media Feature Pack\" dari Microsoft (gratis): Settings › Apps › Optional features › View features › Media Feature Pack. Lalu restart PC.",
-            "This Windows (an N or KN edition) has no Windows video components, so ZenLink cannot show the picture. Add the free \"Media Feature Pack\" from Microsoft: Settings › Apps › Optional features › View features › Media Feature Pack. Then restart the PC.",
-        ),
-        tr_ui(ui, "Buka Optional features", "Open Optional features"),
-        tr_ui(ui, "Nanti", "Later"),
+        i18n::tr("The Media Feature Pack is missing"),
+        i18n::tr("This Windows (an N or KN edition) has no Windows video components, so ZenLink cannot show the picture. Add the free \"Media Feature Pack\" from Microsoft: Settings › Apps › Optional features › View features › Media Feature Pack. Then restart the PC."),
+        i18n::tr("Open Optional features"),
+        i18n::tr("Later"),
     );
 }
 
@@ -1283,41 +1204,25 @@ fn confirm_driver(ui: &AppWindow, action: &str) {
         ui.get_phase().as_str(),
         "connecting" | "activating" | "streaming"
     ) {
-        show_toast(
-            ui,
-            tr_ui(
-                ui,
-                "Hentikan mirroring dulu sebelum mengganti driver.",
-                "Stop casting before changing drivers.",
-            ),
-        );
+        show_toast(ui, i18n::tr("Stop casting before changing drivers."));
         return;
     }
     if APP.with_borrow(|a| a.drv_instance.is_none()) {
-        show_toast(
-            ui,
-            tr_ui(ui, "Colokkan perangkat dulu.", "Connect the device first."),
-        );
+        show_toast(ui, i18n::tr("Connect the device first."));
         return;
     }
     let (title, body) = match action {
         "restore" => (
-            tr_ui(ui, "Kembalikan driver Apple?", "Restore the Apple driver?"),
-            tr_ui(ui,
-                "Mode Apple Driver bisa melihat perangkat lagi. ZenLink Studio berhenti sampai drivernya dipasang lagi. Cadangan disimpan dulu. Windows akan minta izin administrator. Cabut lalu colok lagi kabelnya setelah selesai.",
-                "Apple Driver mode can see the device again. ZenLink Studio stops until its driver is installed again. A backup is saved first. Windows will ask for administrator permission. Unplug and reconnect the cable afterwards."),
+            i18n::tr("Restore the Apple driver?"),
+            i18n::tr("Apple Driver mode can see the device again. ZenLink Studio stops until its driver is installed again. A backup is saved first. Windows will ask for administrator permission. Unplug and reconnect the cable afterwards."),
         ),
         "bind" => (
-            tr_ui(ui, "Pasang driver ZenLink Studio?", "Install the ZenLink Studio driver?"),
-            tr_ui(ui,
-                "Seperti TikTok LIVE Studio, ZenLink memasang driver libusb-win32 untuk perangkat ini. Selama terpasang, mode Apple dan aplikasi Apple tidak melihat perangkat; tekan Kembalikan driver Apple untuk balik. Kalau belum ada paket driver untuk model ini, ZenLink membuatnya dan menandatanganinya dengan sertifikat baru bernama \"ZenLink ZenLink Studio\" yang ditambahkan ke sertifikat tepercaya Windows (kunci privatnya dihapus). Cadangan disimpan dulu, dan driver Apple dipasang lagi otomatis kalau perangkat gagal jalan. Windows akan minta izin administrator. Cabut lalu colok lagi kabelnya setelah selesai.",
-                "Like TikTok LIVE Studio, ZenLink installs the libusb-win32 driver for this device. While it is installed, Apple mode and Apple apps can't see the device; press Restore Apple driver to switch back. If there is no driver package for this model yet, ZenLink builds one and signs it with a new certificate named \"ZenLink ZenLink Studio\", added to Windows' trusted certificates (its private key is deleted). A backup is saved first, and Apple's driver comes back automatically if the device doesn't start. Windows will ask for administrator permission. Unplug and reconnect the cable afterwards."),
+            i18n::tr("Install the ZenLink Studio driver?"),
+            i18n::tr("Like TikTok LIVE Studio, ZenLink installs the libusb-win32 driver for this device. While it is installed, Apple mode and Apple apps can't see the device; press Restore Apple driver to switch back. If there is no driver package for this model yet, ZenLink builds one and signs it with a new certificate named \"ZenLink ZenLink Studio\", added to Windows' trusted certificates (its private key is deleted). A backup is saved first, and Apple's driver comes back automatically if the device doesn't start. Windows will ask for administrator permission. Unplug and reconnect the cable afterwards."),
         ),
         _ => (
-            tr_ui(ui, "Hapus filter libusb0?", "Remove the libusb0 filter?"),
-            tr_ui(ui,
-                "Filter ini menumpuk di driver Apple dan bisa membuat Windows crash. Driver Apple tetap ada. Cadangan disimpan dulu. Windows akan minta izin administrator.",
-                "It is stacked on Apple's driver, which can crash Windows. Apple's driver stays. A backup is saved first. Windows will ask for administrator permission."),
+            i18n::tr("Remove the libusb0 filter?"),
+            i18n::tr("It is stacked on Apple's driver, which can crash Windows. Apple's driver stays. A backup is saved first. Windows will ask for administrator permission."),
         ),
     };
     open_sheet(
@@ -1325,8 +1230,8 @@ fn confirm_driver(ui: &AppWindow, action: &str) {
         &format!("drv:{action}"),
         title,
         body,
-        tr_ui(ui, "Lanjut", "Continue"),
-        tr_ui(ui, "Batal", "Cancel"),
+        i18n::tr("Continue"),
+        i18n::tr("Cancel"),
     );
 }
 
@@ -1338,9 +1243,8 @@ fn run_driver(ui: &AppWindow, api: &Api, action: String) {
     open_sheet(
         ui,
         "busy",
-        tr_ui(ui, "Mengganti driver perangkat…", "Changing the device's driver…"),
-        tr_ui(ui, "Setujui izin Windows. Jendela PowerShell menampilkan tiap langkah; biarkan kabel tetap tercolok sampai selesai.",
-            "Approve the Windows permission prompt. A PowerShell window shows each step; keep the cable plugged in until it finishes."),
+        i18n::tr("Changing the device's driver…"),
+        i18n::tr("Approve the Windows permission prompt. A PowerShell window shows each step; keep the cable plugged in until it finishes."),
         String::new(),
         String::new(),
     );
@@ -1399,41 +1303,28 @@ fn run_driver(ui: &AppWindow, api: &Api, action: String) {
                 open_sheet(
                     &ui,
                     "restart",
-                    tr_ui(&ui, "Driver sudah diganti", "Driver changed"),
+                    i18n::tr("Driver changed"),
                     format!("{msg}
 
-{}", tr_ui(&ui,
-                        &format!("Layanan ZenLink perlu dimulai ulang untuk memakai mode {target}. Cabut lalu colok lagi kabelnya."),
-                        &format!("The ZenLink service needs a restart to use {target} mode. Unplug the cable and plug it in again."))),
-                    tr_ui(&ui, "Mulai ulang sekarang", "Restart now"),
-                    tr_ui(&ui, "Nanti", "Later"),
+{}", trf!("The ZenLink service needs a restart to use {target} mode. Unplug the cable and plug it in again.", target = target)),
+                    i18n::tr("Restart now"),
+                    i18n::tr("Later"),
                 );
             } else {
                 let body = if msg.is_empty() {
-                    tr_ui(
-                        &ui,
-                        "Backend tidak menjawab.",
-                        "The backend did not answer.",
-                    )
+                    i18n::tr("The backend did not answer.")
                 } else {
-                    tr_backend(&ui, &msg)
+                    tr_backend(&msg)
                 };
                 let body = if rolled {
-                    format!(
-                        "{body} {}",
-                        tr_ui(
-                            &ui,
-                            "Kondisi sebelumnya sudah dipulihkan.",
-                            "The previous state was restored."
-                        )
-                    )
+                    format!("{body} {}", i18n::tr("The previous state was restored."))
                 } else {
                     body
                 };
                 open_sheet(
                     &ui,
                     "info",
-                    tr_ui(&ui, "Driver tidak diubah", "Driver not changed"),
+                    i18n::tr("Driver not changed"),
                     body,
                     "OK".into(),
                     String::new(),
@@ -1673,50 +1564,26 @@ fn show_android(
     ui.set_android_count(list.len() as i32);
     ui.set_adb_missing(matches!(view, AdbView::NoAdb) || ADB_INSTALLING.load(Relaxed));
     let status = match view {
-        AdbView::NoAdb => tr_ui(ui, "adb belum terpasang.", "adb is not installed yet."),
-        AdbView::Starting => tr_ui(ui, "Menyalakan ADB…", "Starting ADB…"),
-        AdbView::NotRunning => tr_ui(
-            ui,
-            "ADB tidak mau menyala. Tutup aplikasi lain yang memakai ADB, lalu coba lagi.",
-            "ADB did not start. Close other apps that use ADB, then try again.",
-        ),
-        AdbView::Foreign => tr_ui(
-            ui,
-            "Port ADB 5037 dipakai program lain. ZenLink tidak mengubahnya.",
-            "ADB port 5037 is used by another program. ZenLink does not change it.",
-        ),
+        AdbView::NoAdb => i18n::tr("adb is not installed yet."),
+        AdbView::Starting => i18n::tr("Starting ADB…"),
+        AdbView::NotRunning => {
+            i18n::tr("ADB did not start. Close other apps that use ADB, then try again.")
+        }
+        AdbView::Foreign => {
+            i18n::tr("ADB port 5037 is used by another program. ZenLink does not change it.")
+        }
         AdbView::Running { version, other } => {
             let base = if list.is_empty() && phone_seen {
-                tr_ui(
-                    ui,
-                    "Windows melihat HP lewat USB, tapi ADB belum. Nyalakan Debugging USB (langkah di bawah), lalu cabut dan colok lagi kabelnya.",
-                    "Windows sees a phone on USB, but ADB does not yet. Turn on USB debugging (steps below), then unplug and plug the cable in again.",
-                )
+                i18n::tr("Windows sees a phone on USB, but ADB does not yet. Turn on USB debugging (steps below), then unplug and plug the cable in again.")
             } else if list.is_empty() {
-                tr_ui(
-                    ui,
-                    "Belum ada perangkat Android. Ikuti langkah di bawah.",
-                    "No Android device yet. Follow the steps below.",
-                )
+                i18n::tr("No Android device yet. Follow the steps below.")
             } else {
-                format!(
-                    "{} {}",
-                    list.len(),
-                    tr_ui(
-                        ui,
-                        "perangkat terlihat lewat ADB.",
-                        "device(s) seen through ADB."
-                    )
-                )
+                format!("{} {}", list.len(), i18n::tr("device(s) seen through ADB."))
             };
             if *other {
                 format!(
                     "{base} {}",
-                    tr_ui(
-                        ui,
-                        &format!("Server ADB versi {version} milik aplikasi lain sedang berjalan; ZenLink tidak menghentikannya."),
-                        &format!("Another app's ADB server (version {version}) is running; ZenLink does not stop it."),
-                    )
+                    trf!("Another app's ADB server (version {version}) is running; ZenLink does not stop it.", version = version)
                 )
             } else {
                 base
@@ -1728,41 +1595,29 @@ fn show_android(
         .iter()
         .map(|d| {
             let link = match d.primary.connection {
-                Connection::Usb => "USB",
-                Connection::WifiTcp { .. } | Connection::WifiTls { .. } => "Wi-Fi",
-                Connection::Emulator => tr_ui_static(ui, "Emulator", "Emulator"),
-                Connection::Unknown => "?",
+                Connection::Usb => "USB".to_string(),
+                Connection::WifiTcp { .. } | Connection::WifiTls { .. } => "Wi-Fi".to_string(),
+                Connection::Emulator => i18n::tr("Emulator"),
+                Connection::Unknown => "?".to_string(),
             };
             let state = match &d.readiness {
-                Readiness::Ready => tr_ui(ui, "Siap", "Ready"),
-                Readiness::NeedsAuthorization => {
-                    tr_ui(ui, "Ketuk Izinkan di HP", "Tap Allow on the phone")
+                Readiness::Ready => i18n::tr("Ready"),
+                Readiness::NeedsAuthorization => i18n::tr("Tap Allow on the phone"),
+                Readiness::Offline => i18n::tr("Offline, reconnect the cable"),
+                Readiness::NoPermission => i18n::tr("No USB permission or driver"),
+                Readiness::NotAndroidSystem => i18n::tr("Recovery or bootloader mode"),
+                Readiness::TooOld { sdk } => {
+                    trf!("Android too old (API {sdk}, needs 21+)", sdk = sdk)
                 }
-                Readiness::Offline => tr_ui(
-                    ui,
-                    "Offline, colok ulang kabel",
-                    "Offline, reconnect the cable",
-                ),
-                Readiness::NoPermission => tr_ui(
-                    ui,
-                    "Tidak ada izin/driver USB",
-                    "No USB permission or driver",
-                ),
-                Readiness::NotAndroidSystem => tr_ui(
-                    ui,
-                    "Mode recovery/bootloader",
-                    "Recovery or bootloader mode",
-                ),
-                Readiness::TooOld { sdk } => tr_ui(
-                    ui,
-                    &format!("Android terlalu lama (API {sdk}, perlu 21+)"),
-                    &format!("Android too old (API {sdk}, needs 21+)"),
-                ),
-                Readiness::Unknown => tr_ui(ui, "Membaca info perangkat…", "Reading device info…"),
+                Readiness::Unknown => i18n::tr("Reading device info…"),
             };
             let both_links = d.transports.iter().any(|t| t.connection == Connection::Usb)
                 && d.transports.iter().any(|t| t.connection.is_wireless());
-            let mut sub = vec![if both_links { "USB + Wi-Fi" } else { link }.to_string()];
+            let mut sub = vec![if both_links {
+                "USB + Wi-Fi".to_string()
+            } else {
+                link
+            }];
             if let Some(r) = &d.android_release {
                 sub.push(format!("Android {r}"));
             }
@@ -1985,7 +1840,7 @@ fn refresh_encoder_ui(ui: &AppWindow) {
         let hw = v.iter().filter(|e| e.accel == Accel::Hardware).count();
         let mut s = format!("{name}: {} ({hw} hw)", v.len());
         if c == "av1" || (c == "h265" && !hevc_ok()) {
-            s.push_str(&tr_ui(ui, ", tanpa decoder di PC", ", no PC decoder"));
+            s.push_str(&i18n::tr(", no PC decoder"));
         }
         parts.push(s);
     }
@@ -1999,10 +1854,7 @@ fn copy_screen_text(ui: &AppWindow) {
     static BUSY: AtomicBool = AtomicBool::new(false);
     let live = APP.with_borrow(|a| a.streaming || a.android_live);
     if !live {
-        show_toast(
-            ui,
-            tr_ui(ui, "Mulai mirroring dulu.", "Start mirroring first."),
-        );
+        show_toast(ui, i18n::tr("Start mirroring first."));
         return;
     }
     if BUSY.swap(true, Relaxed) {
@@ -2011,24 +1863,10 @@ fn copy_screen_text(ui: &AppWindow) {
     let shot = APP.with_borrow(|a| a.view.as_ref()?.snapshot(Duration::from_millis(400)));
     let Some(shot) = shot else {
         BUSY.store(false, Relaxed);
-        show_toast(
-            ui,
-            tr_ui(
-                ui,
-                "Belum ada gambar untuk dibaca.",
-                "No picture to read yet.",
-            ),
-        );
+        show_toast(ui, i18n::tr("No picture to read yet."));
         return;
     };
-    show_toast(
-        ui,
-        tr_ui(
-            ui,
-            "Membaca teks di layar…",
-            "Reading the text on the screen…",
-        ),
-    );
+    show_toast(ui, i18n::tr("Reading the text on the screen…"));
     let weak = ui.as_weak();
     std::thread::spawn(move || {
         let r = Some(
@@ -2063,39 +1901,19 @@ fn copy_screen_text(ui: &AppWindow) {
                     .unwrap_or(0)
             };
             let msg = if !ok {
-                tr_ui(
-                    &ui,
-                    "Gagal membaca teks (Windows OCR).",
-                    "Text recognition failed (Windows OCR).",
-                )
+                i18n::tr("Text recognition failed (Windows OCR).")
             } else if text.is_empty() {
-                tr_ui(
-                    &ui,
-                    "Tidak ada teks di layar.",
-                    "No text found on the screen.",
-                )
+                i18n::tr("No text found on the screen.")
             } else if !set_pc_clipboard_text(&text) {
-                tr_ui(
-                    &ui,
-                    "Teks terbaca, tapi Windows tidak mengizinkan menyalin ke clipboard.",
-                    "Text read, but Windows didn't allow copying it to the clipboard.",
-                )
+                i18n::tr("Text read, but Windows didn't allow copying it to the clipboard.")
             } else if num("added") == 0 {
-                tr_ui(
-                    &ui,
-                    "Tidak ada yang baru di layar ini; teks yang disalin tidak berubah.",
-                    "Nothing new on this screen; the copied text is unchanged.",
-                )
+                i18n::tr("Nothing new on this screen; the copied text is unchanged.")
             } else {
                 let (n, total) = (num("added"), num("total"));
-                tr_ui(
-                    &ui,
-                    &format!(
-                        "Disalin ke PC: {n} baris baru ({total} total). Alt+R mulai dari awal."
-                    ),
-                    &format!(
-                        "Copied to the PC: {n} new line(s) ({total} in total). Alt+R starts over."
-                    ),
+                trf!(
+                    "Copied to the PC: {n} new line(s) ({total} in total). Alt+R starts over.",
+                    n = n,
+                    total = total
                 )
             };
             show_toast(&ui, msg);
@@ -2233,7 +2051,7 @@ fn apps_show(ui: &AppWindow, filter: &str) {
             tint: app_tint(&a.package),
             name: a.name.clone().into(),
             sub: if a.system {
-                format!("{} · {}", a.package, tr_ui(ui, "sistem", "system"))
+                format!("{} · {}", a.package, i18n::tr("system"))
             } else {
                 a.package.clone()
             }
@@ -2241,21 +2059,17 @@ fn apps_show(ui: &AppWindow, filter: &str) {
         })
         .collect();
     let status = if total == 0 {
-        tr_ui(
-            ui,
-            "HP tidak memberi daftar app.",
-            "The phone listed no apps.",
-        )
+        i18n::tr("The phone listed no apps.")
     } else if shown.is_empty() {
-        tr_ui(ui, "Tidak ada app yang cocok.", "No app matches.")
+        i18n::tr("No app matches.")
     } else if shown.len() < total {
-        tr_ui(
-            ui,
-            &format!("{} dari {total} app. Ketik untuk mencari.", shown.len()),
-            &format!("{} of {total} apps. Type to search.", shown.len()),
+        trf!(
+            "{_0} of {total} apps. Type to search.",
+            _0 = shown.len(),
+            total = total
         )
     } else {
-        tr_ui(ui, &format!("{total} app."), &format!("{total} apps."))
+        trf!("{total} apps.", total = total)
     };
     ui.set_android_apps_status(status.into());
     ui.set_android_apps(std::rc::Rc::new(slint::VecModel::from(model)).into());
@@ -2270,25 +2084,11 @@ fn apps_open(ui: &AppWindow) {
     }
     // The phone being mirrored (set in android_start), on the link in use.
     let Some(d) = APP.with_borrow(|a| a.android.as_ref().and(a.apps_device.clone())) else {
-        show_toast(
-            ui,
-            tr_ui(
-                ui,
-                "Mulai mirroring HP Android dulu.",
-                "Start mirroring an Android phone first.",
-            ),
-        );
+        show_toast(ui, i18n::tr("Start mirroring an Android phone first."));
         return;
     };
     ui.set_android_apps_window_ok(d.sdk.unwrap_or(0) >= zenlink_android::apps::MIN_SDK_NEW_DISPLAY);
-    ui.set_android_apps_title(
-        tr_ui(
-            ui,
-            &format!("Aplikasi di {}", d.name.display),
-            &format!("Apps on {}", d.name.display),
-        )
-        .into(),
-    );
+    ui.set_android_apps_title(trf!("Apps on {_0}", _0 = d.name.display).into());
     ui.set_android_apps_open(true);
     let cached = APP.with_borrow_mut(|a| {
         a.apps_device = Some(d.clone());
@@ -2308,9 +2108,7 @@ fn apps_open(ui: &AppWindow) {
     };
     ui.set_android_apps_busy(true);
     ui.set_android_apps(std::rc::Rc::new(slint::VecModel::<AppRow>::default()).into());
-    ui.set_android_apps_status(
-        tr_ui(ui, "Membaca daftar app di HP…", "Reading the phone's apps…").into(),
-    );
+    ui.set_android_apps_status(i18n::tr("Reading the phone's apps…").into());
     let weak = ui.as_weak();
     std::thread::spawn(move || {
         let client = zenlink_android::adb::AdbClient::default();
@@ -2331,14 +2129,7 @@ fn apps_open(ui: &AppWindow) {
                 }
                 Err(e) => {
                     log::warn!("android: app list failed: {e}");
-                    ui.set_android_apps_status(
-                        tr_ui(
-                            &ui,
-                            &format!("Daftar app tidak terbaca: {e}"),
-                            &format!("Could not read the apps: {e}"),
-                        )
-                        .into(),
-                    );
+                    ui.set_android_apps_status(trf!("Could not read the apps: {e}", e = e).into());
                 }
             }
         });
@@ -2364,19 +2155,9 @@ fn apps_launch(ui: &AppWindow, index: i32, place: &str) {
                     app.package.clone(),
                 )]);
                 log::info!("android: start {} on the phone", app.package);
-                show_toast(
-                    ui,
-                    tr_ui(
-                        ui,
-                        &format!("Membuka {}…", app.name),
-                        &format!("Opening {}…", app.name),
-                    ),
-                );
+                show_toast(ui, trf!("Opening {_0}…", _0 = app.name));
             }
-            None => show_toast(
-                ui,
-                tr_ui(ui, "Kontrol HP belum siap.", "Phone control is not ready."),
-            ),
+            None => show_toast(ui, i18n::tr("Phone control is not ready.")),
         }
         return;
     }
@@ -2389,24 +2170,10 @@ fn apps_launch(ui: &AppWindow, index: i32, place: &str) {
         screen: false,
     };
     match appwin::spawn(&args) {
-        Ok(_) => show_toast(
-            ui,
-            tr_ui(
-                ui,
-                &format!("Membuka {}…", app.name),
-                &format!("Opening {}…", app.name),
-            ),
-        ),
+        Ok(_) => show_toast(ui, trf!("Opening {_0}…", _0 = app.name)),
         Err(e) => {
             log::warn!("android: app window failed: {e}");
-            show_toast(
-                ui,
-                tr_ui(
-                    ui,
-                    &format!("Jendela app gagal dibuka: {e}"),
-                    &format!("The app window did not open: {e}"),
-                ),
-            );
+            show_toast(ui, trf!("The app window did not open: {e}", e = e));
         }
     }
 }
@@ -2423,16 +2190,11 @@ fn scrcpy_server() -> Result<Arc<Vec<u8>>, String> {
 /// Runs one Wi-Fi step on a worker thread (the ADB calls block for
 /// seconds) and shows its message. `Ok` is a success message.
 /// Shows the current step of a Wi-Fi job under the device list.
-type Step<'a> = &'a dyn Fn(&'static str, &'static str);
+type Step<'a> = &'a dyn Fn(String);
 
 fn android_wifi_job(
     ui: &AppWindow,
-    job: impl FnOnce(
-            Step,
-        )
-            -> Result<(&'static str, &'static str, String), (&'static str, &'static str, String)>
-        + Send
-        + 'static,
+    job: impl FnOnce(Step) -> Result<(String, String), (String, String)> + Send + 'static,
 ) {
     if ui.get_android_wifi_busy() {
         return;
@@ -2442,11 +2204,10 @@ fn android_wifi_job(
     let weak = ui.as_weak();
     std::thread::spawn(move || {
         let w = weak.clone();
-        let step = move |id: &'static str, en: &'static str| {
+        let step = move |s: String| {
             let w = w.clone();
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = w.upgrade() {
-                    let s = tr_ui(&ui, id, en);
                     ui.set_android_wifi_status(s.into());
                 }
             });
@@ -2456,7 +2217,7 @@ fn android_wifi_job(
             let Some(ui) = weak.upgrade() else { return };
             ui.set_android_wifi_busy(false);
             ui.set_android_wifi_status("".into());
-            let ((id, en, detail), _ok) = match r {
+            let ((msg, detail), _ok) = match r {
                 Ok(m) => (m, true),
                 Err(m) => (m, false),
             };
@@ -2465,7 +2226,7 @@ fn android_wifi_job(
             } else {
                 format!(" ({detail})")
             };
-            show_toast(&ui, format!("{}{tail}", tr_ui(&ui, id, en)));
+            show_toast(&ui, format!("{msg}{tail}"));
         });
     });
 }
@@ -2481,47 +2242,24 @@ fn android_wifi_device(ui: &AppWindow, index: i32) {
     android_wifi_job(ui, move |step| {
         let c = AdbClient::default();
         let serial = d.primary.serial.clone();
-        step(
-            "1/3 · Membaca alamat Wi-Fi HP…",
-            "1/3 · Reading the phone's Wi-Fi address…",
-        );
+        step(i18n::tr("1/3 · Reading the phone's Wi-Fi address…"));
         let target = match d.primary.transport_id {
             Some(id) => Target::TransportId(id),
             None => Target::Serial(&serial),
         };
         let ip = match c.wifi_address(&target) {
             Ok(Some(ip)) => ip,
-            Ok(None) => {
-                return Err((
-                    "HP belum tersambung ke Wi-Fi",
-                    "The phone is not on Wi-Fi",
-                    String::new(),
-                ))
-            }
-            Err(e) => {
-                return Err((
-                    "Gagal membaca alamat Wi-Fi",
-                    "Couldn't read the Wi-Fi address",
-                    e.to_string(),
-                ))
-            }
+            Ok(None) => return Err((i18n::tr("The phone is not on Wi-Fi"), String::new())),
+            Err(e) => return Err((i18n::tr("Couldn't read the Wi-Fi address"), e.to_string())),
         };
-        step(
-            "2/3 · Menyalakan mode Wi-Fi ADB di HP (layar HP bisa berkedip)…",
+        step(i18n::tr(
             "2/3 · Turning on ADB over Wi-Fi on the phone (its screen may flicker)…",
-        );
+        ));
         if let Err(e) = c.tcpip(&target, TCPIP_PORT) {
-            return Err((
-                "Gagal mengaktifkan mode TCP/IP",
-                "Couldn't turn on TCP/IP mode",
-                e.to_string(),
-            ));
+            return Err((i18n::tr("Couldn't turn on TCP/IP mode"), e.to_string()));
         }
         // adbd restarts on the phone; give it a moment, then retry.
-        step(
-            "3/3 · Menyambung lewat Wi-Fi…",
-            "3/3 · Connecting over Wi-Fi…",
-        );
+        step(i18n::tr("3/3 · Connecting over Wi-Fi…"));
         let mut last = String::new();
         for _ in 0..4 {
             std::thread::sleep(Duration::from_millis(1200));
@@ -2529,8 +2267,7 @@ fn android_wifi_device(ui: &AppWindow, index: i32) {
                 Ok(Reply::Ok(_)) => {
                     log::info!("android: Wi-Fi connected to {ip}:{TCPIP_PORT}");
                     return Ok((
-                        "Tersambung lewat Wi-Fi. Kabel boleh dicabut",
-                        "Connected over Wi-Fi. You can unplug the cable",
+                        i18n::tr("Connected over Wi-Fi. You can unplug the cable"),
                         format!("{ip}:{TCPIP_PORT}"),
                     ));
                 }
@@ -2540,8 +2277,9 @@ fn android_wifi_device(ui: &AppWindow, index: i32) {
         }
         log::warn!("android: Wi-Fi connect to {ip} failed: {last}");
         Err((
-            "Gagal tersambung lewat Wi-Fi. PC dan HP harus di jaringan yang sama",
-            "Couldn't connect over Wi-Fi. The PC and the phone must be on the same network",
+            i18n::tr(
+                "Couldn't connect over Wi-Fi. The PC and the phone must be on the same network",
+            ),
             last,
         ))
     });
@@ -2552,29 +2290,15 @@ fn android_wifi_connect(ui: &AppWindow, addr: String) {
     use zenlink_android::adb::AdbClient;
     use zenlink_android::wireless::{parse_endpoint, Reply};
     let Some((host, port)) = parse_endpoint(&addr) else {
-        show_toast(
-            ui,
-            tr_ui(
-                ui,
-                "Alamat tidak valid. Contoh: 192.168.1.20:37099",
-                "Invalid address. Example: 192.168.1.20:37099",
-            ),
-        );
+        show_toast(ui, i18n::tr("Invalid address. Example: 192.168.1.20:37099"));
         return;
     };
     android_wifi_job(ui, move |step| {
-        step(
-            "Menyambung ke HP lewat Wi-Fi…",
-            "Connecting to the phone over Wi-Fi…",
-        );
+        step(i18n::tr("Connecting to the phone over Wi-Fi…"));
         match AdbClient::default().connect_device(&host, port) {
-            Ok(Reply::Ok(_)) => Ok((
-                "Tersambung lewat Wi-Fi",
-                "Connected over Wi-Fi",
-                format!("{host}:{port}"),
-            )),
-            Ok(Reply::Failed(m)) => Err(("Gagal tersambung", "Couldn't connect", m)),
-            Err(e) => Err(("Gagal tersambung", "Couldn't connect", e.to_string())),
+            Ok(Reply::Ok(_)) => Ok((i18n::tr("Connected over Wi-Fi"), format!("{host}:{port}"))),
+            Ok(Reply::Failed(m)) => Err((i18n::tr("Couldn't connect"), m)),
+            Err(e) => Err((i18n::tr("Couldn't connect"), e.to_string())),
         }
     });
 }
@@ -2586,35 +2310,20 @@ fn android_wifi_pair(ui: &AppWindow, addr: String, code: String) {
     let Some((host, port)) = parse_endpoint(&addr) else {
         show_toast(
             ui,
-            tr_ui(
-                ui,
-                "Isi alamat pairing (IP:port) yang tampil di HP.",
-                "Enter the pairing address (IP:port) shown on the phone.",
-            ),
+            i18n::tr("Enter the pairing address (IP:port) shown on the phone."),
         );
         return;
     };
     if !valid_pair_code(&code) {
-        show_toast(
-            ui,
-            tr_ui(
-                ui,
-                "Kode pairing harus 6 digit.",
-                "The pairing code has 6 digits.",
-            ),
-        );
+        show_toast(ui, i18n::tr("The pairing code has 6 digits."));
         return;
     }
     android_wifi_job(ui, move |step| {
-        step("Pairing dengan HP…", "Pairing with the phone…");
+        step(i18n::tr("Pairing with the phone…"));
         match AdbClient::default().pair(&host, port, &code) {
-        Ok(Reply::Ok(_)) => Ok((
-            "Pairing berhasil. Sekarang isi alamat di layar Wireless debugging lalu tekan Sambung",
-            "Paired. Now enter the address on the Wireless debugging screen and press Connect",
-            String::new(),
-        )),
-        Ok(Reply::Failed(m)) => Err(("Pairing gagal", "Pairing failed", m)),
-        Err(e) => Err(("Pairing gagal", "Pairing failed", e.to_string())),
+        Ok(Reply::Ok(_)) => Ok((i18n::tr("Paired. Now enter the address on the Wireless debugging screen and press Connect"), String::new())),
+        Ok(Reply::Failed(m)) => Err((i18n::tr("Pairing failed"), m)),
+        Err(e) => Err((i18n::tr("Pairing failed"), e.to_string())),
     }
     });
 }
@@ -2661,18 +2370,11 @@ fn android_wifi_qr(ui: &AppWindow) {
         return;
     };
     ui.set_android_qr(qr_image(&qr));
-    ui.set_android_qr_status(
-        tr_ui(
-            ui,
-            "Menunggu HP memindai…",
-            "Waiting for the phone to scan…",
-        )
-        .into(),
-    );
+    ui.set_android_qr_status(i18n::tr("Waiting for the phone to scan…").into());
     ui.set_android_qr_on(true);
     let weak = ui.as_weak();
     // Status line (and a toast when the attempt ends) for this attempt only.
-    let report = move |id: &'static str, en: &'static str, detail: String, end: bool| {
+    let report = move |text: String, detail: String, end: bool| {
         let weak = weak.clone();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(ui) = weak.upgrade() else { return };
@@ -2684,7 +2386,7 @@ fn android_wifi_qr(ui: &AppWindow) {
             } else {
                 format!(" ({detail})")
             };
-            let msg = format!("{}{tail}", tr_ui(&ui, id, en));
+            let msg = format!("{text}{tail}");
             if end {
                 ui.set_android_qr_on(false);
                 show_toast(&ui, msg);
@@ -2716,31 +2418,16 @@ fn android_wifi_qr(ui: &AppWindow) {
             std::thread::sleep(Duration::from_millis(800));
         };
         let Some(svc) = found else {
-            report(
-                "QR tidak dipindai dalam 2 menit. Coba lagi, atau pakai kode pairing",
-                "The QR code was not scanned within 2 minutes. Try again, or use a pairing code",
-                last_err,
-                true,
-            );
+            report(i18n::tr("The QR code was not scanned within 2 minutes. Try again, or use a pairing code"), last_err, true);
             return;
         };
-        report(
-            "HP ditemukan, pairing…",
-            "Phone found, pairing…",
-            String::new(),
-            false,
-        );
+        report(i18n::tr("Phone found, pairing…"), String::new(), false);
         match c.pair(&svc.host, svc.port, &password) {
             Ok(Reply::Ok(_)) => {}
-            Ok(Reply::Failed(m)) => return report("Pairing gagal", "Pairing failed", m, true),
-            Err(e) => return report("Pairing gagal", "Pairing failed", e.to_string(), true),
+            Ok(Reply::Failed(m)) => return report(i18n::tr("Pairing failed"), m, true),
+            Err(e) => return report(i18n::tr("Pairing failed"), e.to_string(), true),
         }
-        report(
-            "Pairing berhasil, menyambung…",
-            "Paired, connecting…",
-            String::new(),
-            false,
-        );
+        report(i18n::tr("Paired, connecting…"), String::new(), false);
         // The connect service may be announced a moment after pairing.
         let t1 = Instant::now();
         while live() && t1.elapsed() < Duration::from_secs(30) {
@@ -2749,18 +2436,13 @@ fn android_wifi_qr(ui: &AppWindow) {
                     match c.connect_device(&s.host, s.port) {
                         Ok(Reply::Ok(_)) => {
                             return report(
-                                "Tersambung lewat Wi-Fi",
-                                "Connected over Wi-Fi",
+                                i18n::tr("Connected over Wi-Fi"),
                                 format!("{}:{}", s.host, s.port),
                                 true,
                             )
                         }
-                        Ok(Reply::Failed(m)) => {
-                            return report("Sambung gagal", "Connect failed", m, true)
-                        }
-                        Err(e) => {
-                            return report("Sambung gagal", "Connect failed", e.to_string(), true)
-                        }
+                        Ok(Reply::Failed(m)) => return report(i18n::tr("Connect failed"), m, true),
+                        Err(e) => return report(i18n::tr("Connect failed"), e.to_string(), true),
                     }
                 }
             }
@@ -2768,8 +2450,9 @@ fn android_wifi_qr(ui: &AppWindow) {
         }
         if live() {
             report(
-                "Pairing berhasil. Isi alamat di layar Wireless debugging lalu tekan Sambung",
-                "Paired. Enter the address on the Wireless debugging screen and press Connect",
+                i18n::tr(
+                    "Paired. Enter the address on the Wireless debugging screen and press Connect",
+                ),
                 String::new(),
                 true,
             );
@@ -2787,7 +2470,7 @@ fn android_start(ui: &AppWindow, index: i32) {
     {
         (
             Box::new(android::FixtureSource::new(f.into(), shared.clone())),
-            tr_ui(ui, "Rekaman uji", "Test recording"),
+            i18n::tr("Test recording"),
         )
     } else {
         let dev = APP.with_borrow(|a| {
@@ -2819,14 +2502,7 @@ fn android_start(ui: &AppWindow, index: i32) {
             d
         });
         let Some(d) = dev else {
-            show_toast(
-                ui,
-                tr_ui(
-                    ui,
-                    "Belum ada perangkat Android yang siap.",
-                    "No Android device is ready yet.",
-                ),
-            );
+            show_toast(ui, i18n::tr("No Android device is ready yet."));
             return;
         };
         let server = match scrcpy_server() {
@@ -2834,10 +2510,9 @@ fn android_start(ui: &AppWindow, index: i32) {
             Err(e) => {
                 log::warn!("android: {e}");
                 ui.set_android_message(
-                    tr_ui(
-                        ui,
-                        &format!("File server scrcpy tidak ada ({e}). Pasang ulang ZenLink."),
-                        &format!("The scrcpy server file is missing ({e}). Reinstall ZenLink."),
+                    trf!(
+                        "The scrcpy server file is missing ({e}). Reinstall ZenLink.",
+                        e = e
                     )
                     .into(),
                 );
@@ -2927,8 +2602,8 @@ fn rail_refresh(ui: &AppWindow) {
         };
         let word = match state {
             "live" => "Live".to_string(),
-            "ready" => tr_ui(ui, "Siap", "Ready"),
-            _ => tr_ui(ui, "Perlu izin", "Needs attention"),
+            "ready" => i18n::tr("Ready"),
+            _ => i18n::tr("Needs attention"),
         };
         rows.push(RailDev {
             kind: "android".into(),
@@ -3072,14 +2747,7 @@ fn files_show_selected(ui: &AppWindow) -> bool {
             true
         }
         None => {
-            show_toast(
-                ui,
-                tr_ui(
-                    ui,
-                    "Pilih HP Android yang siap dulu.",
-                    "Pick a ready Android phone first.",
-                ),
-            );
+            show_toast(ui, i18n::tr("Pick a ready Android phone first."));
             false
         }
     }
@@ -3119,14 +2787,7 @@ fn rail_pop(ui: &AppWindow, i: i32) {
         Ok(c) => c,
         Err(e) => {
             log::warn!("android: window failed: {e}");
-            show_toast(
-                ui,
-                tr_ui(
-                    ui,
-                    &format!("Jendela gagal dibuka: {e}"),
-                    &format!("The window did not open: {e}"),
-                ),
-            );
+            show_toast(ui, trf!("The window did not open: {e}", e = e));
             return;
         }
     };
@@ -3226,16 +2887,8 @@ fn android_tick(ui: &AppWindow) {
     rail_refresh(ui);
     ui.set_android_link(link.into());
     let message = match st.phase {
-        android::Phase::Error => tr_ui(
-            ui,
-            &format!("Mirroring gagal: {}. Cabut-colok kabel atau ketuk Izinkan di HP, lalu Mulai lagi.", st.error),
-            &format!("Mirroring failed: {}. Reconnect the cable or tap Allow on the phone, then Start again.", st.error),
-        ),
-        android::Phase::Connecting if !st.error.is_empty() => tr_ui(
-            ui,
-            &format!("Mencoba lagi… ({})", st.error),
-            &format!("Retrying… ({})", st.error),
-        ),
+        android::Phase::Error => trf!("Mirroring failed: {_0}. Reconnect the cable or tap Allow on the phone, then Start again.", _0 = st.error),
+        android::Phase::Connecting if !st.error.is_empty() => trf!("Retrying… ({_0})", _0 = st.error),
         _ => String::new(),
     };
     ui.set_android_message(message.into());
@@ -3277,28 +2930,16 @@ fn run_shortcut(
     let need_apple = || {
         show_toast(
             ui,
-            tr_ui(
-                ui,
-                "Shortcut ini butuh mode Apple Driver saat mirroring.",
-                "This shortcut needs Apple Driver mode while mirroring.",
-            ),
+            i18n::tr("This shortcut needs Apple Driver mode while mirroring."),
         );
     };
     match s {
         Shortcut::Mute => {
             ui.invoke_action("mute".into());
             let msg = if ui.get_muted() {
-                tr_ui(
-                    ui,
-                    "Suara di PC: mati (Alt+M)",
-                    "Sound on the PC: off (Alt+M)",
-                )
+                i18n::tr("Sound on the PC: off (Alt+M)")
             } else {
-                tr_ui(
-                    ui,
-                    "Suara di PC: nyala (Alt+M)",
-                    "Sound on the PC: on (Alt+M)",
-                )
+                i18n::tr("Sound on the PC: on (Alt+M)")
             };
             show_toast(ui, msg);
         }
@@ -3315,14 +2956,7 @@ fn run_shortcut(
             } else {
                 format!("{r}°")
             };
-            show_toast(
-                ui,
-                tr_ui(
-                    ui,
-                    &format!("Rotasi: {label}"),
-                    &format!("Rotation: {label}"),
-                ),
-            );
+            show_toast(ui, trf!("Rotation: {label}", label = label));
         }
         Shortcut::Back => ui.invoke_action(
             if android_screen {
@@ -3338,11 +2972,7 @@ fn run_shortcut(
             ocr::clear();
             show_toast(
                 ui,
-                tr_ui(
-                    ui,
-                    "Riwayat teks dihapus. Alt+C berikutnya mulai dari awal.",
-                    "Copy history cleared. The next Alt+C starts fresh.",
-                ),
+                i18n::tr("Copy history cleared. The next Alt+C starts fresh."),
             );
         }
         Shortcut::Android(a) => ui.invoke_action(a.into()),
@@ -3351,23 +2981,9 @@ fn run_shortcut(
             Some(t) => {
                 let n = t.chars().count();
                 input.send(Cmd::TypeText(t));
-                show_toast(
-                    ui,
-                    tr_ui(
-                        ui,
-                        &format!("Mengetik {n} karakter di perangkat."),
-                        &format!("Typing {n} characters on the device."),
-                    ),
-                );
+                show_toast(ui, trf!("Typing {n} characters on the device.", n = n));
             }
-            None => show_toast(
-                ui,
-                tr_ui(
-                    ui,
-                    "Clipboard PC tidak berisi teks.",
-                    "The PC clipboard has no text.",
-                ),
-            ),
+            None => show_toast(ui, i18n::tr("The PC clipboard has no text.")),
         },
         Shortcut::Apple(a) => input.send(Cmd::Action(a)),
     }
@@ -3405,32 +3021,18 @@ fn android_session_ok(ui: &AppWindow, st: &android::Status, using: &str) {
     if st.fell_back {
         show_toast(
             ui,
-            tr_ui(
-                ui,
-                &format!(
-                    "Encoder pilihan gagal, sekarang pakai {using}. Pilihanmu tetap disimpan."
-                ),
-                &format!("The chosen encoder failed; now using {using}. Your choice is kept."),
+            trf!(
+                "The chosen encoder failed; now using {using}. Your choice is kept.",
+                using = using
             ),
         );
     }
 }
 
-fn tr_ui_static(ui: &AppWindow, id: &'static str, en: &'static str) -> &'static str {
-    if ui.global::<I18n>().get_id() {
-        id
-    } else {
-        en
-    }
-}
-
 /// Tray menu words in the UI language.
-fn tray_labels(p: &Prefs) -> (&'static str, &'static str) {
-    if p.lang.as_str() == "en" {
-        ("Open ZenLink", "Quit")
-    } else {
-        ("Buka ZenLink", "Keluar")
-    }
+fn tray_labels(p: &Prefs) -> (String, String) {
+    i18n::set(p.lang.as_str()); // prefs_changed asks before apply_prefs runs
+    (i18n::tr("Open ZenLink"), i18n::tr("Quit"))
 }
 
 /// "Close to the tray": hide the window, keep the session (sound keeps
@@ -3441,7 +3043,7 @@ fn hide_to_tray(ui: &AppWindow) {
         // A one-off "Minimize to tray" from the close dialog needs the icon too.
         let p = ui.get_prefs();
         let (open, quit) = tray_labels(&p);
-        tray::set_icon(true, open, quit);
+        tray::set_icon(true, &open, &quit);
         let _ = unsafe { ShowWindow(h, SW_HIDE) };
         tray::HIDDEN.store(true, Relaxed);
     }
@@ -3467,7 +3069,7 @@ fn show_window(ui: &AppWindow) {
         tray::HIDDEN.store(false, Relaxed);
         let p = ui.get_prefs();
         let (open, quit) = tray_labels(&p);
-        tray::set_icon(p.close_action == "tray", open, quit);
+        tray::set_icon(p.close_action == "tray", &open, &quit);
     }
 }
 
@@ -3533,7 +3135,7 @@ fn update_check(ui: &AppWindow, manual: bool) {
     let channel = update_channel(&ui.get_prefs());
     update_clear(ui);
     ui.set_upd_busy(true);
-    ui.set_upd_status(tr_ui(ui, "Memeriksa pembaruan…", "Checking for updates…").into());
+    ui.set_upd_status(i18n::tr("Checking for updates…").into());
     let weak = ui.as_weak();
     std::thread::spawn(move || {
         let r = updater::check(channel);
@@ -3543,14 +3145,7 @@ fn update_check(ui: &AppWindow, manual: bool) {
             match r {
                 Ok(Offer::UpToDate) => {
                     log::info!("update: up to date ({channel:?})");
-                    ui.set_upd_status(
-                        tr_ui(
-                            &ui,
-                            "ZenLink sudah versi terbaru.",
-                            "ZenLink is up to date.",
-                        )
-                        .into(),
-                    );
+                    ui.set_upd_status(i18n::tr("ZenLink is up to date.").into());
                 }
                 Ok(offer) => {
                     let (rel, switch) = match offer {
@@ -3561,28 +3156,16 @@ fn update_check(ui: &AppWindow, manual: bool) {
                     log::info!("update: offer {} (switch {switch})", rel.tag);
                     let v = rel.version.to_string();
                     let status = if switch {
-                        tr_ui(
-                            &ui,
-                            &format!("Edisi lain: v{v}. Terpasang sebagai aplikasi terpisah, pengaturan tidak ikut pindah."),
-                            &format!("Other edition: v{v}. Installs as a separate app; settings do not move over."),
-                        )
+                        trf!("Other edition: v{v}. Installs as a separate app; settings do not move over.", v = v)
                     } else {
-                        tr_ui(
-                            &ui,
-                            &format!("Versi baru tersedia: v{v}"),
-                            &format!("New version available: v{v}"),
-                        )
+                        trf!("New version available: v{v}", v = v)
                     };
                     ui.set_upd_status(status.into());
                     ui.set_upd_notes(zenlink_core::update::short_notes(&rel.notes, 360).into());
                     ui.set_upd_version(v.clone().into());
                     ui.set_upd_switch(switch);
                     if !manual && !switch {
-                        let t = tr_ui(
-                            &ui,
-                            &format!("ZenLink v{v} tersedia. Buka Pengaturan › Pembaruan."),
-                            &format!("ZenLink v{v} is available. Open Settings › Updates."),
-                        );
+                        let t = trf!("ZenLink v{v} is available. Open Settings › Updates.", v = v);
                         show_toast(&ui, t);
                     }
                     UPDATE_OFFER.with_borrow_mut(|o| *o = Some((rel, switch)));
@@ -3590,14 +3173,7 @@ fn update_check(ui: &AppWindow, manual: bool) {
                 Err(e) => {
                     log::warn!("update: check failed: {e}");
                     if manual {
-                        ui.set_upd_status(
-                            tr_ui(
-                                &ui,
-                                &format!("Tidak bisa memeriksa: {e}"),
-                                &format!("Could not check: {e}"),
-                            )
-                            .into(),
-                        );
+                        ui.set_upd_status(trf!("Could not check: {e}", e = e).into());
                     } else {
                         ui.set_upd_status("".into());
                     }
@@ -3633,20 +3209,13 @@ fn update_install(ui: &AppWindow) {
     let dest = match updater::download_path(kind, &asset) {
         Ok(d) => d,
         Err(e) => {
-            ui.set_upd_status(tr_ui(ui, &format!("Gagal: {e}"), &format!("Failed: {e}")).into());
+            ui.set_upd_status(trf!("Failed: {e}", e = e).into());
             return;
         }
     };
     ui.set_upd_busy(true);
     ui.set_upd_progress(0.0);
-    ui.set_upd_status(
-        tr_ui(
-            ui,
-            &format!("Mengunduh {}…", asset.name),
-            &format!("Downloading {}…", asset.name),
-        )
-        .into(),
-    );
+    ui.set_upd_status(trf!("Downloading {_0}…", _0 = asset.name).into());
     let weak = ui.as_weak();
     std::thread::spawn(move || {
         let w = weak.clone();
@@ -3677,14 +3246,7 @@ fn update_install(ui: &AppWindow) {
             ui.set_upd_progress(-1.0);
             match r {
                 Ok(()) if switch => {
-                    ui.set_upd_status(
-                        tr_ui(
-                            &ui,
-                            "Penginstal edisi lain sudah dibuka.",
-                            "The other edition's installer is open.",
-                        )
-                        .into(),
-                    );
+                    ui.set_upd_status(i18n::tr("The other edition's installer is open.").into());
                 }
                 Ok(()) => {
                     log::info!("update: started {}, quitting", rel.tag);
@@ -3692,14 +3254,7 @@ fn update_install(ui: &AppWindow) {
                 }
                 Err(e) => {
                     log::warn!("update: {e}");
-                    ui.set_upd_status(
-                        tr_ui(
-                            &ui,
-                            &format!("Pembaruan gagal: {e}"),
-                            &format!("Update failed: {e}"),
-                        )
-                        .into(),
-                    );
+                    ui.set_upd_status(trf!("Update failed: {e}", e = e).into());
                 }
             }
         });
@@ -3762,7 +3317,7 @@ fn main() -> Result<(), slint::PlatformError> {
         });
         let p = ui.get_prefs();
         let (open, quit) = tray_labels(&p);
-        tray::set_icon(p.close_action == "tray", open, quit);
+        tray::set_icon(p.close_action == "tray", &open, &quit);
         if !test_mode && !updater::is_store() {
             // Keeps the Run entry pointing at this exe (a moved Portable.exe).
             // The Store edition starts with Windows through its StartupTask
@@ -3881,11 +3436,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 .find(|d| d.id == id)
                 .map(|d| (d.state == "offline", d.title.to_string()));
             if let Some((true, name)) = offline {
-                let t = tr_ui(
-                    &ui,
-                    &format!("{name} belum tersambung. Colokkan kabel (atau sambungkan ke Wi-Fi yang sama), buka kunci, lalu tekan Mulai."),
-                    &format!("{name} is not connected. Plug in the cable (or join the same Wi-Fi), unlock it, then press Start."),
-                );
+                let t = trf!("{name} is not connected. Plug in the cable (or join the same Wi-Fi), unlock it, then press Start.", name = name);
                 show_toast(&ui, t);
             }
             let a = api2.clone();
@@ -3907,14 +3458,7 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_allow_network(move || {
             let weak = weak.clone();
             if let Some(ui) = weak.upgrade() {
-                ui.set_firewall_msg(
-                    tr_ui(
-                        &ui,
-                        "Menunggu izin administrator…",
-                        "Waiting for administrator permission…",
-                    )
-                    .into(),
-                );
+                ui.set_firewall_msg(i18n::tr("Waiting for administrator permission…").into());
             }
             std::thread::spawn(move || {
                 let r = drivers::allow_network();
@@ -3925,7 +3469,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             ui.set_firewall_blocked(false);
                             String::new()
                         }
-                        Err(e) => tr_backend(&ui, &e),
+                        Err(e) => tr_backend(&e),
                     };
                     ui.set_firewall_msg(msg.into());
                 });
@@ -3972,14 +3516,7 @@ fn main() -> Result<(), slint::PlatformError> {
             } else if let Some(action) = kind.strip_prefix("drv:") {
                 run_driver(&ui, &api, action.to_string());
             } else if kind == "restart" {
-                show_toast(
-                    &ui,
-                    tr_ui(
-                        &ui,
-                        "Memulai ulang layanan ZenLink…",
-                        "Restarting the ZenLink service…",
-                    ),
-                );
+                show_toast(&ui, i18n::tr("Restarting the ZenLink service…"));
                 let api = api.clone();
                 std::thread::spawn(move || api.post_slow("/api/app/restart", &json!({}), 20));
             }
@@ -3997,10 +3534,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         ui.on_restart(move || {
             if let Some(ui) = weak.upgrade() {
-                show_toast(
-                    &ui,
-                    tr_ui(&ui, "Memulai ulang koneksi…", "Restarting the connection…"),
-                );
+                show_toast(&ui, i18n::tr("Restarting the connection…"));
             }
             let a = api.clone();
             std::thread::spawn(move || {
@@ -4046,8 +3580,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let (open, quit) = tray_labels(&p);
             tray::set_icon(
                 p.close_action == "tray" || tray::HIDDEN.load(Relaxed),
-                open,
-                quit,
+                &open,
+                &quit,
             );
             let android_changed = devprofiles::picture_of(&p)
                 != devprofiles::picture_of(&last.borrow())
@@ -4080,14 +3614,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 });
                 if restart {
                     let i = APP.with_borrow(|a| a.android_index);
-                    show_toast(
-                        &ui,
-                        tr_ui(
-                            &ui,
-                            "Menerapkan pengaturan Android…",
-                            "Applying the Android settings…",
-                        ),
-                    );
+                    show_toast(&ui, i18n::tr("Applying the Android settings…"));
                     android_start(&ui, i);
                 }
                 // Only picture settings refit the window. Any other setting
@@ -4278,7 +3805,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             ui.set_adb_error(
                                 format!(
                                     "{} ({e})",
-                                    tr_ui(&ui, "Gagal memasang adb. Cek internet lalu coba lagi.", "Could not install adb. Check the internet connection and try again.")
+                                    i18n::tr("Could not install adb. Check the internet connection and try again.")
                                 )
                                 .into(),
                             );
@@ -4405,10 +3932,7 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.on_android_restart(move || {
             if let Some(ui) = weak.upgrade() {
                 let i = APP.with_borrow(|a| a.android_index);
-                show_toast(
-                    &ui,
-                    tr_ui(&ui, "Memulai ulang koneksi…", "Restarting the connection…"),
-                );
+                show_toast(&ui, i18n::tr("Restarting the connection…"));
                 android_start(&ui, i);
             }
         });
@@ -4566,14 +4090,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         a.mode_sent = (!failed).then(Instant::now);
                     });
                     if failed {
-                        show_toast(
-                            &ui,
-                            tr_ui(
-                                &ui,
-                                "Mode belum tersimpan, coba lagi.",
-                                "The mode was not saved, try again.",
-                            ),
-                        );
+                        show_toast(&ui, i18n::tr("The mode was not saved, try again."));
                         open_chooser(&ui);
                     }
                 });
@@ -4594,9 +4111,9 @@ fn main() -> Result<(), slint::PlatformError> {
             show_toast(
                 &ui,
                 if link.as_str() == "wireless" {
-                    tr_ui(&ui, "Beralih ke Wi-Fi…", "Switching to Wi-Fi…")
+                    i18n::tr("Switching to Wi-Fi…")
                 } else {
-                    tr_ui(&ui, "Beralih ke kabel…", "Switching to the cable…")
+                    i18n::tr("Switching to the cable…")
                 },
             );
             let (api, w) = (api.clone(), weak.clone());
@@ -4610,11 +4127,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         if !ok {
                             show_toast(
                                 &ui,
-                                tr_ui(
-                                    &ui,
-                                    "Sambungan belum bisa diganti, coba lagi.",
-                                    "The connection could not be changed, try again.",
-                                ),
+                                i18n::tr("The connection could not be changed, try again."),
                             );
                         }
                     }
@@ -4704,9 +4217,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 show_toast(
                     &ui,
                     if a.as_str() == "wifi" {
-                        tr_ui(&ui, "Menyiapkan Wi-Fi…", "Setting up Wi-Fi…")
+                        i18n::tr("Setting up Wi-Fi…")
                     } else {
-                        tr_ui(&ui, "Memeriksa driver…", "Checking drivers…")
+                        i18n::tr("Checking drivers…")
                     },
                 );
             }
@@ -4721,14 +4234,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let _ = slint::invoke_from_event_loop(move || {
                     let Some(ui) = w.upgrade() else { return };
                     let Some(r) = r else {
-                        show_toast(
-                            &ui,
-                            tr_ui(
-                                &ui,
-                                "Backend tidak menjawab.",
-                                "The backend did not answer.",
-                            ),
-                        );
+                        show_toast(&ui, i18n::tr("The backend did not answer."));
                         return;
                     };
                     if a == "wifi" {
@@ -4736,30 +4242,19 @@ fn main() -> Result<(), slint::PlatformError> {
                         let msg = r
                             .get("message")
                             .and_then(Value::as_str)
-                            .map(|m| tr_backend(&ui, m))
+                            .map(|m| tr_backend(m))
                             .unwrap_or_else(|| {
                                 if ok {
-                                    tr_ui(
-                                        &ui,
-                                        "Wi-Fi siap. Sekarang bisa tanpa kabel.",
-                                        "Wi-Fi is ready. You can unplug the cable.",
-                                    )
+                                    i18n::tr("Wi-Fi is ready. You can unplug the cable.")
                                 } else {
-                                    tr_ui(
-                                        &ui,
-                                        "Wi-Fi belum bisa disiapkan.",
-                                        "Wi-Fi could not be set up.",
-                                    )
+                                    i18n::tr("Wi-Fi could not be set up.")
                                 }
                             });
                         show_toast(&ui, msg);
                     } else {
-                        let t = drivers_summary(&ui, &r);
+                        let t = drivers_summary(&r);
                         APP.with_borrow_mut(|x| x.drivers_text = Some(t));
-                        show_toast(
-                            &ui,
-                            tr_ui(&ui, "Driver sudah diperiksa.", "Drivers checked."),
-                        );
+                        show_toast(&ui, i18n::tr("Drivers checked."));
                     }
                 });
             });
@@ -4967,7 +4462,7 @@ fn main() -> Result<(), slint::PlatformError> {
             });
             if unlock && ui.get_phase().as_str() == "streaming" {
                 input.send(Cmd::Action("wake"));
-                show_toast(&ui, tr_ui(&ui, "Membuka kunci perangkat…", "Unlocking the device…"));
+                show_toast(&ui, i18n::tr("Unlocking the device…"));
             }
             APP.with_borrow_mut(|a| {
                 if a.view.is_none() {
@@ -5269,11 +4764,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     } else if let Some(t) = a.live_since.filter(|t| streaming && !on_android && t.elapsed() > Duration::from_secs(10)) {
                         a.live_since = None;
                         log::warn!("apple: no picture {:.0} s after streaming started (decoded {:.1} fps, hardware {})", t.elapsed().as_secs_f32(), s.decoded_fps, s.hardware);
-                        let msg = tr_ui_static(
-                            &ui,
-                            "Belum ada gambar dari iPhone/iPad. Buka kunci perangkat lalu tekan Mulai ulang. Kalau tetap kosong, kirim log (Pengaturan › Tentang › Buka folder log).",
-                            "No picture from the iPhone/iPad yet. Unlock the device and press Restart. If it stays empty, send the logs (Settings › About › Open log folder).",
-                        );
+                        let msg = i18n::tr("No picture from the iPhone/iPad yet. Unlock the device and press Restart. If it stays empty, send the logs (Settings › About › Open log folder).");
                         show_toast(&ui, msg.to_string());
                     }
                     if streaming && s.width > 0 && std::env::var_os("ZL_STATS_LOG").is_some() {
@@ -5287,7 +4778,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             .as_ref()
                             .filter(|_| on_android)
                             .and_then(|sh| sh.audio_ms())
-                            .map(|ms| format!("  ·  {} {ms} ms", tr_ui_static(&ui, "suara", "sound")))
+                            .map(|ms| format!("  ·  {} {ms} ms", i18n::tr("sound")))
                             .unwrap_or_default();
                         ui.set_stats_line(format!("{}×{}  ·  {:.0} fps  ·  {:.1} Mbps  ·  decode {:.1} ms{sound}", s.width, s.height, s.presented_fps.min(s.decoded_fps), s.mbps, s.decode_ms).into());
                         ui.set_stats_full(

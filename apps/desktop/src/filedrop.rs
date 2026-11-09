@@ -13,7 +13,7 @@ use slint::ComponentHandle;
 use zenlink_android::adb::{AdbClient, Target};
 use zenlink_android::files::{self, Installed, Kind};
 
-use crate::{show_toast, tr_ui, AppWindow, APP};
+use crate::{i18n, show_toast, AppWindow, APP};
 
 /// One dropped file and the phone it goes to.
 struct Job {
@@ -37,27 +37,24 @@ fn queue(ui: &AppWindow) -> &'static Mutex<Sender<Job>> {
     })
 }
 
-/// Sets the pill from any thread: `both` is "Indonesian|English" (empty
-/// hides it), `progress` 0..1.
-fn pill(weak: &slint::Weak<AppWindow>, both: &str, progress: f32) {
-    let (id, en) = both.split_once('|').unwrap_or((both, both));
-    let (id, en) = (id.to_string(), en.to_string());
+/// Sets the pill from any thread: `text` (empty hides it), `progress` 0..1.
+fn pill(weak: &slint::Weak<AppWindow>, text: &str, progress: f32) {
+    let text = text.to_string();
     let w = weak.clone();
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(ui) = w.upgrade() {
-            ui.set_transfer(tr_ui(&ui, &id, &en).into());
+            ui.set_transfer(text.into());
             ui.set_transfer_p(progress);
         }
     });
 }
 
-fn finished(weak: &slint::Weak<AppWindow>, id: String, en: String) {
+fn finished(weak: &slint::Weak<AppWindow>, t: String) {
     let w = weak.clone();
     let _ = slint::invoke_from_event_loop(move || {
         if let Some(ui) = w.upgrade() {
             ui.set_transfer("".into());
             ui.set_transfer_p(-1.0);
-            let t = tr_ui(&ui, &id, &en);
             show_toast(&ui, t);
         }
     });
@@ -72,8 +69,8 @@ fn run(weak: &slint::Weak<AppWindow>, job: Job) {
     let size = std::fs::metadata(&job.path).map(|m| m.len()).unwrap_or(0);
     let kind = files::kind(&job.path);
     let start = match kind {
-        Kind::Install => format!("Memasang {name}…|Installing {name}…"),
-        Kind::Copy => format!("Mengirim {name}…|Sending {name}…"),
+        Kind::Install => trf!("Installing {name}…", name = name),
+        Kind::Copy => trf!("Sending {name}…", name = name),
     };
     pill(weak, &start, 0.0);
     let client = AdbClient::default();
@@ -101,17 +98,16 @@ fn run(weak: &slint::Weak<AppWindow>, job: Job) {
                 );
                 finished(
                     weak,
-                    format!("Tersimpan di {device} › Download: {saved}"),
-                    format!("Saved on {device} › Download: {saved}"),
+                    trf!(
+                        "Saved on {device} › Download: {saved}",
+                        device = device,
+                        saved = saved
+                    ),
                 );
             }
             Err(e) => {
                 log::warn!("drop: {} failed: {e}", job.path.display());
-                finished(
-                    weak,
-                    format!("Gagal mengirim {name}: {e}"),
-                    format!("Could not send {name}: {e}"),
-                );
+                finished(weak, trf!("Could not send {name}: {e}", name = name, e = e));
             }
         },
         Kind::Install => {
@@ -126,24 +122,25 @@ fn run(weak: &slint::Weak<AppWindow>, job: Job) {
                     );
                     finished(
                         weak,
-                        format!("{name} terpasang di {device}."),
-                        format!("{name} is installed on {device}."),
+                        trf!(
+                            "{name} is installed on {device}.",
+                            name = name,
+                            device = device
+                        ),
                     );
                 }
                 Ok(Installed::Failed(why)) => {
                     log::warn!("drop: install {} failed: {why}", job.path.display());
                     finished(
                         weak,
-                        format!("{name} tidak terpasang: {why}"),
-                        format!("{name} was not installed: {why}"),
+                        trf!("{name} was not installed: {why}", name = name, why = why),
                     );
                 }
                 Err(e) => {
                     log::warn!("drop: install {} failed: {e}", job.path.display());
                     finished(
                         weak,
-                        format!("{name} tidak terpasang: {e}"),
-                        format!("{name} was not installed: {e}"),
+                        trf!("{name} was not installed: {e}", name = name, e = e),
                     );
                 }
             }
@@ -211,23 +208,12 @@ fn drop_file(ui: &AppWindow, path: PathBuf) {
     let Some((serial, transport_id, device)) = phone() else {
         show_toast(
             ui,
-            tr_ui(
-                ui,
-                "Mulai mirroring HP Android dulu, lalu tarik file ke sini.",
-                "Start mirroring an Android phone first, then drop the file here.",
-            ),
+            i18n::tr("Start mirroring an Android phone first, then drop the file here."),
         );
         return;
     };
     if !path.is_file() {
-        show_toast(
-            ui,
-            tr_ui(
-                ui,
-                "Folder belum bisa dikirim: pilih file-nya.",
-                "Folders cannot be sent yet: drop the files.",
-            ),
-        );
+        show_toast(ui, i18n::tr("Folders cannot be sent yet: drop the files."));
         return;
     }
     let _ = queue(ui).lock().unwrap().send(Job {
@@ -264,7 +250,7 @@ mod ios {
     use slint::ComponentHandle;
 
     use super::pill;
-    use crate::{app_letters, app_tint, show_toast, tr_ui, AppRow, AppWindow};
+    use crate::{app_letters, app_tint, i18n, show_toast, AppRow, AppWindow};
 
     thread_local! {
         /// Files waiting for the user to pick an app.
@@ -313,46 +299,27 @@ mod ios {
 
     fn set_title(ui: &AppWindow) {
         let n = PENDING.with_borrow(Vec::len);
-        let t = tr_ui(
-            ui,
-            &format!("Kirim {n} file ke app di iPhone/iPad"),
-            &format!("Send {n} file(s) to an app on the iPhone/iPad"),
-        );
+        let t = trf!("Send {n} file(s) to an app on the iPhone/iPad", n = n);
         ui.set_files_title(t.into());
     }
 
-    fn list_error(ui: &AppWindow, m: Option<String>) -> String {
+    fn list_error(m: Option<String>) -> String {
         if let Some(m) = m {
             return m;
         }
-        tr_ui(
-            ui,
-            "Daftar app iPhone/iPad tidak terbaca. Pastikan perangkat tersambung di mode Apple Driver dan sudah dipercaya (Trust).",
-            "Could not read the iPhone/iPad apps. Check that the device is connected in Apple Driver mode and trusted.",
-        )
+        i18n::tr("Could not read the iPhone/iPad apps. Check that the device is connected in Apple Driver mode and trusted.")
     }
 
     pub fn dropped(ui: &AppWindow, path: PathBuf) {
         if ui.get_mode_active().as_str() != "apple" {
             show_toast(
                 ui,
-                tr_ui(
-                    ui,
-                    "Kirim file ke iPhone/iPad butuh mode Apple Driver (ZenLink Studio tidak bisa).",
-                    "Sending files to an iPhone/iPad needs Apple Driver mode (ZenLink Studio cannot).",
-                ),
+                i18n::tr("Sending files to an iPhone/iPad needs Apple Driver mode (ZenLink Studio cannot)."),
             );
             return;
         }
         if !path.is_file() {
-            show_toast(
-                ui,
-                tr_ui(
-                    ui,
-                    "Folder belum bisa dikirim: pilih file-nya.",
-                    "Folders cannot be sent yet: drop the files.",
-                ),
-            );
+            show_toast(ui, i18n::tr("Folders cannot be sent yet: drop the files."));
             return;
         }
         let first = PENDING.with_borrow_mut(|p| {
@@ -366,14 +333,7 @@ mod ios {
         ui.set_files_open(true);
         ui.set_files_busy(true);
         ui.set_files_apps(std::rc::Rc::new(slint::VecModel::<AppRow>::default()).into());
-        ui.set_files_status(
-            tr_ui(
-                ui,
-                "Membaca app di iPhone/iPad…",
-                "Reading the iPhone/iPad apps…",
-            )
-            .into(),
-        );
+        ui.set_files_status(i18n::tr("Reading the iPhone/iPad apps…").into());
         let weak = ui.as_weak();
         std::thread::spawn(move || {
             let r = list_apps();
@@ -383,7 +343,7 @@ mod ios {
                 let apps = match r {
                     Ok(a) => a,
                     Err(m) => {
-                        let m = list_error(&ui, m);
+                        let m = list_error(m);
                         ui.set_files_status(m.into());
                         return;
                     }
@@ -398,15 +358,9 @@ mod ios {
                     })
                     .collect();
                 let status = if rows.is_empty() {
-                    tr_ui(
-                        &ui,
-                        "Tidak ada app yang menerima file (File Sharing). Pasang mis. VLC atau Documents dari App Store.",
-                        "No app accepts files (File Sharing). Install e.g. VLC or Documents from the App Store.",
-                    )
+                    i18n::tr("No app accepts files (File Sharing). Install e.g. VLC or Documents from the App Store.")
                 } else {
-                    tr_ui(
-                        &ui,
-                        "Pilih app: file masuk ke folder app itu dan terlihat di app Files › Di iPhone Saya.",
+                    i18n::tr(
                         "Pick an app: the files go to its folder and show in Files › On My iPhone.",
                     )
                 };
@@ -440,8 +394,12 @@ mod ios {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
                 let k = i + 1;
-                let label = format!(
-                    "Mengirim {name} ke {app} ({k}/{total})…|Sending {name} to {app} ({k}/{total})…"
+                let label = trf!(
+                    "Sending {name} to {app} ({k}/{total})…",
+                    name = name,
+                    app = app,
+                    k = k,
+                    total = total
                 );
                 pill(&weak, &label, 0.0);
                 match send(path, &bundle, |p| pill(&weak, &label, p)) {
@@ -450,20 +408,23 @@ mod ios {
                 }
             }
             pill(&weak, "", -1.0);
-            let (id, en) = if sent == total {
-                (
-                    format!("{sent} file terkirim ke {app}. Buka app {app} atau Files › Di iPhone Saya."),
-                    format!("{sent} file(s) sent to {app}. Open {app} or Files › On My iPhone."),
+            let t = if sent == total {
+                trf!(
+                    "{sent} file(s) sent to {app}. Open {app} or Files › On My iPhone.",
+                    sent = sent,
+                    app = app
                 )
             } else {
-                (
-                    format!("{sent} dari {total} file terkirim ke {app}. {last_error}"),
-                    format!("{sent} of {total} file(s) sent to {app}. {last_error}"),
+                trf!(
+                    "{sent} of {total} file(s) sent to {app}. {last_error}",
+                    sent = sent,
+                    total = total,
+                    app = app,
+                    last_error = last_error
                 )
             };
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = weak.upgrade() {
-                    let t = tr_ui(&ui, &id, &en);
                     show_toast(&ui, t);
                 }
             });

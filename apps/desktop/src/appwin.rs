@@ -318,7 +318,7 @@ fn tick(ui: &AppWin, a: &AppArgs) {
             ui.set_phase(ui_phase.into());
             if st.phase == android::Phase::Error {
                 log::warn!("app window: {}", st.error);
-                ui.set_message(error_text(ui, &st.error, a.screen).into());
+                ui.set_message(error_text(&st.error, a.screen).into());
             }
         }
     }
@@ -359,29 +359,21 @@ fn tick(ui: &AppWin, a: &AppArgs) {
     });
 }
 
-/// A short bilingual reason for the window, from the session's English error.
-fn error_text(ui: &AppWin, e: &str, screen: bool) -> String {
-    let id = ui.global::<I18n>().get_id();
+/// A short reason for the window, from the session's English error.
+fn error_text(e: &str, screen: bool) -> String {
     let low = e.to_lowercase();
     if low.contains("device") && (low.contains("not found") || low.contains("offline")) {
-        return if id {
-            "HP tidak tersambung lagi. Sambungkan lagi, lalu Coba lagi.".into()
-        } else {
-            "The phone is no longer connected. Connect it again, then Try again.".into()
-        };
+        return crate::i18n::tr(
+            "The phone is no longer connected. Connect it again, then Try again.",
+        );
     }
     if screen {
-        return if id {
-            format!("Layar HP tidak bisa ditampilkan: {e}")
-        } else {
-            format!("The phone's screen could not be shown: {e}")
-        };
+        return trf!("The phone's screen could not be shown: {e}", e = e);
     }
-    if id {
-        format!("App tidak bisa dibuka di layar virtual (Android 10+): {e}")
-    } else {
-        format!("The app could not open on a virtual display (Android 10+): {e}")
-    }
+    trf!(
+        "The app could not open on a virtual display (Android 10+): {e}",
+        e = e
+    )
 }
 
 /// Runs the app window until it is closed.
@@ -414,7 +406,7 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
     ui.global::<Theme>()
         .set_glass(if glass_on { 1.0 - 0.75 * thick } else { 0.0 });
     ui.global::<Theme>().set_icons(crate::icon_font().into());
-    ui.global::<I18n>().set_id(p.lang.as_str() != "en");
+    crate::set_lang(&ui.global::<I18n>(), p.lang.as_str());
     ui.set_app_name(a.name.clone().into());
     ui.set_device(a.device.clone().into());
     ui.set_screen(a.screen);

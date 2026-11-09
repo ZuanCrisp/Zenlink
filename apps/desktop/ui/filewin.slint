@@ -109,8 +109,8 @@ export component FilePane inherits Glass {
             HorizontalLayout {
                 padding: 10px;
                 spacing: 8px;
-                GlassButton { icon: "\u{E74A}"; tip: I18n.t("Folder atas", "Up one folder"); enabled: Files.path != "/" && Files.path != "/sdcard"; clicked => { Files.up(); } }
-                GlassButton { icon: "\u{E72C}"; tip: I18n.t("Muat ulang", "Refresh"); clicked => { Files.refresh(); } }
+                GlassButton { icon: "\u{E74A}"; tip: I18n.t("Up one folder"); enabled: Files.path != "/" && Files.path != "/sdcard"; clicked => { Files.up(); } }
+                GlassButton { icon: "\u{E72C}"; tip: I18n.t("Refresh"); clicked => { Files.refresh(); } }
                 Rectangle {
                     horizontal-stretch: 1;
                     border-radius: 16px;
@@ -127,21 +127,21 @@ export component FilePane inherits Glass {
                         }
                     }
                 }
-                GlassButton { icon: "\u{E8F4}"; label: I18n.t("Folder baru", "New folder"); clicked => { root.ask-folder = true; } }
+                GlassButton { icon: "\u{E8F4}"; label: I18n.t("New folder"); clicked => { root.ask-folder = true; } }
                 GlassButton {
                     primary: true;
                     icon: "\u{E896}";
-                    label: I18n.t("Salin ke PC", "Copy to PC");
+                    label: I18n.t("Copy to PC");
                     enabled: Files.selected >= 0 && Files.selected < Files.rows.length && !Files.rows[Files.selected].dir;
                     clicked => { Files.copy-to-pc(Files.selected); }
                 }
                 GlassButton {
                     icon: "\u{E74D}";
-                    tip: I18n.t("Hapus", "Delete");
+                    tip: I18n.t("Delete");
                     enabled: Files.selected >= 0 && Files.selected < Files.rows.length;
                     clicked => { root.confirm-delete = true; }
                 }
-                GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup file", "Close files"); clicked => { root.close(); } }
+                GlassButton { icon: "\u{E711}"; tip: I18n.t("Close files"); clicked => { root.close(); } }
             }
             Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
         }
@@ -173,7 +173,7 @@ export component FilePane inherits Glass {
                             spacing: 8px;
                             Icon { width: 18px; text: p.icon; font-size: 14px; color: Files.path == p.path ? Theme.accent : Theme.text-2; }
                             Text {
-                                text: p.label;
+                                text: I18n.t(p.label);
                                 font-size: 12.5px;
                                 color: Files.path == p.path ? Theme.accent : Theme.text;
                                 vertical-alignment: center;
@@ -195,10 +195,10 @@ export component FilePane inherits Glass {
                             if Files.hidden-files: Icon { text: "\u{E73E}"; font-size: 10px; color: Theme.btn-text; }
                             TouchArea { clicked => { Files.show-hidden(!Files.hidden-files); } }
                         }
-                        Text { text: I18n.t("File tersembunyi", "Hidden files"); font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
+                        Text { text: I18n.t("Hidden files"); font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
                     }
                     Rectangle { height: 6px; }
-                    GlassButton { icon: "\u{E8B7}"; label: I18n.t("Folder unduhan PC", "PC download folder"); clicked => { Files.open-downloads(); } }
+                    GlassButton { icon: "\u{E8B7}"; label: I18n.t("PC download folder"); clicked => { Files.open-downloads(); } }
                 }
                 }
                 Rectangle { x: parent.width - 1px; width: 1px; background: Theme.line; }
@@ -224,9 +224,9 @@ export component FilePane inherits Glass {
                     padding: 24px;
                     spacing: 8px;
                     Text {
-                        text: Files.phase == "loading" ? I18n.t("Membaca folderâ€¦", "Reading the folderâ€¦")
+                        text: Files.phase == "loading" ? I18n.t("Reading the folderâ€¦")
                             : Files.phase == "error" ? Files.message
-                            : I18n.t("Folder ini kosong. Tarik file dari Explorer ke sini untuk mengirimnya ke HP.", "This folder is empty. Drag files from Explorer here to send them to the phone.");
+                            : I18n.t("This folder is empty. Drag files from Explorer here to send them to the phone.");
                         font-size: 12.5px;
                         color: Files.phase == "error" ? Theme.warn : Theme.text-2;
                         horizontal-alignment: center;
@@ -246,7 +246,7 @@ export component FilePane inherits Glass {
                 if !Files.busy: Text {
                     horizontal-stretch: 1;
                     text: Files.notice != "" ? Files.notice
-                        : I18n.t("Klik dua kali folder untuk membuka, file untuk menyalin ke PC. Tarik file dari Explorer untuk mengirim ke folder ini.", "Double-click a folder to open it, a file to copy it to the PC. Drag files from Explorer to send them to this folder.");
+                        : I18n.t("Double-click a folder to open it, a file to copy it to the PC. Drag files from Explorer to send them to this folder.");
                     font-size: 11.5px;
                     color: Theme.text-2;
                     vertical-alignment: center;
@@ -288,7 +288,7 @@ export component FilePane inherits Glass {
                         horizontal-alignment: right;
                         vertical-alignment: center;
                     }
-                    GlassButton { icon: "\u{E711}"; label: I18n.t("Batal", "Cancel"); clicked => { Files.cancel-job(); } }
+                    GlassButton { icon: "\u{E711}"; label: I18n.t("Cancel"); clicked => { Files.cancel-job(); } }
                 }
             }
         }
@@ -308,14 +308,14 @@ export component FilePane inherits Glass {
                 padding: 18px;
                 spacing: 12px;
                 if root.confirm-delete: Text {
-                    text: I18n.t("Hapus \"", "Delete \"") + (Files.selected >= 0 && Files.selected < Files.rows.length ? Files.rows[Files.selected].name : "")
-                        + I18n.t("\" dari HP? Tidak bisa dibatalkan.", "\" from the phone? This cannot be undone.");
+                    text: I18n.t("Delete \"") + (Files.selected >= 0 && Files.selected < Files.rows.length ? Files.rows[Files.selected].name : "")
+                        + I18n.t("\" from the phone? This cannot be undone.");
                     font-size: 12.5px;
                     color: Theme.text;
                     wrap: word-wrap;
                 }
                 if root.ask-folder: Text {
-                    text: I18n.t("Nama folder baru", "New folder name");
+                    text: I18n.t("New folder name");
                     font-size: 12.5px;
                     color: Theme.text;
                 }
@@ -338,16 +338,16 @@ export component FilePane inherits Glass {
                 HorizontalLayout {
                     alignment: end;
                     spacing: 8px;
-                    GlassButton { label: I18n.t("Batal", "Cancel"); clicked => { root.confirm-delete = false; root.ask-folder = false; } }
+                    GlassButton { label: I18n.t("Cancel"); clicked => { root.confirm-delete = false; root.ask-folder = false; } }
                     if root.confirm-delete: GlassButton {
                         primary: true;
                         icon: "\u{E74D}";
-                        label: I18n.t("Hapus", "Delete");
+                        label: I18n.t("Delete");
                         clicked => { root.confirm-delete = false; Files.delete-row(Files.selected); }
                     }
                     if root.ask-folder: GlassButton {
                         primary: true;
-                        label: I18n.t("Buat", "Create");
+                        label: I18n.t("Create");
                         clicked => { if root.folder-name != "" { root.ask-folder = false; Files.new-folder(root.folder-name); } }
                     }
                 }

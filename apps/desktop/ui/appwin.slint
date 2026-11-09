@@ -89,7 +89,7 @@ export component AppWin inherits Window {
                         }
                         Text {
                             text: root.phase == "streaming" ? (root.screen ? "Live" : root.device)
-                                : root.phase == "error" ? I18n.t("Terputus", "Disconnected") : I18n.t("Menyambung…", "Connecting…");
+                                : root.phase == "error" ? I18n.t("Disconnected") : I18n.t("Connecting…");
                             font-size: 10.5px;
                             color: Theme.text-3;
                             overflow: elide;
@@ -99,13 +99,13 @@ export component AppWin inherits Window {
                     if root.screen: GlassButton {
                         primary: true;
                         icon: "\u{E8A0}";
-                        label: I18n.t("Gabung", "Merge");
-                        tip: I18n.t("Kembalikan HP ini ke jendela utama ZenLink", "Move this phone back into the main ZenLink window");
+                        label: I18n.t("Merge");
+                        tip: I18n.t("Move this phone back into the main ZenLink window");
                         clicked => { root.action("merge"); }
                     }
                     GlassButton {
                         icon: root.is-fullscreen ? "\u{E73F}" : "\u{E740}";
-                        tip: root.is-fullscreen ? I18n.t("Keluar layar penuh", "Exit full screen") : I18n.t("Layar penuh", "Full screen");
+                        tip: root.is-fullscreen ? I18n.t("Exit full screen") : I18n.t("Full screen");
                         clicked => { root.window-action("fullscreen"); }
                     }
                     TrafficLights {
@@ -128,8 +128,8 @@ export component AppWin inherits Window {
                     spacing: 12px;
                     Text {
                         text: root.phase == "error"
-                            ? (root.message != "" ? root.message : I18n.t("App tidak bisa dibuka.", "The app could not be opened."))
-                            : (root.screen ? I18n.t("Menyambung ke ", "Connecting to ") + root.device + "…" : I18n.t("Membuka ", "Opening ") + root.app-name + "…");
+                            ? (root.message != "" ? root.message : I18n.t("The app could not be opened."))
+                            : (root.screen ? I18n.t("Connecting to ") + root.device + "…" : I18n.t("Opening ") + root.app-name + "…");
                         font-size: 13px;
                         color: root.phase == "error" ? Theme.warn : Theme.text-2;
                         wrap: word-wrap;
@@ -137,7 +137,7 @@ export component AppWin inherits Window {
                     }
                     if root.phase == "error": HorizontalLayout {
                         alignment: center;
-                        GlassButton { primary: true; icon: "\u{E72C}"; label: I18n.t("Coba lagi", "Try again"); clicked => { root.retry(); } }
+                        GlassButton { primary: true; icon: "\u{E72C}"; label: I18n.t("Try again"); clicked => { root.retry(); } }
                     }
                 }
             }
@@ -160,16 +160,16 @@ export component AppWin inherits Window {
                             padding-right: 6px;
                             spacing: 4px;
                             alignment: center;
-                            GlassButton { icon: "\u{E72B}"; tip: I18n.t("Kembali", "Back"); enabled: root.phase == "streaming"; clicked => { root.action("back"); } }
-                            if root.screen: GlassButton { icon: "\u{E80F}"; tip: I18n.t("Beranda", "Home"); enabled: root.phase == "streaming"; clicked => { root.action("home"); } }
-                            if root.screen: GlassButton { icon: "\u{E8A9}"; tip: I18n.t("Aplikasi terbaru", "Recent apps"); enabled: root.phase == "streaming"; clicked => { root.action("switcher"); } }
-                            if !root.screen: GlassButton { icon: "\u{E777}"; tip: I18n.t("Mulai ulang app", "Restart the app"); enabled: root.phase == "streaming"; clicked => { root.action("restart-app"); } }
+                            GlassButton { icon: "\u{E72B}"; tip: I18n.t("Back"); enabled: root.phase == "streaming"; clicked => { root.action("back"); } }
+                            if root.screen: GlassButton { icon: "\u{E80F}"; tip: I18n.t("Home"); enabled: root.phase == "streaming"; clicked => { root.action("home"); } }
+                            if root.screen: GlassButton { icon: "\u{E8A9}"; tip: I18n.t("Recent apps"); enabled: root.phase == "streaming"; clicked => { root.action("switcher"); } }
+                            if !root.screen: GlassButton { icon: "\u{E777}"; tip: I18n.t("Restart the app"); enabled: root.phase == "streaming"; clicked => { root.action("restart-app"); } }
                             Rectangle { width: 1px; background: Theme.dark ? #ffffff1f : #0000001a; }
                             GlassButton { icon: "\u{E9E9}"; tip: "Quick Settings"; enabled: root.phase == "streaming"; clicked => { root.action("quick-settings"); } }
-                            GlassButton { icon: "\u{EA8F}"; tip: I18n.t("Notifikasi", "Notifications"); enabled: root.phase == "streaming"; clicked => { root.action("notifications"); } }
-                            GlassButton { icon: "\u{E993}"; tip: I18n.t("Volume HP turun", "Phone volume down"); enabled: root.phase == "streaming"; clicked => { root.action("vol-down"); } }
-                            GlassButton { icon: "\u{E995}"; tip: I18n.t("Volume HP naik", "Phone volume up"); enabled: root.phase == "streaming"; clicked => { root.action("vol-up"); } }
-                            GlassButton { icon: "\u{E72E}"; tip: I18n.t("Tombol daya (kunci / nyalakan layar)", "Power button (lock / wake the screen)"); enabled: root.phase == "streaming"; clicked => { root.action("lock"); } }
+                            GlassButton { icon: "\u{EA8F}"; tip: I18n.t("Notifications"); enabled: root.phase == "streaming"; clicked => { root.action("notifications"); } }
+                            GlassButton { icon: "\u{E993}"; tip: I18n.t("Phone volume down"); enabled: root.phase == "streaming"; clicked => { root.action("vol-down"); } }
+                            GlassButton { icon: "\u{E995}"; tip: I18n.t("Phone volume up"); enabled: root.phase == "streaming"; clicked => { root.action("vol-up"); } }
+                            GlassButton { icon: "\u{E72E}"; tip: I18n.t("Power button (lock / wake the screen)"); enabled: root.phase == "streaming"; clicked => { root.action("lock"); } }
                         }
                     }
                 }

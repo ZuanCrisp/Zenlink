@@ -69,20 +69,20 @@ export component DeviceRail inherits Glass {
         alignment: start;
         RailItem {
             icon: "\u{E80F}";
-            label: I18n.t("Beranda", "Home");
+            label: I18n.t("Home");
             on: root.home-on;
             clicked => { root.home(); }
         }
         Rectangle { height: 6px; }
         Text {
-            text: I18n.t("Perangkat", "Devices");
+            text: I18n.t("Devices");
             font-size: 11px;
             color: Theme.text-3;
             height: 22px;
             vertical-alignment: center;
         }
         if root.devices.length == 0: Text {
-            text: I18n.t("Belum ada perangkat. Colokkan HP atau sambung lewat Wi-Fi.", "No device yet. Plug in a phone or connect over Wi-Fi.");
+            text: I18n.t("No device yet. Plug in a phone or connect over Wi-Fi.");
             font-size: 11.5px;
             color: Theme.text-2;
             wrap: word-wrap;
@@ -130,7 +130,7 @@ export component DeviceRail inherits Glass {
                             }
                         }
                         Text {
-                            text: d.state == "window" ? I18n.t("Jendela sendiri", "Own window") : d.sub;
+                            text: d.state == "window" ? I18n.t("Own window") : d.sub;
                             font-size: 10.5px;
                             color: Theme.text-3;
                             overflow: elide;
@@ -150,7 +150,7 @@ export component DeviceRail inherits Glass {
                                 clicked => { Tip.shown = false; root.pop(i); }
                                 changed has-hover => {
                                     if self.has-hover {
-                                        Tip.text = I18n.t("Pisah ke jendela sendiri", "Move to its own window");
+                                        Tip.text = I18n.t("Move to its own window");
                                         Tip.x = self.absolute-position.x + self.width / 2;
                                         Tip.top = self.absolute-position.y;
                                         Tip.bottom = self.absolute-position.y + self.height;
@@ -170,14 +170,14 @@ export component DeviceRail inherits Glass {
                 spacing: 2px;
                 RailItem {
                     icon: "\u{E7F4}";
-                    label: I18n.t("Layar", "Screen");
+                    label: I18n.t("Screen");
                     on: root.screen-on;
                     enabled: d.kind == "android";
                     clicked => { root.screen(); }
                 }
                 RailItem {
                     icon: "\u{E8B7}";
-                    label: d.files ? I18n.t("File", "Files") : I18n.t("File · segera", "Files · soon");
+                    label: d.files ? I18n.t("Files") : I18n.t("Files · soon");
                     on: root.files-on;
                     enabled: d.files;
                     clicked => { root.files(); }
@@ -187,7 +187,7 @@ export component DeviceRail inherits Glass {
         Rectangle { height: 4px; }
         RailItem {
             icon: "\u{E710}";
-            label: I18n.t("Sambung perangkat", "Connect a device");
+            label: I18n.t("Connect a device");
             on: root.adding;
             clicked => { root.connect(); }
         }

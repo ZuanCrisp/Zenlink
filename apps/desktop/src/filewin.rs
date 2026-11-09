@@ -18,7 +18,7 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 use zenlink_android::adb::{AdbClient, Target};
 use zenlink_android::browse::{self, CopyError, Entry};
 
-use crate::{tr_ui, AppWindow, FileRow, Files, I18n, PlaceRow};
+use crate::{i18n, AppWindow, FileRow, Files, PlaceRow};
 
 /// The phone the drawer shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -211,7 +211,7 @@ fn go(ui: &AppWindow, path: String) {
                 }
                 Err(e) => {
                     log::warn!("files: list {path}: {e}");
-                    f.set_message(error_text(&ui, &e.to_string()).into());
+                    f.set_message(error_text(&e.to_string()).into());
                     f.set_phase("error".into());
                 }
             }
@@ -227,22 +227,14 @@ fn notice(ui: &AppWindow, text: String) {
     ui.global::<Files>().set_notice(text.into());
 }
 
-fn error_text(ui: &AppWindow, e: &str) -> String {
+fn error_text(e: &str) -> String {
     let low = e.to_lowercase();
     if low.contains("permission denied") {
-        tr_ui(
-            ui,
-            "Android tidak mengizinkan folder ini dibuka.",
-            "Android does not allow opening this folder.",
-        )
+        i18n::tr("Android does not allow opening this folder.")
     } else if low.contains("not found") || low.contains("offline") || low.contains("no devices") {
-        tr_ui(
-            ui,
-            "HP tidak tersambung. Sambungkan lagi, lalu Muat ulang.",
-            "The phone is not connected. Connect it again, then Refresh.",
-        )
+        i18n::tr("The phone is not connected. Connect it again, then Refresh.")
     } else {
-        format!("{}: {e}", tr_ui(ui, "Gagal", "Failed"))
+        format!("{}: {e}", i18n::tr("Failed"))
     }
 }
 
@@ -342,28 +334,19 @@ fn start_copier(ui: &AppWindow) -> Sender<CopyJob> {
                 match result {
                     Ok((name, Some(path), open)) => {
                         log::info!("files: copied {} to {}", name, path.display());
-                        notice(
-                            &ui,
-                            format!(
-                                "{} {}",
-                                tr_ui(&ui, "Tersalin ke", "Copied to"),
-                                path.display()
-                            ),
-                        );
+                        notice(&ui, format!("{} {}", i18n::tr("Copied to"), path.display()));
                         if open {
                             open_on_pc(&path);
                         }
                     }
                     Ok((name, None, _)) => {
                         log::info!("files: sent {name}");
-                        notice(&ui, format!("{} {name}", tr_ui(&ui, "Terkirim:", "Sent:")));
+                        notice(&ui, format!("{} {name}", i18n::tr("Sent:")));
                     }
-                    Err(CopyError::Cancelled) => {
-                        notice(&ui, tr_ui(&ui, "Dibatalkan.", "Cancelled."))
-                    }
+                    Err(CopyError::Cancelled) => notice(&ui, i18n::tr("Cancelled.")),
                     Err(CopyError::Adb(e)) => {
                         log::warn!("files: copy failed: {e}");
-                        notice(&ui, error_text(&ui, &e.to_string()));
+                        notice(&ui, error_text(&e.to_string()));
                     }
                 }
                 if refresh {
@@ -450,7 +433,7 @@ fn change(
                         notice(&ui, ok);
                     }
                 }
-                Err(e) => notice(&ui, error_text(&ui, &e.to_string())),
+                Err(e) => notice(&ui, error_text(&e.to_string())),
             }
             go(&ui, current_path());
         });
@@ -460,22 +443,22 @@ fn change(
 /// Registers the drawer's callbacks; call once at start.
 pub fn install(ui: &AppWindow) {
     let f = ui.global::<Files>();
-    let id = ui.global::<I18n>().get_id();
     let places: Vec<PlaceRow> = browse::QUICK_DIRS
         .iter()
         .map(|(label, path)| {
-            let (label_id, icon) = match *label {
-                "Internal storage" => ("Penyimpanan internal", "\u{EDA2}"),
-                "Camera" => ("Kamera", "\u{E722}"),
-                "Download" => ("Unduhan", "\u{E896}"),
-                "Pictures" => ("Gambar", "\u{EB9F}"),
-                "Movies" => ("Video", "\u{E714}"),
-                "Documents" => ("Dokumen", "\u{E8A5}"),
-                "Music" => ("Musik", "\u{E8D6}"),
-                other => (other, "\u{E8B7}"),
+            // The label is an English key; the drawer shows it translated.
+            let icon = match *label {
+                "Internal storage" => "\u{EDA2}",
+                "Camera" => "\u{E722}",
+                "Download" => "\u{E896}",
+                "Pictures" => "\u{EB9F}",
+                "Movies" => "\u{E714}",
+                "Documents" => "\u{E8A5}",
+                "Music" => "\u{E8D6}",
+                _ => "\u{E8B7}",
             };
             PlaceRow {
-                label: if id { label_id } else { label }.into(),
+                label: (*label).into(),
                 path: (*path).into(),
                 icon: icon.into(),
             }
@@ -547,21 +530,14 @@ pub fn install(ui: &AppWindow) {
             return;
         };
         log::info!("files: delete {path}");
-        let ok = tr_ui(&ui, "Terhapus.", "Deleted.");
+        let ok = i18n::tr("Deleted.");
         change(&ui, ok, move |c, t| browse::delete(c, t, &path));
     });
     let weak = ui.as_weak();
     f.on_new_folder(move |name| {
         let Some(ui) = weak.upgrade() else { return };
         let Some(name) = zenlink_android::files::safe_name(name.as_str()) else {
-            notice(
-                &ui,
-                tr_ui(
-                    &ui,
-                    "Nama folder tidak bisa dipakai.",
-                    "That folder name cannot be used.",
-                ),
-            );
+            notice(&ui, i18n::tr("That folder name cannot be used."));
             return;
         };
         let dir = browse::join(&current_path(), &name);
@@ -612,14 +588,7 @@ pub fn dropped(ui: &AppWindow, path: &Path) -> bool {
             dir: current_path(),
         });
     } else {
-        notice(
-            ui,
-            tr_ui(
-                ui,
-                "Folder belum bisa dikirim: pilih file-nya.",
-                "Folders cannot be sent yet: drop the files.",
-            ),
-        );
+        notice(ui, i18n::tr("Folders cannot be sent yet: drop the files."));
     }
     true
 }
