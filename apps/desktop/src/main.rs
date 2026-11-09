@@ -4678,7 +4678,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let (api, w) = (api.clone(), weak.clone());
             let a = a.to_string();
             std::thread::spawn(move || {
-                let r = if a == "wifi" {
+                let r = if a == "wifi" && !apple::python_engine() {
+                    Some(apple::prepare_wifi())
+                } else if a == "wifi" {
                     api.post_slow("/api/wifi/prepare", &json!({}), 120)
                 } else {
                     api.get("/api/drivers")

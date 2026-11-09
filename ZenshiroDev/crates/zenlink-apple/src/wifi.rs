@@ -176,6 +176,75 @@ pub async fn connect(addr: SocketAddr, record: &Record) -> Result<Tunnel, String
     })
 }
 
+/// One-time Wi-Fi setup over the cable (port of backend apple/wifi.py `prepare`): turns on
+/// Wi-Fi connections and, on iOS 17+, writes the RemotePairing record the Wi-Fi tunnel needs
+/// (pymobiledevice3's format, so the backend's Hybrid reads it too). The device may ask to
+/// Trust. Returns whether a RemotePairing record is in place (iOS < 17 has none).
+pub async fn prepare(udid: &str) -> Result<bool, String> {
+    use idevice::{
+        lockdown::LockdownClient, provider::IdeviceProvider as _,
+        remote_pairing::RemotePairingLockdownService, IdeviceService as _,
+    };
+    let provider = crate::link::provider(udid).await?;
+    let mut lockdown = LockdownClient::connect(&provider)
+        .await
+        .map_err(|e| format!("lockdown: {e:?}"))?;
+    let pairing = provider
+        .get_pairing_file()
+        .await
+        .map_err(|e| format!("pair record (Trust this computer): {e:?}"))?;
+    lockdown
+        .start_session(&pairing)
+        .await
+        .map_err(|e| format!("lockdown session: {e:?}"))?;
+    lockdown
+        .set_value("EnableWifiConnections", true.into(), Some("com.apple.mobile.wireless_lockdown"))
+        .await
+        .map_err(|e| format!("Wi-Fi connections: {e:?}"))?;
+    let host = hostname();
+    let id = host_identifier(&host);
+    let dir = record_dir().ok_or("no user profile")?;
+    let old = records(&dir).into_iter().find(|r| r.udid == udid);
+    let mut file = match &old {
+        Some(r) => rp_file(r, &id)?,
+        None => {
+            let mut f = RpPairingFile::generate(&host);
+            f.identifier = id;
+            f
+        }
+    };
+    let paired = async {
+        let mut client = RemotePairingLockdownService::connect(&provider)
+            .await
+            .map_err(|e| format!("{e:?}"))?
+            .into_client(&host)
+            .map_err(|e| format!("{e:?}"))?;
+        client
+            .connect(&mut file, || async { String::new() })
+            .await
+            .map_err(|e| format!("{e:?}"))
+    }
+    .await;
+    if let Err(e) = paired {
+        log::info!("wifi: RemotePairing record not written: {e}");
+        return Ok(false);
+    }
+    if old.as_ref().is_some_and(|r| r.public_key == file.public_key_bytes()) {
+        return Ok(true); // verified with the stored record
+    }
+    let Some(irk) = file.alt_irk().map(<[u8]>::to_vec) else {
+        return Err("pairing gave no altIRK".into());
+    };
+    let mut d = plist::Dictionary::new();
+    d.insert("peer_alt_irk".into(), plist::Value::Data(irk));
+    d.insert("private_key".into(), plist::Value::Data(file.private_key_bytes()));
+    d.insert("public_key".into(), plist::Value::Data(file.public_key_bytes()));
+    d.insert("remote_unlock_host_key".into(), "".into());
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    plist::to_file_xml(dir.join(format!("remote_{udid}.plist")), &d).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 fn rp_file(r: &Record, identifier: &str) -> Result<RpPairingFile, String> {
     let mut d = plist::Dictionary::new();
     d.insert(

@@ -225,6 +225,49 @@ pub fn file_device() -> Option<String> {
         .or_else(|| e.devices.lock().unwrap().iter().find(|d| d.paired).map(|d| d.udid.clone()))
 }
 
+/// One-time Wi-Fi setup over the cable (Settings), in the backend's reply shape
+/// {ok, message, device}. Off the UI thread.
+pub fn prepare_wifi() -> Value {
+    let fail = |m: &str| json!({ "ok": false, "message": m });
+    if !IN_USE.load(Relaxed) {
+        return fail("Wi-Fi needs Apple Driver mode.");
+    }
+    let e = engine();
+    if e.sessions.lock().unwrap().values().any(|s| s.live()) {
+        return fail("Stop casting first.");
+    }
+    let usb = match block_on(link::usb_devices()) {
+        Ok(u) => u,
+        Err(err) => return fail(&format!("Wi-Fi setup failed: {err}")),
+    };
+    let dir = zenlink_apple::wifi::record_dir();
+    let has_record = |u: &str| dir.as_ref().is_some_and(|d| d.join(format!("remote_{u}.plist")).is_file());
+    let name = |u: &str| custom_name(u).or_else(|| {
+        let n = e.info.lock().unwrap().get(u)?.name.clone();
+        (!n.is_empty()).then_some(n)
+    });
+    let mut ready: Vec<String> = usb.iter().filter(|(_, p)| *p).map(|(u, _)| u.clone()).collect();
+    if ready.is_empty() {
+        if !usb.is_empty() {
+            return fail("Unlock the device and tap Trust, then try again.");
+        }
+        let wifi = e.devices.lock().unwrap().iter().find(|d| d.addr.is_some()).map(|d| d.udid.clone());
+        return match wifi {
+            Some(u) => json!({ "ok": true, "message": "Wi-Fi is already set up.", "device": name(&u) }),
+            None => fail("Connect the device with the cable, unlock it and tap Trust first."),
+        };
+    }
+    ready.sort_by_key(|u| has_record(u)); // a device with no Wi-Fi record yet first
+    let udid = &ready[0];
+    match block_on(zenlink_apple::wifi::prepare(udid)) {
+        Ok(paired) => {
+            log::info!("wifi: prepared {udid} (RemotePairing record: {paired})");
+            json!({ "ok": true, "wifiConnections": true, "remotePairing": paired, "device": name(udid) })
+        }
+        Err(err) => fail(&format!("Wi-Fi setup failed: {err}")),
+    }
+}
+
 /// Runs `f` on the engine's runtime; call from a plain thread, never from the runtime.
 pub fn block_on<F: std::future::Future>(f: F) -> F::Output {
     engine().rt.block_on(f)
