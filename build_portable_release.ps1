@@ -226,6 +226,8 @@ $rustExe = Join-Path $rustTarget "release\ZenLink.exe"
 Copy-Item $rustExe $app
 # The Rust Apple engine decodes the device's sound with the same zlaac.dll (src/aac.rs).
 Copy-Item "$root\apps\desktop\backend\zenlink\zlaac.dll" $app
+# The Rust AirPlay receiver (Studio Wi-Fi) decrypts the session key with playfair.dll.
+Copy-Item "$root\apps\desktop\backend\zenlink\airplay\playfair.dll" $app
 Invoke-Sign @(Join-Path $app "ZenLink.exe")
 
 Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta

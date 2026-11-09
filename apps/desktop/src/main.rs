@@ -3696,6 +3696,7 @@ fn update_install(ui: &AppWindow) {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    airplay::choose_engine();
     // v2.5.1: `ZenLink.exe --android-app …` is one Android app in its own
     // window (no backend, no tray, no single-instance check).
     let args: Vec<String> = std::env::args().skip(1).collect();

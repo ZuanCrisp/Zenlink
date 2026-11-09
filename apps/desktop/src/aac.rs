@@ -25,7 +25,7 @@ unsafe impl Send for Aac {}
 
 /// zlaac.dll next to ZenLink.exe (packaged), else in a source checkout's backend folder.
 fn find_dll() -> Option<PathBuf> {
-    find_native("", "zlaac.dll").or_else(unpack_embedded)
+    find_native("", "zlaac.dll").or_else(|| unpack_embedded("zlaac", ZLAAC))
 }
 
 /// A native DLL next to ZenLink.exe, else in a source checkout's backend/zenlink/`sub`.
@@ -41,26 +41,31 @@ pub fn find_native(sub: &str, name: &str) -> Option<PathBuf> {
     dirs.into_iter().map(|d| d.join(name)).find(|p| p.exists())
 }
 
-/// Portable.exe: zlaac.dll is packed in, unpacked to %LOCALAPPDATA%\ZenLink-Next\native once
-/// per size (the service folder is emptied on each new version, so not there).
+/// Portable.exe: the native DLLs are packed in, unpacked to %LOCALAPPDATA%\ZenLink-Next\native
+/// once per size (the service folder is emptied on each new version, so not there).
 #[cfg(feature = "embedded-backend")]
-fn unpack_embedded() -> Option<PathBuf> {
-    static DLL: &[u8] = include_bytes!("../backend/zenlink/zlaac.dll");
+pub static ZLAAC: &[u8] = include_bytes!("../backend/zenlink/zlaac.dll");
+#[cfg(feature = "embedded-backend")]
+pub static PLAYFAIR: &[u8] = include_bytes!("../backend/zenlink/airplay/playfair.dll");
+#[cfg(not(feature = "embedded-backend"))]
+pub static ZLAAC: &[u8] = &[];
+#[cfg(not(feature = "embedded-backend"))]
+pub static PLAYFAIR: &[u8] = &[];
+
+pub fn unpack_embedded(stem: &str, dll: &[u8]) -> Option<PathBuf> {
+    if dll.is_empty() {
+        return None;
+    }
     let dir = zenlink_core::local_data_dir()?.join("native");
-    let path = dir.join(format!("zlaac-{}.dll", DLL.len()));
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() == DLL.len() as u64) {
+    let path = dir.join(format!("{stem}-{}.dll", dll.len()));
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() == dll.len() as u64) {
         return Some(path);
     }
     std::fs::create_dir_all(&dir).ok()?;
-    let tmp = dir.join(format!("unpack-{}.tmp", std::process::id()));
-    std::fs::write(&tmp, DLL).ok()?;
+    let tmp = dir.join(format!("unpack-{stem}-{}.tmp", std::process::id()));
+    std::fs::write(&tmp, dll).ok()?;
     std::fs::rename(&tmp, &path).ok()?;
     Some(path)
-}
-
-#[cfg(not(feature = "embedded-backend"))]
-fn unpack_embedded() -> Option<PathBuf> {
-    None
 }
 
 impl Aac {

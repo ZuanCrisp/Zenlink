@@ -1,6 +1,6 @@
 //! ZenLink Studio over Wi-Fi in the window: the Rust AirPlay receiver (zenlink-airplay) feeds
-//! the decoder directly. Opt-in with `ZL_AIRPLAY=rust` until audio is ported (ROADMAP M3);
-//! otherwise the backend's receiver runs as before (castmanager.py skips its own when set).
+//! the decoder directly. Default; `ZL_ENGINE=python` (or `ZL_AIRPLAY=python`) keeps the backend's
+//! receiver (castmanager.py skips its own when `ZL_AIRPLAY=rust`).
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -27,6 +27,14 @@ static PAUSED: AtomicBool = AtomicBool::new(false);
 
 pub fn enabled() -> bool {
     std::env::var("ZL_AIRPLAY").is_ok_and(|v| v == "rust")
+}
+
+/// The default since M3 step 5: Rust serves Studio Wi-Fi unless `ZL_ENGINE=python`. Set before
+/// any thread starts; the backend inherits it and skips its own receiver.
+pub fn choose_engine() {
+    if std::env::var_os("ZL_AIRPLAY").is_none() && !crate::apple::python_engine() {
+        std::env::set_var("ZL_AIRPLAY", "rust");
+    }
 }
 
 pub fn running() -> bool {
@@ -171,7 +179,9 @@ fn clean(au: &[u8], hevc: bool) -> (Vec<u8>, bool) {
 }
 
 fn start_server() -> Result<(), String> {
-    let dll = crate::aac::find_native("airplay", "playfair.dll").ok_or("playfair.dll not found")?;
+    let dll = crate::aac::find_native("airplay", "playfair.dll")
+        .or_else(|| crate::aac::unpack_embedded("playfair", crate::aac::PLAYFAIR))
+        .ok_or("playfair.dll not found")?;
     zenlink_airplay::fairplay::load(&dll)?;
     let cfg = server::Config {
         name: NAME.into(),
