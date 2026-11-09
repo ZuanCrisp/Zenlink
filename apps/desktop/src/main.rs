@@ -474,14 +474,11 @@ fn passcode_query(ui: &AppWindow, save: Option<String>) {
     });
 }
 
-fn push_audio(api: &Api, p: &Prefs, muted: bool) {
-    let api = api.clone();
+fn push_audio(p: &Prefs, muted: bool) {
     let to_pc = p.audio_out.as_str() != "device";
-    let body = json!({ "enabled": to_pc, "route": p.audio_out.as_str(), "volume": p.volume / 100.0, "muted": muted });
     android::set_audio(to_pc, p.volume / 100.0, muted);
     apple::set_audio(to_pc, p.volume / 100.0, muted);
     apple::set_unlock_on_lock(p.unlock_on_lock, p.unlock_limit);
-    std::thread::spawn(move || api.audio(&body));
 }
 
 fn str_of<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
@@ -689,7 +686,7 @@ pub fn cast_stop_all() {
 }
 
 /// Backend state -> UI. Runs on the UI thread.
-fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
+fn on_state(ui: &AppWindow, st: &Value) {
     let tr = |id: &str, en: &str| -> String {
         if ui.global::<I18n>().get_id() {
             id.into()
@@ -974,7 +971,7 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
             a.live_since = live.then(Instant::now);
             if live {
                 log::info!("apple: streaming ({backend}, device {device:?})");
-                push_audio(api, &ui.get_prefs(), ui.get_muted());
+                push_audio(&ui.get_prefs(), ui.get_muted());
             }
         }
     });
@@ -3788,7 +3785,7 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     zenlink_core::api::serve(backend::handle);
     let api = Api::new();
-    let input = Input::new(api.clone());
+    let input = Input::new();
     let touch_on = Arc::new(AtomicBool::new(ui.get_prefs().touch));
     let gestures_on = Arc::new(AtomicBool::new(ui.get_prefs().gestures));
     ui.set_message("Menyiapkan ZenLink…".into());
@@ -3811,10 +3808,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 usbdirect::overlay(&mut st);
                 backend::observe(&st);
                 let w = weak.clone();
-                let a = api.clone();
                 if slint::invoke_from_event_loop(move || {
                     if let Some(ui) = w.upgrade() {
-                        on_state(&ui, &a, &st);
+                        on_state(&ui, &st);
                     }
                 })
                 .is_err()
@@ -3986,7 +3982,6 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = ui.as_weak();
-        let api = api.clone();
         let (t, g) = (touch_on.clone(), gestures_on.clone());
         let last = std::cell::RefCell::new(ui.get_prefs());
         ui.on_prefs_changed(move |mut p| {
@@ -4022,7 +4017,7 @@ fn main() -> Result<(), slint::PlatformError> {
             g.store(p.gestures, Relaxed);
             if let Some(ui) = weak.upgrade() {
                 apply_look(&ui);
-                push_audio(&api, &p, ui.get_muted());
+                push_audio(&p, ui.get_muted());
                 // "Device only" sound and the Android picture options are
                 // server start options: restart a running Android session.
                 let key = android_key(&p);
@@ -4388,7 +4383,6 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     {
         let weak = ui.as_weak();
-        let api = api.clone();
         let input = input.clone();
         ui.on_action(move |a| {
             let Some(ui) = weak.upgrade() else { return };
@@ -4460,7 +4454,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "mute" => {
                     let m = !ui.get_muted();
                     ui.set_muted(m);
-                    push_audio(&api, &ui.get_prefs(), m);
+                    push_audio(&ui.get_prefs(), m);
                 }
                 "rotate" => {
                     let mut p = ui.get_prefs();

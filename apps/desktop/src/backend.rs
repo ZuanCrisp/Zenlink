@@ -432,7 +432,6 @@ pub fn handle(method: &str, path: &str, body: Option<&Value>) -> (u16, Value) {
             ok(r.unwrap_or_else(|m| json!({ "ok": false, "message": m })))
         }
         // The sessions read the sound settings from apple.rs.
-        ("POST", "/api/audio") => ok(json!({})),
         ("POST", "/api/app/restart") => {
             // What a service restart did: end casting, then the pending mode applies.
             crate::cast_stop_all();

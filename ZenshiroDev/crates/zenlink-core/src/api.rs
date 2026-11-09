@@ -115,41 +115,6 @@ impl Api {
     pub fn stop_cast(&self) -> bool {
         self.post("/api/cast/stop", &json!({})).is_some()
     }
-
-    /// `x`, `y` are 0..=65535 in the device's touch space.
-    pub fn touch(&self, kind: TouchKind, x: u16, y: u16) {
-        let t = match kind {
-            TouchKind::Contact => "contact",
-            TouchKind::Release => "release",
-        };
-        let _ = self.post("/cast/touch", &json!({ "type": t, "x": x, "y": y }));
-    }
-
-    pub fn button(&self, name: &str) {
-        let _ = self.post("/cast/button", &json!({ "name": name, "state": "press" }));
-    }
-
-    pub fn key(&self, payload: &Value) {
-        let _ = self.post("/cast/key", payload);
-    }
-
-    pub fn keyboard_action(&self, action: &str) {
-        let _ = self.post("/api/keyboard/action", &json!({ "action": action }));
-    }
-
-    /// `paste-pc`: types `text` on the device. Returns the backend's reply
-    /// (`ok`, `message`), `None` when it did not answer.
-    pub fn keyboard_text(&self, action: &str, text: &str) -> Option<Value> {
-        self.post_slow(
-            "/api/keyboard/action",
-            &json!({ "action": action, "text": text }),
-            30,
-        )
-    }
-
-    pub fn audio(&self, settings: &Value) {
-        let _ = self.post("/api/audio", settings);
-    }
 }
 
 #[derive(Clone, Copy, Debug)]

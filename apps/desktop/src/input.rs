@@ -1,5 +1,5 @@
 //! Input worker: sends touches, strokes and buttons in order, off the UI thread, to the Rust
-//! Apple engine in Apple Driver mode, else to the backend. Consecutive moves are coalesced
+//! Apple engine in Apple Driver mode. Consecutive moves are coalesced
 //! (only the newest is sent).
 
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
@@ -8,52 +8,39 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use zenlink_apple::hid;
-use zenlink_core::api::{device_point, Api, TouchKind};
+use zenlink_core::api::{device_point, TouchKind};
 
 use crate::apple;
 
-/// Where input goes: the Rust Apple engine in Apple Driver mode, else the backend.
-struct Out(Api);
+/// Input goes to the Rust Apple engine in Apple Driver mode; ZenLink Studio has no control.
+struct Out;
 
 impl Out {
-    fn touch(&self, kind: TouchKind, x: u16, y: u16) {
+    fn send(&self, c: hid::Cmd) {
         if apple::in_use() {
-            let contact = matches!(kind, TouchKind::Contact);
-            apple::engine().send(hid::Cmd::Touch { contact, x, y });
-        } else {
-            self.0.touch(kind, x, y);
+            apple::engine().send(c);
         }
+    }
+
+    fn touch(&self, kind: TouchKind, x: u16, y: u16) {
+        let contact = matches!(kind, TouchKind::Contact);
+        self.send(hid::Cmd::Touch { contact, x, y });
     }
 
     fn home(&self) {
-        if apple::in_use() {
-            apple::engine().send(hid::Cmd::Button("home"));
-        } else {
-            self.0.button("home");
-        }
+        self.send(hid::Cmd::Button("home"));
     }
 
     fn action(&self, name: &str, text: &str) {
-        if apple::in_use() {
-            apple::engine().send(hid::Cmd::Action {
-                name: name.into(),
-                text: text.into(),
-            });
-        } else if text.is_empty() {
-            self.0.keyboard_action(name);
-        } else {
-            let _ = self.0.keyboard_text(name, text);
-        }
+        self.send(hid::Cmd::Action {
+            name: name.into(),
+            text: text.into(),
+        });
     }
 
     fn tap(&self, usages: Vec<u8>) {
-        if apple::in_use() {
-            apple::engine().send(hid::Cmd::Keys(usages));
-            apple::engine().send(hid::Cmd::Keys(Vec::new()));
-        } else {
-            self.0.key(&serde_json::json!({ "usages": usages }));
-            self.0.key(&serde_json::json!({ "usages": [] }));
-        }
+        self.send(hid::Cmd::Keys(usages));
+        self.send(hid::Cmd::Keys(Vec::new()));
     }
 }
 
@@ -80,13 +67,13 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn new(api: Api) -> Self {
+    pub fn new() -> Self {
         let (tx, rx) = channel();
         let rotation = Arc::new(AtomicU32::new(0));
         let rot = rotation.clone();
         std::thread::Builder::new()
             .name("zenlink-input".into())
-            .spawn(move || worker(api, rx, rot))
+            .spawn(move || worker(rx, rot))
             .expect("input thread");
         Self { tx, rotation }
     }
@@ -96,8 +83,8 @@ impl Input {
     }
 }
 
-fn worker(api: Api, rx: Receiver<Cmd>, rot: Arc<AtomicU32>) {
-    let api = Out(api);
+fn worker(rx: Receiver<Cmd>, rot: Arc<AtomicU32>) {
+    let api = Out;
     let pt = |u: f32, v: f32| device_point(u, v, rot.load(Relaxed));
     let mut next: Option<Cmd> = None;
     loop {
