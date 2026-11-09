@@ -6487,6 +6487,7 @@ dependencies = [
  "base64 0.22.1",
  "gethostname",
  "idevice",
+ "log",
  "mdns-sd",
  "plist",
  "tokio",

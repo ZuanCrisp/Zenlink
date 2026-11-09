@@ -45,6 +45,8 @@ struct State {
     error: Option<String>,
     /// The device the session runs on.
     device: Option<(String, bool)>,
+    /// Clockwise degrees that show the picture upright (SpringBoard orientation).
+    rotation: u32,
 }
 
 pub struct Engine {
@@ -299,7 +301,7 @@ impl Engine {
             "device": s.device.as_ref().map(|(n, w)| json!({ "name": n, "wifi": w })),
             "capture": live.then(|| json!({ "backend": "apple", "codec": "HEVC",
                                             "source": "CoreDevice DisplayService" })),
-            "rotation": 0,
+            "rotation": s.rotation,
         })
     }
 
@@ -411,8 +413,14 @@ impl Engine {
             );
             l.ensure_ddi(&version, |_| {}).await?;
         }
+        let watch_rot = zenlink_apple::watch::orientation(l.adapter.clone(), l.rsd.clone(), |r| {
+            self.state.lock().unwrap().rotation = r;
+        });
+        let watch_lock = zenlink_apple::watch::lock(l.adapter.clone(), l.rsd.clone(), || {
+            log::info!("apple: device locked");
+        });
         let mut first = true;
-        mirror::stream(&mut l, |au| {
+        let stream = mirror::stream(&mut l, |au| {
             if stop.load(Relaxed) {
                 return false;
             }
@@ -423,8 +431,13 @@ impl Engine {
             // A full queue means the decoder stalls: drop the frame, the next keyframe heals it.
             let _ = tx.try_send(au);
             true
-        })
-        .await
+        });
+        // The watchers never end; the session ends with the stream.
+        tokio::select! {
+            r = stream => r,
+            _ = watch_rot => Ok(()),
+            _ = watch_lock => Ok(()),
+        }
     }
 
     pub fn stop(&self) {
@@ -437,6 +450,7 @@ impl Engine {
         st.detail.clear();
         st.error = None;
         st.device = None;
+        st.rotation = 0;
     }
 
     pub fn source(self: &Arc<Self>) -> Box<dyn VideoSource> {
