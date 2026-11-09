@@ -4,4 +4,5 @@
 pub mod ddi;
 pub mod link;
 pub mod mirror;
+pub mod models;
 pub mod wifi;

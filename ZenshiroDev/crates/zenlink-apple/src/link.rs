@@ -50,6 +50,21 @@ pub async fn usbmux() -> Result<UsbmuxdConnection, String> {
         .map_err(|e| format!("Apple Mobile Device Service: {e:?}"))
 }
 
+/// Devices on USB with whether this PC has their pair record (Trust done).
+pub async fn usb_devices() -> Result<Vec<(String, bool)>, String> {
+    let mut mux = usbmux().await?;
+    let list = mux.get_devices().await.map_err(err("device list"))?;
+    let mut out = Vec::new();
+    for d in list
+        .into_iter()
+        .filter(|d| d.connection_type == idevice::usbmuxd::Connection::Usb)
+    {
+        let paired = mux.get_pair_record(&d.udid).await.is_ok();
+        out.push((d.udid, paired));
+    }
+    Ok(out)
+}
+
 /// The device's names and iOS version over lockdown. Needs Trust (a pair record).
 pub async fn info(udid: &str) -> Result<Info, String> {
     let provider = provider(udid).await?;

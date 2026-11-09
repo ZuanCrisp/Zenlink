@@ -2,6 +2,7 @@
 //! ZenLink (v2.5, generation "Next"): Rust shell (ADR-0001 Stage 1).
 
 mod android;
+mod apple;
 mod appwin;
 mod backdrop;
 mod devprofiles;
@@ -648,6 +649,31 @@ fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
     rows
 }
 
+/// Apple Driver mode runs in Rust (apple.rs); ZenLink Studio still in the backend.
+fn cast_start(api: &Api) {
+    if apple::in_use() {
+        apple::start();
+    } else {
+        api.start_cast();
+    }
+}
+
+fn cast_stop(api: &Api) {
+    if apple::in_use() {
+        apple::engine().stop();
+    } else {
+        api.stop_cast();
+    }
+}
+
+fn start_apple_video(v: &mut VideoView, api: &Api) {
+    if apple::in_use() {
+        v.start_source(apple::engine().source());
+    } else {
+        v.start(api.clone());
+    }
+}
+
 /// Backend state -> UI. Runs on the UI thread.
 fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
     let tr = |id: &str, en: &str| -> String {
@@ -926,7 +952,7 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
             a.fitted = None;
             if let Some(v) = a.view.as_mut() {
                 if live {
-                    v.start(api.clone());
+                    start_apple_video(v, api);
                 } else {
                     v.stop();
                 }
@@ -3736,7 +3762,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             }
             loop {
-                if let Some(st) = api.state() {
+                if let Some(mut st) = api.state() {
+                    apple::overlay(&mut st);
                     let w = weak.clone();
                     let a = api.clone();
                     if slint::invoke_from_event_loop(move || {
@@ -3770,7 +3797,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             }
             let a = api.clone();
-            std::thread::spawn(move || a.start_cast());
+            std::thread::spawn(move || cast_start(&a));
         });
     }
     {
@@ -3871,7 +3898,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let api = api.clone();
         ui.on_stop_cast(move || {
             let a = api.clone();
-            std::thread::spawn(move || a.stop_cast());
+            std::thread::spawn(move || cast_stop(&a));
         });
     }
     {
@@ -3886,6 +3913,11 @@ fn main() -> Result<(), slint::PlatformError> {
             }
             let a = api.clone();
             std::thread::spawn(move || {
+                if apple::in_use() {
+                    apple::engine().stop();
+                    apple::start();
+                    return;
+                }
                 a.stop_cast();
                 // The backend ignores Start while the old session is still
                 // closing (that can take a few seconds): wait until it is
@@ -4073,7 +4105,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 )
             {
                 let a = api.clone();
-                std::thread::spawn(move || a.stop_cast());
+                std::thread::spawn(move || cast_stop(&a));
             }
             android_stop(&ui);
             let f = APP.with_borrow_mut(|a| {
@@ -4880,7 +4912,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             });
                             a.view = Some(v);
                             if a.streaming {
-                                a.view.as_mut().unwrap().start(Api::new());
+                                start_apple_video(a.view.as_mut().unwrap(), &Api::new());
                             } else if let Some(src) = a.android_pending.take() {
                                 a.view.as_mut().unwrap().start_source(src);
                             }
