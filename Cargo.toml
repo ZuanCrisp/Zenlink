@@ -6,6 +6,7 @@ members = [
     "ZenshiroDev/crates/zenlink-video",
     "ZenshiroDev/crates/zenlink-android",
     "ZenshiroDev/crates/zenlink-audio",
+    "ZenshiroDev/crates/zenlink-apple",
 ]
 
 [workspace.package]

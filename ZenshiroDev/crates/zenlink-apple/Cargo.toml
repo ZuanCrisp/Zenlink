@@ -1,0 +1,24 @@
+[package]
+name = "zenlink-apple"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Apple Driver mode in Rust on idevice: device list, Developer Disk Image, tunnel, screen stream."
+
+[dependencies]
+# Pinned: idevice breaks its API at every point release until 0.2.
+idevice = { version = "=0.1.68", default-features = false, features = [
+    "ring",
+    "usbmuxd",
+    "core_device_proxy",
+    "tunnel_tcp_stack",
+    "rsd",
+    "display_stream",
+    "mobile_image_mounter",
+    "tss",
+    "cryptexd",
+] }
+plist = "1.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "net"] }
+uuid = { version = "1", features = ["v4"] }
