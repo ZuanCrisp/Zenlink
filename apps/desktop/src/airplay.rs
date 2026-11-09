@@ -168,7 +168,7 @@ pub(crate) fn clean(au: &[u8], hevc: bool) -> (Vec<u8>, bool) {
 }
 
 fn start_server() -> Result<(), String> {
-    let dll = crate::aac::find_native("airplay", "playfair.dll")
+    let dll = crate::aac::find_native("playfair", "playfair.dll")
         .or_else(|| crate::aac::unpack_embedded("playfair", crate::aac::PLAYFAIR))
         .ok_or("playfair.dll not found")?;
     zenlink_airplay::fairplay::load(&dll)?;

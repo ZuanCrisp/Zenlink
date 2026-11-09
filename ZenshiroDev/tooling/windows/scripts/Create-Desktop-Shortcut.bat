@@ -9,12 +9,13 @@ pushd "%ROOT%"
 set "ROOT=%CD%\"
 set "TARGET=%ROOT%Start ZenLink.bat"
 set "STYLE=7"
-rem The icon: next to ZenLink.exe in a packaged copy, in ZenshiroDev\resources in a source checkout.
-set "ICON=%ROOT%assets\zenlink.ico"
-if not exist "%ICON%" set "ICON=%ROOT%ZenshiroDev\resources\assets\zenlink.ico"
-rem ZenLink.exe needs its backend: ZenLinkService.exe or the .venv.
-if exist "%ROOT%ZenLink.exe" if exist "%ROOT%ZenLinkService.exe" set "TARGET=%ROOT%ZenLink.exe"
-if exist "%ROOT%ZenLink.exe" if exist "%ROOT%.venv\Scripts\python.exe" set "TARGET=%ROOT%ZenLink.exe"
+rem The icon: ZenLink.exe's own in a packaged copy, ZenshiroDev\resources in a source checkout.
+set "ICON=%ROOT%ZenshiroDev\resources\assets\zenlink.ico"
+rem A packaged copy (no source code) starts ZenLink.exe directly.
+if exist "%ROOT%ZenLink.exe" if not exist "%ROOT%Cargo.toml" (
+    set "TARGET=%ROOT%ZenLink.exe"
+    set "ICON=%ROOT%ZenLink.exe,0"
+)
 if /i "%TARGET%"=="%ROOT%ZenLink.exe" set "STYLE=1"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ws = New-Object -ComObject WScript.Shell;" ^

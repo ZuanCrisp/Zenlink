@@ -1,5 +1,5 @@
-//! AAC / AAC-ELD decoding through zlaac.dll (the same minimal FFmpeg the backend uses, see
-//! apps/desktop/backend/zenlink/aac.py). Output: interleaved s16le stereo at 48 kHz.
+//! AAC / AAC-ELD decoding through zlaac.dll (a minimal FFmpeg, source in
+//! ZenshiroDev/resources/windows/native/zlaac). Output: interleaved s16le stereo at 48 kHz.
 
 use std::path::{Path, PathBuf};
 
@@ -23,12 +23,13 @@ pub struct Aac {
 // The handle is only used by the one task that owns the decoder.
 unsafe impl Send for Aac {}
 
-/// zlaac.dll next to ZenLink.exe (packaged), else in a source checkout's backend folder.
+/// zlaac.dll next to ZenLink.exe (packaged), else in a source checkout.
 fn find_dll() -> Option<PathBuf> {
-    find_native("", "zlaac.dll").or_else(|| unpack_embedded("zlaac", ZLAAC))
+    find_native("zlaac", "zlaac.dll").or_else(|| unpack_embedded("zlaac", ZLAAC))
 }
 
-/// A native DLL next to ZenLink.exe, else in a source checkout's backend/zenlink/`sub`.
+/// A native DLL next to ZenLink.exe, else in a source checkout's
+/// ZenshiroDev/resources/windows/native/`sub`.
 pub fn find_native(sub: &str, name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let source = std::env::var_os("ZENLINK_SOURCE")
@@ -36,7 +37,7 @@ pub fn find_native(sub: &str, name: &str) -> Option<PathBuf> {
         .map(PathBuf::from);
     let mut dirs: Vec<PathBuf> = exe.parent().map(Path::to_path_buf).into_iter().collect();
     dirs.extend(source.into_iter().chain(exe.ancestors().skip(1).map(Path::to_path_buf)).map(|d| {
-        d.join("apps").join("desktop").join("backend").join("zenlink").join(sub)
+        d.join("ZenshiroDev").join("resources").join("windows").join("native").join(sub)
     }));
     dirs.into_iter().map(|d| d.join(name)).find(|p| p.exists())
 }
@@ -44,9 +45,9 @@ pub fn find_native(sub: &str, name: &str) -> Option<PathBuf> {
 /// Portable.exe: the native DLLs are packed in, unpacked to %LOCALAPPDATA%\ZenLink-Next\native
 /// once per size (the service folder is emptied on each new version, so not there).
 #[cfg(feature = "portable")]
-pub static ZLAAC: &[u8] = include_bytes!("../backend/zenlink/zlaac.dll");
+pub static ZLAAC: &[u8] = include_bytes!("../../../ZenshiroDev/resources/windows/native/zlaac/zlaac.dll");
 #[cfg(feature = "portable")]
-pub static PLAYFAIR: &[u8] = include_bytes!("../backend/zenlink/airplay/playfair.dll");
+pub static PLAYFAIR: &[u8] = include_bytes!("../../../ZenshiroDev/resources/windows/native/playfair/playfair.dll");
 #[cfg(not(feature = "portable"))]
 pub static ZLAAC: &[u8] = &[];
 #[cfg(not(feature = "portable"))]
@@ -112,13 +113,13 @@ mod tests {
 
     #[test]
     fn decodes_the_eld_fixture() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("backend");
-        let data = std::fs::read(root.join("tests/fixtures/eld_48000.zlau")).unwrap();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ZenshiroDev");
+        let data = std::fs::read(root.join("tooling/dev/fixtures/eld_48000.zlau")).unwrap();
         assert_eq!(&data[..4], b"ZLAU");
         let n = data[4] as usize;
         let asc = &data[5..5 + n];
         let mut pos = 9 + n; // ZLAU, length, ASC, u32 rate
-        let mut dec = Aac::with_dll(&root.join("zenlink/zlaac.dll"), asc, 48000).unwrap();
+        let mut dec = Aac::with_dll(&root.join("resources/windows/native/zlaac/zlaac.dll"), asc, 48000).unwrap();
         let mut bytes = 0;
         while pos + 2 <= data.len() {
             let size = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;

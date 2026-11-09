@@ -194,16 +194,44 @@ fn service_state(name: &str) -> (bool, bool) {
     (true, running)
 }
 
-/// The app's read-only folders: the repository's in a source checkout, else beside the exe.
-fn app_dir(repo: &[&str], frozen: &str) -> PathBuf {
-    if let Some(root) = crate::backend_data_dir().and_then(|d| d.parent().map(Path::to_path_buf)) {
-        let p = repo.iter().fold(root, |p, s| p.join(s));
-        if p.exists() {
-            return p;
-        }
+/// Portable.exe carries the driver tool and libusb-win32 (installed builds have them beside
+/// ZenLink.exe), unpacked on first use. Paths keep the installed layout: tools\ next to drivers\.
+#[cfg(feature = "portable")]
+const KIT: &[(&str, &[u8])] = &[
+    ("tools/usb_filter.ps1", include_bytes!("../../../ZenshiroDev/tooling/windows/tools/usb_filter.ps1")),
+    ("drivers/libusb-win32/amd64/libusb0.sys", include_bytes!("../../../ZenshiroDev/resources/windows/drivers/libusb-win32/amd64/libusb0.sys")),
+    ("drivers/libusb-win32/amd64/libusb0.dll", include_bytes!("../../../ZenshiroDev/resources/windows/drivers/libusb-win32/amd64/libusb0.dll")),
+    ("drivers/libusb-win32/x86/libusb0_x86.dll", include_bytes!("../../../ZenshiroDev/resources/windows/drivers/libusb-win32/x86/libusb0_x86.dll")),
+];
+#[cfg(not(feature = "portable"))]
+const KIT: &[(&str, &[u8])] = &[];
+
+fn unpack_kit() -> Option<PathBuf> {
+    let dir = zenlink_core::local_data_dir()?.join("driver-kit");
+    for (name, data) in KIT {
+        let p = dir.join(name);
+        // Rewritten each time: what runs elevated is always this exe's copy.
+        std::fs::create_dir_all(p.parent()?).ok()?;
+        std::fs::write(&p, data).ok()?;
     }
-    let exe = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)).unwrap_or_default();
-    exe.join(frozen)
+    (!KIT.is_empty()).then_some(dir)
+}
+
+/// The app's read-only folders: beside ZenLink.exe (installed), the repository's (source
+/// checkout), else the Portable.exe kit.
+fn app_dir(repo: &[&str], frozen: &str) -> PathBuf {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let beside = exe.parent().map(|d| d.join(frozen)).unwrap_or_default();
+    if beside.exists() {
+        return beside;
+    }
+    let source = std::env::var_os("ZENLINK_SOURCE").filter(|s| !s.is_empty()).map(PathBuf::from);
+    let in_repo = source
+        .into_iter()
+        .chain(exe.ancestors().skip(1).map(Path::to_path_buf))
+        .map(|d| repo.iter().fold(d, |p, s| p.join(s)))
+        .find(|p| p.exists());
+    in_repo.or_else(|| unpack_kit().map(|k| k.join(frozen))).unwrap_or(beside)
 }
 
 pub fn tools_dir() -> PathBuf {

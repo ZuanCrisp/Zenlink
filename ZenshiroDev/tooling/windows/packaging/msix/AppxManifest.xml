@@ -53,16 +53,9 @@
 
   <Extensions>
     <!-- Inbound rules, added by Windows when the package is installed (no
-         administrator prompt): AirPlay / ZenLink Studio over Wi-Fi (the
-         backend) and Android over Wi-Fi (the bundled adb). -->
+         administrator prompt): AirPlay / ZenLink Studio over Wi-Fi. -->
     <desktop2:Extension Category="windows.firewallRules">
-      <desktop2:FirewallRules Executable="ZenLinkService.exe">
-        <desktop2:Rule Direction="in" IPProtocol="TCP" Profile="all" />
-        <desktop2:Rule Direction="in" IPProtocol="UDP" Profile="all" />
-      </desktop2:FirewallRules>
-    </desktop2:Extension>
-    <desktop2:Extension Category="windows.firewallRules">
-      <desktop2:FirewallRules Executable="third_party\platform-tools\adb.exe">
+      <desktop2:FirewallRules Executable="ZenLink.exe">
         <desktop2:Rule Direction="in" IPProtocol="TCP" Profile="all" />
         <desktop2:Rule Direction="in" IPProtocol="UDP" Profile="all" />
       </desktop2:FirewallRules>

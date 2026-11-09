@@ -5,7 +5,8 @@ It speaks the same protocol as iOS Screen Mirroring (pair-verify, fp-setup,
 SETUP, the 128-byte-header mirror stream with AES-CTR, /feedback) and sends a
 real H.264 picture: a moving test pattern with a frame counter.
 
-  .venv\\Scripts\\python tests\\airplay_sim.py --seconds 20 --size 2302x1600 --fps 60
+  pip install av pycryptodome cryptography   (dev only, 64-bit Python)
+  python ZenshiroDev\\tooling\\dev\\airplay_sim.py --seconds 20 --size 2302x1600 --fps 60
 """
 
 from __future__ import annotations
@@ -20,7 +21,6 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import av  # noqa: E402
 from Crypto.Cipher import AES  # noqa: E402
@@ -34,7 +34,7 @@ def playfair_key(keymsg: bytes, ekey: bytes) -> bytes:
     """The receiver's playfair.dll, called the way it does (64-bit Python only)."""
     import ctypes
 
-    dll = ctypes.CDLL(str(Path(__file__).resolve().parents[1] / "zenlink" / "airplay" / "playfair.dll"))
+    dll = ctypes.CDLL(str(Path(__file__).resolve().parents[2] / "resources" / "windows" / "native" / "playfair" / "playfair.dll"))
     out = ctypes.create_string_buffer(16)
     dll.zl_playfair_decrypt(keymsg, ekey, out)
     return out.raw

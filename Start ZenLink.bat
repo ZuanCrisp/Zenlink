@@ -4,80 +4,21 @@ chcp 65001 >nul
 cd /d "%~dp0"
 title ZenLink
 
-rem --- Pinned versions: the same as the release build -----------------------
-rem Python packages: apps\desktop\backend\requirements.txt, with the exact versions
-rem of apps\desktop\backend\requirements.lock as constraints. adb: Google platform-tools;
-rem the ZenLink window downloads it on request (Android page, "Install adb") with the same
-rem revision and SHA-256 as apps\desktop\src\android.rs. ZenshiroDev\tooling\windows\tools\get-adb.ps1
-rem does the same by hand. Change these only together with ZenshiroDev\docs\THIRD_PARTY.md.
+rem --- Pinned adb: Google platform-tools. The ZenLink window downloads it on request
+rem (Android page, "Install adb") with the same revision and SHA-256 as
+rem apps\desktop\src\android.rs; ZenshiroDev\tooling\windows\tools\get-adb.ps1 does the
+rem same by hand. Change these only together with ZenshiroDev\docs\THIRD_PARTY.md.
 set "ZL_ADB_REV=37.0.1"
 set "ZL_ADB_SHA256=45f4d63113e895ebde0c90f194099a4676b6ac653bd28d54314a9e022bbc1a99"
 
-rem Standalone build: ZenLink.exe and its backend ZenLinkService.exe sit next to this file.
-if exist "%~dp0ZenLinkService.exe" if exist "%~dp0ZenLink.exe" (
+rem Installed or packaged copy: ZenLink.exe next to this file, no source code.
+if exist "%~dp0ZenLink.exe" if not exist "%~dp0Cargo.toml" (
     start "" "%~dp0ZenLink.exe"
     exit /b 0
 )
 
-rem Source checkout (monorepo): the Python backend package is in apps\desktop\backend.
-set "BACKEND=%~dp0apps\desktop\backend"
-set "PYTHONPATH=%BACKEND%;%PYTHONPATH%"
-set "VENV=%~dp0.venv"
-set "PY=%VENV%\Scripts\python.exe"
-set "PYW=%VENV%\Scripts\pythonw.exe"
-set "STAMP=%VENV%\.requirements"
-set "STAMPLOCK=%VENV%\.requirements-lock"
 
-rem Fast path: environment exists and requirements.txt / .lock haven't changed.
-if exist "%PY%" if exist "%STAMP%" if exist "%STAMPLOCK%" (
-    fc /b "%BACKEND%\requirements.txt" "%STAMP%" >nul 2>&1 && fc /b "%BACKEND%\requirements.lock" "%STAMPLOCK%" >nul 2>&1 && goto :launch
-)
-
-echo ZenLink - first-time setup
-echo.
-
-if not exist "%PY%" (
-    set "SYS_PY="
-    for %%V in (3.13 3.12 3.11) do (
-        if not defined SYS_PY (
-            py -%%V -c "import sys" >nul 2>&1 && set "SYS_PY=py -%%V"
-        )
-    )
-    if not defined SYS_PY (
-        python -c "import sys; raise SystemExit(0 if (3,11) <= sys.version_info[:2] <= (3,13) else 1)" >nul 2>&1 && set "SYS_PY=python"
-    )
-    if not defined SYS_PY (
-        echo Python 3.13 isn't installed. Installing it for this user with winget...
-        winget install -e --id Python.Python.3.13 --scope user --silent --accept-package-agreements --accept-source-agreements
-        for %%P in ("%LOCALAPPDATA%\Programs\Python\Python313\python.exe") do if exist "%%~P" set "SYS_PY="%%~P""
-        if not defined SYS_PY (
-            py -3.13 -c "import sys" >nul 2>&1 && set "SYS_PY=py -3.13"
-        )
-    )
-    if not defined SYS_PY (
-        echo Python 3.11, 3.12 or 3.13 is required and couldn't be installed automatically.
-        echo Install it from https://www.python.org/downloads/ then open Start ZenLink.bat again.
-        echo.
-        pause
-        exit /b 1
-    )
-    echo [1/3] Creating the Python environment...
-    !SYS_PY! -m venv "%VENV%" || goto :failed
-)
-
-echo [2/3] Installing components (about a minute the first time)...
-"%PY%" -m pip install --disable-pip-version-check -q --upgrade pip >nul 2>&1
-"%PY%" -m pip install --disable-pip-version-check -q -r "%~dp0apps\desktop\backend\requirements.txt" -c "%~dp0apps\desktop\backend\requirements.lock" || goto :failed
-copy /y "%BACKEND%\requirements.txt" "%STAMP%" >nul
-copy /y "%BACKEND%\requirements.lock" "%STAMPLOCK%" >nul
-
-echo [3/3] Checking Windows components...
-call :check_env
-echo Setup complete. Run ZenshiroDev\tooling\windows\scripts\Create-Desktop-Shortcut.bat for a desktop shortcut.
-
-:launch
-rem ZenLink window (Rust, native GPU video). It starts the Python backend
-rem from .venv by itself.
+rem ZenLink (one Rust program, native GPU video).
 rem Android: ZenLink finds adb in the Android SDK (ANDROID_HOME,
 rem ANDROID_SDK_ROOT, %LOCALAPPDATA%\Android\Sdk) or on PATH. Machine-only
 rem settings such as ANDROID_HOME can go in "Start ZenLink.local.bat" next
@@ -87,8 +28,8 @@ rem ZENLINK_DATA_DIR (settings and logs), ZENLINK_OUT_DIR (release build).
 if exist "%~dp0Start ZenLink.local.bat" (
     call "%~dp0Start ZenLink.local.bat"
 ) else if exist "%~dp0..\Start ZenLink.local.bat" call "%~dp0..\Start ZenLink.local.bat"
-rem ZenLink.exe finds this checkout (Python backend, .venv) through ZENLINK_SOURCE,
-rem also when CARGO_TARGET_DIR builds it outside the checkout.
+rem ZenLink.exe finds this checkout (native DLLs, driver tools, data\) through
+rem ZENLINK_SOURCE, also when CARGO_TARGET_DIR builds it outside the checkout.
 set "ZENLINK_SOURCE=%~dp0."
 set "NEXT=%~dp0ZenLink.exe"
 if exist "%NEXT%" goto :start_next
@@ -104,6 +45,13 @@ if not exist "%NEXT%" (
 )
 
 :start_next
+rem First start on this PC: check Apple Devices and the AirPlay firewall rule once.
+set "STAMP=%LOCALAPPDATA%\ZenLink-Next\.setup-checked"
+if not exist "%STAMP%" (
+    call :check_env
+    if not exist "%LOCALAPPDATA%\ZenLink-Next" mkdir "%LOCALAPPDATA%\ZenLink-Next"
+    echo checked> "%STAMP%"
+)
 start "" "%NEXT%"
 exit /b 0
 
@@ -138,18 +86,12 @@ if errorlevel 1 (
     echo  - Apple Devices: OK
 )
 rem Windows Firewall: lets the iPhone/iPad reach ZenLink for AirPlay (ZenLink Studio over Wi-Fi).
-"%PY%" -c "from zenlink import firewall; raise SystemExit(0 if firewall.has_rule() else 1)" >nul 2>&1
+netsh advfirewall firewall show rule name="ZenLink (AirPlay)" verbose 2>nul | find /i "%NEXT%" >nul
 if errorlevel 1 (
     choice /c YN /n /m " - Allow ZenLink on the local network for AirPlay (asks for administrator permission)? [Y/N] "
-    if !errorlevel! equ 1 "%PY%" -c "from zenlink import firewall; firewall.request_rule()"
+    if !errorlevel! equ 1 powershell -NoProfile -Command "Start-Process netsh -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList 'advfirewall firewall add rule name=\"ZenLink (AirPlay)\" dir=in action=allow program=\"%NEXT%\" enable=yes profile=any remoteip=localsubnet'"
 ) else (
     echo  - Firewall for AirPlay: OK
 )
 echo  - USB drivers: installed from inside ZenLink when you pick ZenLink Studio with the cable.
 exit /b 0
-
-:failed
-echo.
-echo Setup failed. Check the internet connection and run Start ZenLink.bat again.
-pause
-exit /b 1

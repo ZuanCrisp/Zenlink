@@ -1131,7 +1131,7 @@ fn widen_for_sheet(ui: &AppWindow) {
     }
 }
 
-/// The backend's data folder (paths.py `DATA_DIR`): a source checkout uses <repo>\data (or
+/// The data folder (settings.json, devices.json): a source checkout uses <repo>\data (or
 /// ZENLINK_DATA_DIR), a portable folder its own folder, an installed build
 /// %LOCALAPPDATA%\ZenLink-Next.
 pub fn backend_data_dir() -> Option<std::path::PathBuf> {
@@ -3796,7 +3796,7 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.set_settings_open(true);
     }
 
-    // Backend (Python sidecar for now), then a state poll loop.
+    // The in-process API (backend.rs), then a state poll loop.
     {
         let weak = ui.as_weak();
         let api = api.clone();

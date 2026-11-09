@@ -2,6 +2,11 @@
 
 Full notes for each version are on the [Releases](https://github.com/zenvyzenshiro/zenlink/releases) page.
 
+## 2.5.12
+
+### Changed
+- **One program, no Python:** Apple Driver mode, ZenLink Studio (cable and Wi-Fi), AirPlay and the driver settings now run inside `ZenLink.exe` (Rust). The `ZenLinkService.exe` helper and its PyInstaller runtime are gone, so downloads are smaller and start faster. Running from source needs only Rust.
+
 ## 2.5.11
 
 ### Added

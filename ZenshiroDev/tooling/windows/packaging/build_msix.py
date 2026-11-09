@@ -1,7 +1,7 @@
 """Builds the Microsoft Store package out/release/ZenLink-v<ver>.msix.
 
 Run after build_portable_release.ps1: it packs the installer layout
-(dist/ZenLinkService: ZenLink.exe, ZenLinkService.exe, adb, ...) with
+(dist/ZenLink: ZenLink.exe, zlaac.dll, playfair.dll, tools, drivers, ...) with
 ZenshiroDev/tooling/windows/packaging/msix/AppxManifest.xml and logos made from
 ZenshiroDev/resources/assets/logo.png.
 
@@ -10,7 +10,7 @@ install it must be signed with a certificate whose subject equals the
 manifest Publisher (only with the user's consent: that installs a
 certificate).
 
-    .venv\\Scripts\\python packaging\\build_msix.py
+    python ZenshiroDev\\tooling\\windows\\packaging\\build_msix.py   (needs Pillow)
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[4]  # ZenshiroDev/tooling/windows/packaging -> repository root
 OUT = Path(os.environ.get("ZENLINK_OUT_DIR") or ROOT / "out")
-SOURCE = OUT / "dist" / "ZenLinkService"
+SOURCE = OUT / "dist" / "ZenLink"
 LAYOUT = OUT / "build" / "msix"
 MAKEAPPX = Path(r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\makeappx.exe")
 # Helper scripts for the source/portable folder; the package has its own
@@ -45,10 +45,10 @@ LOGOS = {
 
 
 def version() -> str:
-    text = (ROOT / "apps" / "desktop" / "backend" / "pyproject.toml").read_text(encoding="utf-8")
-    v = re.search(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', text, re.M)
+    text = (ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    v = re.search(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)', text, re.M)
     if not v:
-        sys.exit("pyproject.toml: a plain X.Y.Z version is needed for the Store")
+        sys.exit("Cargo.toml: an X.Y.Z version is needed for the Store")
     # The Store needs four parts and the last one 0.
     return f"{v[1]}.{v[2]}.{v[3]}.0"
 
@@ -66,7 +66,7 @@ def logo(size: tuple[int, int], dest: Path) -> None:
 
 
 def main() -> None:
-    if not (SOURCE / "ZenLink.exe").exists() or not (SOURCE / "ZenLinkService.exe").exists():
+    if not (SOURCE / "ZenLink.exe").exists():
         sys.exit(f"{SOURCE} is not built: run build_portable_release.ps1 first")
     ver = version()
     if LAYOUT.exists():

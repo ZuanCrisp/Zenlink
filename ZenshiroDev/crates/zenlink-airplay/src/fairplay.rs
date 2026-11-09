@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn setup_replies_and_key_match_python() {
         let dll = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../apps/desktop/backend/zenlink/airplay/playfair.dll");
+            .join("../../resources/windows/native/playfair/playfair.dll");
         load(&dll).unwrap();
         let mut fp = FairPlay::default();
         let setup = [0x46, 0x50, 0x4C, 0x59, 3, 1, 1, 0, 0, 0, 0, 4, 2, 0, 2, 0xBB];

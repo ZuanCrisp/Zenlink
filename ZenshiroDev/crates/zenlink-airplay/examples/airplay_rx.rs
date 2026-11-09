@@ -1,7 +1,7 @@
-//! Runs the receiver and counts what arrives; pair it with the backend's tests/airplay_sim.py:
+//! Runs the receiver and counts what arrives; pair it with ZenshiroDev/tooling/dev/airplay_sim.py:
 //!
 //!   cargo run -p zenlink-airplay --example airplay_rx -- 7101 25
-//!   .venv\Scripts\python apps\desktop\backend\tests\airplay_sim.py --port 7101 --seconds 10 --audio
+//!   python ZenshiroDev\tooling\dev\airplay_sim.py --port 7101 --seconds 10 --audio
 //!
 //! Args: port (default 7101), seconds to run (default 30), `adv` to advertise over mDNS.
 
@@ -45,7 +45,7 @@ async fn main() {
     let port = args.next().and_then(|a| a.parse().ok()).unwrap_or(7101);
     let secs = args.next().and_then(|a| a.parse().ok()).unwrap_or(30);
     let dll = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../apps/desktop/backend/zenlink/airplay/playfair.dll");
+        .join("../../resources/windows/native/playfair/playfair.dll");
     zenlink_airplay::fairplay::load(&dll).unwrap();
     let sink = Arc::new(Count::default());
     let cfg = server::Config {

@@ -1,5 +1,5 @@
-//! AirPlay 1 screen-mirroring receiver (an Apple TV 3 to iOS), port of
-//! `apps/desktop/backend/zenlink/airplay` (protocol after UxPlay / shairplay, GPL-3.0).
+//! AirPlay 1 screen-mirroring receiver (an Apple TV 3 to iOS), port of the
+//! former Python receiver (protocol after UxPlay / shairplay, GPL-3.0).
 //! Serves ZenLink Studio over Wi-Fi and the Hybrid picture (iOS 17-26).
 //!
 //! Done: identity, `GET /info`, pair-verify, FairPlay, keys (step 1); RTSP server, mDNS and the

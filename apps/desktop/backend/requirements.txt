@@ -1,6 +1,0 @@
-# Runtime only. Sound is decoded by zenlink/zlaac.dll; the Apple and AirPlay paths are Rust (ZenLink.exe).
-# Test extras: av (tests/test_aac.py comparison, skipped without it), pycryptodome + cryptography
-# (tests/airplay_sim.py), see pyproject.toml [project.optional-dependencies] dev.
-aiohttp>=3.10
-pyusb>=1.2.1
-sounddevice>=0.4.6

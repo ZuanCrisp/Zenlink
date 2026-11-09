@@ -1,11 +1,8 @@
-.venv/
-__pycache__/
-*.pyc
 .webview/
 zenlink.log
 capture/
 settings.json
-# Source checkout data (settings, passcode, device names): apps/desktop/backend/zenlink/paths.py
+# Source checkout data (settings, passcode, device names): main.rs backend_data_dir
 /data/
 phonelink.log
 devices.json

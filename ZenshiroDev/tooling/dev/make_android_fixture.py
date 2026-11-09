@@ -6,7 +6,7 @@ packet, a config packet (SPS/PPS) and H.264 media packets (Annex B), PTS in
 microseconds. The picture is generated (moving colour bars and a frame
 counter), so the file holds no third-party content.
 
-    .venv\\Scripts\\python ZenshiroDev\\tooling\\dev\\make_android_fixture.py out.scrcpy [--seconds 4] [--fps 30]
+    python ZenshiroDev\\tooling\\dev\\make_android_fixture.py out.scrcpy [--seconds 4] [--fps 30]
 
 Needs PyAV (dev venv only; ZenLink itself does not use it).
 """

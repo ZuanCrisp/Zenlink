@@ -22,7 +22,7 @@ choice /c YN /m "Continue"
 if errorlevel 2 exit /b 0
 
 rem Stop only what runs from this folder: the stable ZenLink uses the same exe names.
-rem A .venv python.exe is a launcher, so its child (the real interpreter) is stopped too.
+rem Child processes (adb, the driver helper) are stopped too.
 powershell -NoProfile -Command "$d = '%ROOT%'; $all = Get-CimInstance Win32_Process; $own = @($all | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, 'OrdinalIgnoreCase') }); $ids = $own.ProcessId; $kids = @($all | Where-Object { $ids -contains $_.ParentProcessId }); ($kids + $own) | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 timeout /t 1 >nul
 

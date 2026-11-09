@@ -2,7 +2,7 @@
 
 Design references for the Rust window are listed in `ZenshiroDev/docs/rust/THIRD_PARTY.md`.
 
-## FFmpeg (AAC decoder only), in `apps/desktop/backend/zenlink/zlaac.dll`
+## FFmpeg (AAC decoder only), in `ZenshiroDev/resources/windows/native/zlaac/zlaac.dll`
 
 - What: the AAC / AAC-ELD decoder (`libavcodec`), `libswresample` and `libavutil`,
   statically linked into `zlaac.dll` (source: `ZenshiroDev/resources/windows/native/zlaac/`). Used for the
@@ -30,7 +30,7 @@ Design references for the Rust window are listed in `ZenshiroDev/docs/rust/THIRD
 
 ## Test fixtures only (not bundled)
 
-- `apps/desktop/backend/tests/fixtures/eld_*.zlau` are AAC-ELD streams of a synthetic signal, encoded on
+- `ZenshiroDev/tooling/dev/fixtures/eld_*.zlau` are AAC-ELD streams of a synthetic signal, encoded on
   the developer's PC with the Fraunhofer FDK AAC encoder 2.0.3
   (https://github.com/mstorsjo/fdk-aac, tag v2.0.3, tarball SHA-256
   `e25671cd96b10bad896aa42ab91a695a9e573395262baed4e4a2ff178d6a3a78`) through
@@ -61,7 +61,7 @@ Design references for the Rust window are listed in `ZenshiroDev/docs/rust/THIRD
   Copyright (C) 2018-2026 Romain Vimont. Apache-2.0 is compatible with GPL-3.0.
   Credited in the README, in Settings › About & credits, and in the installed
   `THIRD_PARTY.md` with `third_party\scrcpy\LICENSE`.
-- Checked by `apps/desktop/backend/tests/test_scrcpy_pin.py` (SHA-256) and the Rust test
+- Checked by the Rust test
   `scrcpy::tests::bundled_server_is_present_with_the_pinned_size`.
 
 ## Android platform-tools `adb` (downloaded on request)
