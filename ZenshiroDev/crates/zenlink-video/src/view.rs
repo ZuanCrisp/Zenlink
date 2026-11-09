@@ -15,8 +15,7 @@ use windows::Win32::System::Threading::WaitForSingleObjectEx;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use zenlink_core::api::Api;
-use zenlink_core::source::{BackendSource, VideoSource};
+use zenlink_core::source::VideoSource;
 
 use crate::d3d::{Gpu, Ring, SharedRing};
 use crate::decoder;
@@ -570,11 +569,6 @@ impl VideoView {
 
     pub fn stats(&self) -> StatsSnapshot {
         self.meter.lock().unwrap().sample(&self.inner.stats)
-    }
-
-    /// Decode the backend's cast stream (Apple devices).
-    pub fn start(&mut self, api: Api) {
-        self.start_source(Box::new(BackendSource(api)));
     }
 
     /// Decode any video source (Android, a recording).

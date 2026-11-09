@@ -1,10 +1,7 @@
-use std::time::Duration;
-
 use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::base_url;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Codec {
@@ -57,77 +54,47 @@ impl CodecInfo {
     }
 }
 
-/// Short requests (state, input, settings). The video stream uses its own agent.
-#[derive(Clone)]
-pub struct Api {
-    agent: ureq::Agent,
+/// The backend's requests, answered in this process by the handler the app registers
+/// (status code, JSON body). Before that every request fails.
+pub type Handler = fn(method: &str, path: &str, body: Option<&Value>) -> (u16, Value);
+
+static HANDLER: std::sync::OnceLock<Handler> = std::sync::OnceLock::new();
+
+/// Serve the API in this process (the Python sidecar is gone).
+pub fn serve(handler: Handler) {
+    let _ = HANDLER.set(handler);
 }
 
-impl Default for Api {
-    fn default() -> Self {
-        Self::new()
-    }
+fn call(method: &str, path: &str, body: Option<&Value>) -> Option<(u16, Value)> {
+    HANDLER.get().map(|h| h(method, path, body))
 }
+
+/// Short requests (state, input, settings).
+#[derive(Clone, Default)]
+pub struct Api;
 
 impl Api {
     pub fn new() -> Self {
-        let agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(5)))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        Self { agent }
+        Self
     }
 
     pub fn get(&self, path: &str) -> Option<Value> {
-        let mut r = self
-            .agent
-            .get(format!("{}{path}", base_url()))
-            .call()
-            .ok()?;
-        if r.status() != 200 {
-            return None;
-        }
-        r.body_mut().read_json::<Value>().ok()
+        call("GET", path, None).filter(|(c, _)| *c == 200).map(|(_, v)| v)
     }
 
     pub fn post(&self, path: &str, body: &Value) -> Option<Value> {
-        let mut r = self
-            .agent
-            .post(format!("{}{path}", base_url()))
-            .send_json(body)
-            .ok()?;
-        if !r.status().is_success() {
-            return None;
-        }
-        Some(r.body_mut().read_json::<Value>().unwrap_or(Value::Null))
+        call("POST", path, Some(body)).filter(|(c, _)| (200..300).contains(c)).map(|(_, v)| v)
     }
 
-    /// POST for work that takes long (driver changes, Wi-Fi setup). The JSON
-    /// body comes back also for error statuses: they carry the message.
-    pub fn post_slow(&self, path: &str, body: &Value, secs: u64) -> Option<Value> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(secs)))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        let mut r = agent
-            .post(format!("{}{path}", base_url()))
-            .send_json(body)
-            .ok()?;
-        r.body_mut().read_json::<Value>().ok()
+    /// POST for work that takes long (driver changes). The JSON body comes back also for
+    /// error statuses: they carry the message.
+    pub fn post_slow(&self, path: &str, body: &Value, _secs: u64) -> Option<Value> {
+        call("POST", path, Some(body)).map(|(_, v)| v)
     }
 
-    /// GET for work that takes a few seconds (an iPhone's app list). The JSON
-    /// body comes back also for error statuses: they carry the message.
-    pub fn get_slow(&self, path: &str, secs: u64) -> Option<Value> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(secs)))
-            .http_status_as_error(false)
-            .build()
-            .into();
-        let mut r = agent.get(format!("{}{path}", base_url())).call().ok()?;
-        r.body_mut().read_json::<Value>().ok()
+    /// GET that may take a few seconds; the body comes back also for error statuses.
+    pub fn get_slow(&self, path: &str, _secs: u64) -> Option<Value> {
+        call("GET", path, None).map(|(_, v)| v)
     }
 
     pub fn alive(&self) -> bool {
@@ -138,29 +105,12 @@ impl Api {
         self.get("/api/state")
     }
 
-    pub fn codec(&self) -> Option<CodecInfo> {
-        let mut r = self
-            .agent
-            .get(format!("{}/cast/codec", base_url()))
-            .call()
-            .ok()?;
-        if r.status() != 200 {
-            return None;
-        }
-        let bytes = r.body_mut().read_to_vec().ok()?;
-        CodecInfo::from_json(&bytes)
-    }
-
     pub fn start_cast(&self) -> bool {
         self.post("/api/cast/start", &json!({})).is_some()
     }
 
     pub fn stop_cast(&self) -> bool {
         self.post("/api/cast/stop", &json!({})).is_some()
-    }
-
-    pub fn request_keyframe(&self) {
-        let _ = self.post("/cast/pli", &json!({}));
     }
 
     /// `x`, `y` are 0..=65535 in the device's touch space.

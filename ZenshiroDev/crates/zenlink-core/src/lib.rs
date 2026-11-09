@@ -1,28 +1,19 @@
-//! Client side of the ZenLink backend protocol (ZenshiroDev/docs/rust/AUDIT.md section 2).
-//!
-//! Stage 1 of ADR-0001: the backend is the Python sidecar on 127.0.0.1:47421
-//! (the beta's port; the stable v2.2.31 keeps 47321, so both can run side by side).
-//! Later stages replace the sidecar with Rust crates; this API stays.
+//! Shared pieces of the ZenLink window: the backend API (served in this process since the
+//! Python sidecar was removed), decoder records, data folders and updates.
 
 use std::path::{Path, PathBuf};
 
 pub mod api;
 pub mod nal;
-pub mod sidecar;
 pub mod source;
 pub mod stream;
 pub mod update;
-
-pub const HOST: &str = "127.0.0.1";
-
-/// Backend port. The stable v2.2.31 uses 47321; the beta must never share it.
-pub const PORT: u16 = 47421;
 
 /// Product name for window titles and messages.
 pub const APP_NAME: &str = "ZenLink";
 
 /// Folder name under %APPDATA% and %LOCALAPPDATA% for prefs, settings and the
-/// unpacked backend. The stable build uses "ZenLink"; the beta never touches it.
+/// native DLLs. The stable build uses "ZenLink"; the beta never touches it.
 pub const DATA_DIR_NAME: &str = "ZenLink-Next";
 
 /// Window log file, in `log_dir()`. The stable build writes zenlink-next.log.
@@ -35,15 +26,6 @@ pub fn log_dir() -> PathBuf {
     local_data_dir()
         .map(|d| d.join("logs"))
         .unwrap_or_else(std::env::temp_dir)
-}
-
-/// Backend URL. `ZENLINK_PORT` overrides the port (tests, a second instance).
-pub fn base_url() -> String {
-    let port = std::env::var("ZENLINK_PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(PORT);
-    format!("http://{HOST}:{port}")
 }
 
 /// The beta's data folder inside a base folder such as %APPDATA% or %LOCALAPPDATA%.
@@ -59,12 +41,6 @@ pub fn local_data_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod isolation_tests {
     use super::*;
-
-    #[test]
-    fn beta_port_differs_from_stable() {
-        assert_eq!(PORT, 47421);
-        assert_ne!(PORT, 47321, "47321 belongs to the stable v2.2.31");
-    }
 
     #[test]
     fn beta_names_carry_beta() {

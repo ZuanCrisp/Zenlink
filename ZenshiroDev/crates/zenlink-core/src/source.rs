@@ -1,9 +1,9 @@
-//! Where the decoder gets its video from. The Apple path reads the backend's
-//! stream.bin; Android reads a scrcpy socket. Both hand the decoder the same
+//! Where the decoder gets its video from: the Apple, AirPlay and USB Direct sessions and
+//! Android's scrcpy socket. Both hand the decoder the same
 //! records (length-prefixed samples and avcC/hvcC configs), so there is one
 //! decoder and one renderer for every device type.
 
-use crate::api::{Api, CodecInfo};
+use crate::api::CodecInfo;
 use crate::stream::{Record, StreamReader};
 
 /// A stream of decoder records. `None` ends the session.
@@ -30,25 +30,5 @@ pub trait VideoSource: Send {
     /// recording, a closed device). The decoder thread then exits.
     fn finished(&self) -> bool {
         false
-    }
-}
-
-/// The Python backend's cast stream (Apple devices).
-pub struct BackendSource(pub Api);
-
-impl VideoSource for BackendSource {
-    fn open(&mut self) -> Option<(CodecInfo, Box<dyn RecordStream>)> {
-        let info = self.0.codec()?;
-        match StreamReader::open() {
-            Ok(s) => Some((info, Box::new(s))),
-            Err(e) => {
-                log::warn!("stream: {e}");
-                None
-            }
-        }
-    }
-
-    fn request_keyframe(&self) {
-        self.0.request_keyframe();
     }
 }

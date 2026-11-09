@@ -1,9 +1,8 @@
-//! GET /cast/stream.bin: records of `[u32 BE len][u8 type][len - 1 bytes]`.
+//! Decoder records, and a reader for streams of `[u32 BE len][u8 type][len - 1 bytes]`.
 
 use std::io::Read;
 
 use crate::api::CodecInfo;
-use crate::base_url;
 
 #[derive(Debug)]
 pub enum Record {
@@ -22,23 +21,6 @@ pub struct StreamReader {
 }
 
 impl StreamReader {
-    pub fn open() -> Result<Self, String> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .build()
-            .into();
-        let r = agent
-            .get(format!("{}/cast/stream.bin", base_url()))
-            .call()
-            .map_err(|e| e.to_string())?;
-        if r.status() != 200 {
-            return Err(format!("stream HTTP {}", r.status()));
-        }
-        Ok(Self {
-            reader: Box::new(r.into_body().into_reader()),
-        })
-    }
-
     pub fn from_reader(reader: impl Read + Send + 'static) -> Self {
         Self {
             reader: Box::new(reader),

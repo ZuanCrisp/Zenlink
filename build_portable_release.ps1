@@ -234,7 +234,7 @@ Invoke-Sign @($service)
 $env:ZENLINK_BACKEND_EXE = $service
 # Kept outside outuild (emptied each run), so only the changed crates rebuild.
 $portableTarget = Join-Path $rustTarget "portable"
-& cargo build --profile $cargoProfile --manifest-path Cargo.toml -p zenlink-app --features embedded-backend --target-dir $portableTarget
+& cargo build --profile $cargoProfile --manifest-path Cargo.toml -p zenlink-app --features portable --target-dir $portableTarget
 Remove-Item Env:ZENLINK_BACKEND_EXE
 if ($LASTEXITCODE) { throw "cargo (portable) failed" }
 Copy-Item (Join-Path $portableTarget "$cargoProfile\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")

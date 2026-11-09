@@ -111,7 +111,7 @@ pub fn kind() -> Kind {
         return Kind::Source;
     };
     let dir = exe.parent().unwrap_or(Path::new("."));
-    if cfg!(feature = "embedded-backend") {
+    if cfg!(feature = "portable") {
         Kind::Portable
     } else if dir.join("unins000.exe").exists() {
         Kind::Installed

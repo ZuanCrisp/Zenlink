@@ -19,6 +19,8 @@ mod prefs;
 mod shortcuts;
 mod tray;
 mod updater;
+mod backend;
+mod drivers;
 mod usbdirect;
 mod usbphones;
 
@@ -35,14 +37,12 @@ use slint::{ComponentHandle, LogicalSize, Model};
 use windows::Win32::Foundation::HWND;
 
 use zenlink_core::api::Api;
-use zenlink_core::sidecar::Sidecar;
 use zenlink_video::{Fit, PointerEvent, VideoView};
 
 use input::{Cmd, Input};
 
 slint::include_modules!();
 
-static SIDECAR: OnceLock<Mutex<Option<Sidecar>>> = OnceLock::new();
 static DEMO_T0: OnceLock<Instant> = OnceLock::new();
 
 /// Minimal file logger in `zenlink_core::log_dir()`. Each start begins a new
@@ -673,15 +673,22 @@ fn cast_stop(api: &Api) {
     }
 }
 
-fn start_apple_video(v: &mut VideoView, api: &Api) {
+fn start_apple_video(v: &mut VideoView) {
     if airplay::running() {
         v.start_source(Box::new(airplay::AirSource));
     } else if usbdirect::running() {
         v.start_source(Box::new(usbdirect::UsbSource));
     } else if apple::in_use() {
         v.start_source(apple::engine().source());
-    } else {
-        v.start(api.clone());
+    }
+}
+
+/// Ends every session (a link change, a mode restart, quitting).
+pub fn cast_stop_all() {
+    airplay::stop();
+    usbdirect::stop();
+    if apple::in_use() {
+        apple::engine().stop();
     }
 }
 
@@ -963,7 +970,7 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
             a.fitted = None;
             if let Some(v) = a.view.as_mut() {
                 if live {
-                    start_apple_video(v, api);
+                    start_apple_video(v);
                 } else {
                     v.stop();
                 }
@@ -1143,9 +1150,7 @@ pub fn backend_data_dir() -> Option<std::path::PathBuf> {
             if dir
                 .join("apps")
                 .join("desktop")
-                .join("backend")
-                .join("zenlink")
-                .join("connection.py")
+                .join("Cargo.toml")
                 .exists()
             {
                 return Some(data.unwrap_or_else(|| dir.join("data")));
@@ -3777,6 +3782,7 @@ fn main() -> Result<(), slint::PlatformError> {
             slint::CloseRequestResponse::KeepWindowShown
         });
     }
+    zenlink_core::api::serve(backend::handle);
     let api = Api::new();
     let input = Input::new(api.clone());
     let touch_on = Arc::new(AtomicBool::new(ui.get_prefs().touch));
@@ -3795,26 +3801,12 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         let api = api.clone();
         std::thread::spawn(move || {
-            match Sidecar::ensure(&api, Duration::from_secs(40)) {
-                Ok(s) => {
-                    let _ = SIDECAR.set(Mutex::new(Some(s)));
-                }
-                Err(e) => {
-                    let w = weak.clone();
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = w.upgrade() {
-                            ui.set_phase("error".into());
-                            ui.set_message(format!("Backend: {e}").into());
-                        }
-                    });
-                    return;
-                }
-            }
             loop {
                 if let Some(mut st) = api.state() {
                     apple::overlay(&mut st);
                     airplay::overlay(&mut st);
                     usbdirect::overlay(&mut st);
+                    backend::observe(&st);
                     let w = weak.clone();
                     let a = api.clone();
                     if slint::invoke_from_event_loop(move || {
@@ -4976,7 +4968,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             });
                             a.view = Some(v);
                             if a.streaming {
-                                start_apple_video(a.view.as_mut().unwrap(), &Api::new());
+                                start_apple_video(a.view.as_mut().unwrap());
                             } else if let Some(src) = a.android_pending.take() {
                                 a.view.as_mut().unwrap().start_source(src);
                             }
@@ -5328,9 +5320,7 @@ fn main() -> Result<(), slint::PlatformError> {
     tray::set_icon(false, "", "");
     let _ = ui.hide();
     APP.with_borrow_mut(|a| a.view = None);
-    if let Some(m) = SIDECAR.get() {
-        m.lock().unwrap().take();
-    }
+    cast_stop_all();
     stop_own_adb_server();
     r
 }

@@ -43,13 +43,13 @@ pub fn find_native(sub: &str, name: &str) -> Option<PathBuf> {
 
 /// Portable.exe: the native DLLs are packed in, unpacked to %LOCALAPPDATA%\ZenLink-Next\native
 /// once per size (the service folder is emptied on each new version, so not there).
-#[cfg(feature = "embedded-backend")]
+#[cfg(feature = "portable")]
 pub static ZLAAC: &[u8] = include_bytes!("../backend/zenlink/zlaac.dll");
-#[cfg(feature = "embedded-backend")]
+#[cfg(feature = "portable")]
 pub static PLAYFAIR: &[u8] = include_bytes!("../backend/zenlink/airplay/playfair.dll");
-#[cfg(not(feature = "embedded-backend"))]
+#[cfg(not(feature = "portable"))]
 pub static ZLAAC: &[u8] = &[];
-#[cfg(not(feature = "embedded-backend"))]
+#[cfg(not(feature = "portable"))]
 pub static PLAYFAIR: &[u8] = &[];
 
 pub fn unpack_embedded(stem: &str, dll: &[u8]) -> Option<PathBuf> {

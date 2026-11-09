@@ -31,6 +31,6 @@ base64 = "0.22"
 slint-build = "1.18"
 
 [features]
-# Portable.exe: the Python backend (ZENLINK_BACKEND_EXE) packed into
-# ZenLink.exe. adb is not packed: ZenLink downloads it on request.
-embedded-backend = ["zenlink-core/embedded-backend"]
+# Portable.exe: the native DLLs packed into ZenLink.exe. adb is not packed:
+# ZenLink downloads it on request.
+portable = []

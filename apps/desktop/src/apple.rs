@@ -306,7 +306,12 @@ pub fn overlay(st: &mut Value) {
     if !apple {
         return;
     }
-    if let (Some(dst), Value::Object(src)) = (st.as_object_mut(), engine().snapshot()) {
+    let mut snap = engine().snapshot();
+    if snap["devices"].as_array().is_some_and(Vec::is_empty) {
+        // Apple's service sees nothing: keep the backend's devices whose driver is wrong.
+        snap.as_object_mut().map(|o| o.remove("devices"));
+    }
+    if let (Some(dst), Value::Object(src)) = (st.as_object_mut(), snap) {
         dst.extend(src);
     }
 }

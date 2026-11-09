@@ -4,16 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "ZenLink backend client: sidecar launch, cast stream parsing, input."
+description = "ZenLink core: in-process API, decoder records, data folders, updates."
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = { workspace = true }
-ureq = { workspace = true }
 log = { workspace = true }
 
-[features]
-# Portable build: the backend exe (ZENLINK_BACKEND_EXE at build time) is
-# packed into this binary and unpacked to %LOCALAPPDATA%\ZenLink on start.
-embedded-backend = []
