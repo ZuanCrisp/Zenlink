@@ -2,7 +2,6 @@ use base64::Engine;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Codec {
     H264,
@@ -79,11 +78,15 @@ impl Api {
     }
 
     pub fn get(&self, path: &str) -> Option<Value> {
-        call("GET", path, None).filter(|(c, _)| *c == 200).map(|(_, v)| v)
+        call("GET", path, None)
+            .filter(|(c, _)| *c == 200)
+            .map(|(_, v)| v)
     }
 
     pub fn post(&self, path: &str, body: &Value) -> Option<Value> {
-        call("POST", path, Some(body)).filter(|(c, _)| (200..300).contains(c)).map(|(_, v)| v)
+        call("POST", path, Some(body))
+            .filter(|(c, _)| (200..300).contains(c))
+            .map(|(_, v)| v)
     }
 
     /// POST for work that takes long (driver changes). The JSON body comes back also for

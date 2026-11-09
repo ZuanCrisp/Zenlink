@@ -35,6 +35,8 @@ pub trait Sink: Send + Sync {
     fn video(&self, au: Vec<u8>);
     /// 48 kHz stereo s16le.
     fn audio(&self, pcm: &[u8]);
+    /// The device's ProductType, learned during the trust check.
+    fn product(&self, _product_type: &str) {}
 }
 
 /// Rate of the device's audio clock against the host clock, for SKEW (session.py SkewMeter):
@@ -57,7 +59,10 @@ impl SkewMeter {
     const JUMP: f64 = 0.5;
 
     pub fn new() -> Self {
-        Self { scale: 48000, ..Self::default() }
+        Self {
+            scale: 48000,
+            ..Self::default()
+        }
     }
 
     pub fn add(&mut self, pts: CmTime, local: CmTime) {
@@ -68,7 +73,10 @@ impl SkewMeter {
         if let Some((ld, ll)) = self.last {
             let (dd, dl) = (dev - ld, loc - ll);
             if dd < 0.0 || dl < 0.0 || (dd - dl).abs() > Self::JUMP {
-                *self = Self { scale: self.scale, ..Self::default() };
+                *self = Self {
+                    scale: self.scale,
+                    ..Self::default()
+                };
             }
         }
         self.last = Some((dev, loc));
@@ -89,7 +97,11 @@ impl SkewMeter {
     }
 
     pub fn rate(&self) -> f64 {
-        let nominal = if self.scale == 0 { 48000.0 } else { self.scale as f64 };
+        let nominal = if self.scale == 0 {
+            48000.0
+        } else {
+            self.scale as f64
+        };
         let (Some(f), Some(d)) = (self.first, self.done) else {
             return nominal;
         };
@@ -110,7 +122,10 @@ struct HostClock {
 
 impl HostClock {
     fn new(id: u64) -> Self {
-        Self { id, start: Instant::now() }
+        Self {
+            id,
+            start: Instant::now(),
+        }
     }
 
     fn now(&self) -> CmTime {
@@ -119,9 +134,21 @@ impl HostClock {
 }
 
 fn configs(dev: &Device) -> (Option<u8>, Option<u8>) {
-    let has = |c: &Config, sub| c.interfaces.iter().any(|i| i.class == VENDOR && i.subclass == sub);
-    let qt = dev.configs.iter().find(|c| has(c, QT_SUBCLASS)).map(|c| c.value);
-    let mux = dev.configs.iter().find(|c| !has(c, QT_SUBCLASS) && has(c, MUX_SUBCLASS)).map(|c| c.value);
+    let has = |c: &Config, sub| {
+        c.interfaces
+            .iter()
+            .any(|i| i.class == VENDOR && i.subclass == sub)
+    };
+    let qt = dev
+        .configs
+        .iter()
+        .find(|c| has(c, QT_SUBCLASS))
+        .map(|c| c.value);
+    let mux = dev
+        .configs
+        .iter()
+        .find(|c| !has(c, QT_SUBCLASS) && has(c, MUX_SUBCLASS))
+        .map(|c| c.value);
     (mux, qt)
 }
 
@@ -162,8 +189,16 @@ pub struct Control {
 }
 
 impl Session {
-    pub fn new(serial: &str, sink: Arc<dyn Sink>, display: (u32, u32), audio_to_pc: bool) -> (Self, Control) {
-        let control = Control { stop: Arc::new(AtomicBool::new(false)), audio_to_pc: Arc::new(AtomicBool::new(audio_to_pc)) };
+    pub fn new(
+        serial: &str,
+        sink: Arc<dyn Sink>,
+        display: (u32, u32),
+        audio_to_pc: bool,
+    ) -> (Self, Control) {
+        let control = Control {
+            stop: Arc::new(AtomicBool::new(false)),
+            audio_to_pc: Arc::new(AtomicBool::new(audio_to_pc)),
+        };
         let s = Self {
             serial: serial.replace('-', "").to_uppercase(),
             sink,
@@ -248,17 +283,22 @@ impl Session {
         let mut dev = self.find()?.ok_or(not_attached)?;
         let (mux, mut qt) = configs(&dev);
         self.mux_cfg = mux;
-        self.sink.state("activating", "Switching the device to screen capture");
+        self.sink
+            .state("activating", "Switching the device to screen capture");
         let mut adopt = false;
         if qt.is_some() {
-            log::info!("usb direct: device is still in capture mode; switching it back to normal first");
+            log::info!(
+                "usb direct: device is still in capture mode; switching it back to normal first"
+            );
             self.capture_request(&dev, false);
             match self.wait_reconnect(false, Duration::from_secs(6)) {
                 Ok(d) => dev = d,
                 Err(_) if !self.stop.load(Relaxed) => {
                     log::info!("usb direct: device stayed in capture mode; adopting it");
                     adopt = true;
-                    dev = self.find()?.ok_or("The device disappeared. Plug it in again and retry.")?;
+                    dev = self
+                        .find()?
+                        .ok_or("The device disappeared. Plug it in again and retry.")?;
                 }
                 Err(e) => return Err(e),
             }
@@ -267,7 +307,10 @@ impl Session {
             qt = q;
         }
         if !adopt {
-            log::info!("usb direct: requesting capture mode ({} configurations)", dev.configs.len());
+            log::info!(
+                "usb direct: requesting capture mode ({} configurations)",
+                dev.configs.len()
+            );
             self.capture_request(&dev, true);
             dev = self.wait_reconnect(true, Duration::from_secs(15))?;
             let (m, q) = configs(&dev);
@@ -278,21 +321,27 @@ impl Session {
             "The device did not offer its screen-capture configuration. Unlock it and try again. \
              If it keeps failing, restart the iPhone/iPad.",
         )?;
-        log::info!("usb direct: capture mode on ({} configurations, capture config {qt})", dev.configs.len());
+        log::info!(
+            "usb direct: capture mode on ({} configurations, capture config {qt})",
+            dev.configs.len()
+        );
 
         // qcast QMirror_Init/Trust: capture configuration, lockdown session over usbmux.
         {
             let h = Arc::new(dev.open()?);
             if h.active_configuration() != Some(qt) {
-                h.set_configuration(qt)
-                    .map_err(|e| format!("Trust check over USB failed ({e}). Unplug the device and retry."))?;
+                h.set_configuration(qt).map_err(|e| {
+                    format!("Trust check over USB failed ({e}). Unplug the device and retry.")
+                })?;
             }
             self.prove_trust(&h, &dev, qt)?;
         }
 
         // qcast quicktime_libusb0_impl::start: a fresh handle, SET_CONFIGURATION(capture), claim the
         // capture interface, clear both halts, then read 16 KiB with a 100 ms timeout.
-        let dev = self.find()?.ok_or("The device disappeared. Plug it in again and retry.")?;
+        let dev = self
+            .find()?
+            .ok_or("The device disappeared. Plug it in again and retry.")?;
         let h = Arc::new(dev.open()?);
         if let Err(e) = h.set_configuration(qt) {
             if h.active_configuration() != Some(qt) {
@@ -301,14 +350,21 @@ impl Session {
                 ));
             }
         }
-        let cfg = dev.configs.iter().find(|c| c.value == qt).ok_or("capture configuration missing")?;
+        let cfg = dev
+            .configs
+            .iter()
+            .find(|c| c.value == qt)
+            .ok_or("capture configuration missing")?;
         let iface = cfg
             .interfaces
             .iter()
             .find(|i| i.class == VENDOR && i.subclass == QT_SUBCLASS)
             .ok_or("The capture interface is missing from the capture configuration.")?;
-        h.claim(iface.number)
-            .map_err(|e| format!("Windows refused to open the capture interface ({e}). Unplug the device and retry."))?;
+        h.claim(iface.number).map_err(|e| {
+            format!(
+                "Windows refused to open the capture interface ({e}). Unplug the device and retry."
+            )
+        })?;
         let (Some(ep_in), Some(ep_out)) = (iface.ep_in(), iface.ep_out()) else {
             return Err("The capture interface has no bulk endpoints.".into());
         };
@@ -323,7 +379,12 @@ impl Session {
             ep_in.address,
             ep_out.address
         );
-        self.cap = Some(Capture { dev: h, iface: iface.number, ep_in: ep_in.address, ep_out: ep_out.address });
+        self.cap = Some(Capture {
+            dev: h,
+            iface: iface.number,
+            ep_in: ep_in.address,
+            ep_out: ep_out.address,
+        });
         Ok(())
     }
 
@@ -332,17 +393,24 @@ impl Session {
             .configs
             .iter()
             .find(|c| c.value == qt)
-            .and_then(|c| c.interfaces.iter().find(|i| i.class == VENDOR && i.subclass == MUX_SUBCLASS))
+            .and_then(|c| {
+                c.interfaces
+                    .iter()
+                    .find(|i| i.class == VENDOR && i.subclass == MUX_SUBCLASS)
+            })
             .cloned()
         else {
             log::warn!("usb direct: no usbmux interface in the capture configuration");
             return Ok(());
         };
-        self.sink.state("activating", "Checking that this PC is trusted");
+        self.sink
+            .state("activating", "Checking that this PC is trusted");
         let (Some(ep_in), Some(ep_out)) = (iface.ep_in().cloned(), iface.ep_out().cloned()) else {
             return Ok(());
         };
-        h.claim(iface.number).map_err(|e| format!("Trust check over USB failed ({e}). Unplug the device and retry."))?;
+        h.claim(iface.number).map_err(|e| {
+            format!("Trust check over USB failed ({e}). Unplug the device and retry.")
+        })?;
         let result = (|| {
             let mux = UsbMux::start(h.clone(), ep_in.address, ep_out.address, ep_out.max_packet)?;
             let stream = mux.connect(LOCKDOWN_PORT)?;
@@ -353,8 +421,11 @@ impl Session {
         })();
         h.release(iface.number);
         match result {
-            Ok(()) => {
+            Ok(product) => {
                 log::info!("usb direct: trust confirmed (lockdown session started and stopped)");
+                if let Some(p) = product {
+                    self.sink.product(&p);
+                }
                 Ok(())
             }
             Err(e) => {
@@ -392,7 +463,8 @@ impl Session {
     }
 
     fn write(&self, data: &[u8]) -> Result<(), String> {
-        self.write_timeout(data, 2000).map_err(|e| format!("USB connection lost: {e}"))
+        self.write_timeout(data, 2000)
+            .map_err(|e| format!("USB connection lost: {e}"))
     }
 
     fn write_timeout(&self, data: &[u8], timeout: u32) -> Result<(), i32> {
@@ -435,7 +507,8 @@ impl Session {
     }
 
     fn receive(&mut self) -> Result<(), String> {
-        self.sink.state("waiting", "Unlock the device and keep it unlocked");
+        self.sink
+            .state("waiting", "Unlock the device and keep it unlocked");
         let mut buf: Vec<u8> = Vec::new();
         let mut received = 0usize;
         let mut silent = Instant::now();
@@ -474,7 +547,8 @@ impl Session {
                         if let Err(e) = self.activate() {
                             break Err(e);
                         }
-                        self.sink.state("waiting", "Unlock the device and keep it unlocked");
+                        self.sink
+                            .state("waiting", "Unlock the device and keep it unlocked");
                         self.pinged = false;
                         silent = Instant::now();
                         (rx, reading) = self.start_reader();
@@ -490,7 +564,10 @@ impl Session {
                         // qcast: one active PING on the first read timeout, never repeated.
                         let ok = self.write_timeout(&wire::ping(true), 100).is_ok();
                         self.pinged = true;
-                        log::info!("usb direct: active PING {}", if ok { "sent" } else { "not taken" });
+                        log::info!(
+                            "usb direct: active PING {}",
+                            if ok { "sent" } else { "not taken" }
+                        );
                     }
                     continue;
                 }
@@ -538,11 +615,22 @@ impl Session {
         if self.audio_clock.is_none() || on == self.audio_on {
             return;
         }
-        let packet = if on { wire::hpa1(self.device_audio_clock) } else { wire::asyn(wire::HPA0, self.device_audio_clock, &[]) };
+        let packet = if on {
+            wire::hpa1(self.device_audio_clock)
+        } else {
+            wire::asyn(wire::HPA0, self.device_audio_clock, &[])
+        };
         match self.write(&packet) {
             Ok(()) => {
                 self.audio_on = on;
-                log::info!("usb direct: sound {}", if on { "to this PC" } else { "back on the device" });
+                log::info!(
+                    "usb direct: sound {}",
+                    if on {
+                        "to this PC"
+                    } else {
+                        "back on the device"
+                    }
+                );
             }
             Err(e) => log::info!("usb direct: could not move the sound: {e}"),
         }
@@ -579,7 +667,8 @@ impl Session {
                     self.write(&wire::ping(false))?;
                     self.pinged = true;
                 }
-                self.sink.state("handshake", "Device answered, setting up the stream");
+                self.sink
+                    .state("handshake", "Device answered, setting up the stream");
                 Ok(false)
             }
             Some(wire::SYNC) => self.handle_sync(p).map(|_| false),
@@ -688,7 +777,15 @@ mod tests {
             let j = jitter * ((k >> 16) & 0x7FFF) as f64 / 32768.0;
             let dev = start.0 + t;
             let loc = start.1 + t * rate + 0.02 + j;
-            m.add(CmTime { value: (dev * 48000.0) as u64, scale: 48000, flags: 0, epoch: 0 }, CmTime::ns((loc * 1e9) as u64));
+            m.add(
+                CmTime {
+                    value: (dev * 48000.0) as u64,
+                    scale: 48000,
+                    flags: 0,
+                    epoch: 0,
+                },
+                CmTime::ns((loc * 1e9) as u64),
+            );
             t += 0.02;
         }
     }

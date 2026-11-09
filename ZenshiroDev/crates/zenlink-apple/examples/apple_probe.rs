@@ -110,12 +110,12 @@ async fn run(a: Args) -> Result<(), String> {
         &key,
         false,
         |au| {
-        first.get_or_insert_with(Instant::now);
-        frames += 1;
-        bytes += au.len();
-        if let Some(f) = out.as_mut() {
-            let _ = f.write_all(&au);
-        }
+            first.get_or_insert_with(Instant::now);
+            frames += 1;
+            bytes += au.len();
+            if let Some(f) = out.as_mut() {
+                let _ = f.write_all(&au);
+            }
             Instant::now() < end
         },
         |_| audio += 1,

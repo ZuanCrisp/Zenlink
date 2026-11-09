@@ -119,7 +119,8 @@ struct Api {
     release_interface: unsafe extern "C" fn(Handle, c_int) -> c_int,
     bulk_write: unsafe extern "C" fn(Handle, c_int, *const u8, c_int, c_int) -> c_int,
     bulk_read: unsafe extern "C" fn(Handle, c_int, *mut u8, c_int, c_int) -> c_int,
-    control_msg: unsafe extern "C" fn(Handle, c_int, c_int, c_int, c_int, *mut u8, c_int, c_int) -> c_int,
+    control_msg:
+        unsafe extern "C" fn(Handle, c_int, c_int, c_int, c_int, *mut u8, c_int, c_int) -> c_int,
     clear_halt: unsafe extern "C" fn(Handle, c_uint) -> c_int,
     get_string_simple: unsafe extern "C" fn(Handle, c_int, *mut c_char, usize) -> c_int,
 }
@@ -141,9 +142,12 @@ fn api() -> Result<&'static Api, String> {
     API.get_or_init(|| unsafe {
         let path = dll_path();
         if !path.exists() {
-            return Err("libusb0.dll is not installed. Open Settings > Connection & Drivers.".into());
+            return Err(
+                "libusb0.dll is not installed. Open Settings > Connection & Drivers.".into(),
+            );
         }
-        let lib = Library::new(&path).map_err(|e| format!("libusb0.dll could not be loaded: {e}"))?;
+        let lib =
+            Library::new(&path).map_err(|e| format!("libusb0.dll could not be loaded: {e}"))?;
         macro_rules! f {
             ($n:literal) => {
                 *lib.get($n).map_err(|e| format!("libusb0.dll: {e}"))?
@@ -229,7 +233,10 @@ unsafe fn configs(dev: &UsbDevice) -> Vec<Config> {
                     let eps = (0..a.b_num_endpoints as usize)
                         .map(|k| {
                             let e = &*a.endpoint.add(k);
-                            Endpoint { address: e.b_endpoint_address, max_packet: e.w_max_packet_size }
+                            Endpoint {
+                                address: e.b_endpoint_address,
+                                max_packet: e.w_max_packet_size,
+                            }
                         })
                         .collect();
                     Some(Iface {
@@ -240,7 +247,10 @@ unsafe fn configs(dev: &UsbDevice) -> Vec<Config> {
                     })
                 })
                 .collect();
-            Config { value: c.b_configuration_value, interfaces: ifaces }
+            Config {
+                value: c.b_configuration_value,
+                interfaces: ifaces,
+            }
         })
         .collect()
 }
@@ -261,7 +271,13 @@ pub fn apple_devices() -> Result<Vec<(String, Device)>, String> {
                 let desc = std::ptr::addr_of!(d.descriptor).read_unaligned();
                 if desc.id_vendor == 0x05AC {
                     let serial = serial_of(api, dev, desc.i_serial_number);
-                    out.push((serial, Device { ptr: dev, configs: configs(d) }));
+                    out.push((
+                        serial,
+                        Device {
+                            ptr: dev,
+                            configs: configs(d),
+                        },
+                    ));
                 }
                 dev = d.next;
             }
@@ -283,12 +299,18 @@ unsafe fn serial_of(api: &Api, dev: *const UsbDevice, index: u8) -> String {
         return String::new();
     }
     let bytes: Vec<u8> = buf[..n as usize].iter().map(|&c| c as u8).collect();
-    String::from_utf8_lossy(&bytes).trim_matches(['\0', ' ', '\t']).replace('-', "").to_uppercase()
+    String::from_utf8_lossy(&bytes)
+        .trim_matches(['\0', ' ', '\t'])
+        .replace('-', "")
+        .to_uppercase()
 }
 
 pub fn find(serial: &str) -> Result<Option<Device>, String> {
     let want = serial.replace('-', "").to_uppercase();
-    Ok(apple_devices()?.into_iter().find(|(s, _)| *s == want).map(|(_, d)| d))
+    Ok(apple_devices()?
+        .into_iter()
+        .find(|(s, _)| *s == want)
+        .map(|(_, d)| d))
 }
 
 /// An open device handle; closed on drop.
@@ -322,7 +344,10 @@ impl Device {
 impl Open {
     pub fn set_configuration(&self, value: u8) -> Result<(), i32> {
         let api = api().map_err(|_| -1)?;
-        check("set_configuration", unsafe { (api.set_configuration)(self.h, value as c_int) }).map(drop)
+        check("set_configuration", unsafe {
+            (api.set_configuration)(self.h, value as c_int)
+        })
+        .map(drop)
     }
 
     /// GET_CONFIGURATION over the control pipe (libusb0 has no getter).
@@ -333,7 +358,10 @@ impl Open {
 
     pub fn claim(&self, iface: u8) -> Result<(), i32> {
         let api = api().map_err(|_| -1)?;
-        check("claim_interface", unsafe { (api.claim_interface)(self.h, iface as c_int) }).map(drop)
+        check("claim_interface", unsafe {
+            (api.claim_interface)(self.h, iface as c_int)
+        })
+        .map(drop)
     }
 
     pub fn release(&self, iface: u8) {
@@ -344,10 +372,21 @@ impl Open {
 
     pub fn clear_halt(&self, ep: u8) -> Result<(), i32> {
         let api = api().map_err(|_| -1)?;
-        check("clear_halt", unsafe { (api.clear_halt)(self.h, ep as c_uint) }).map(drop)
+        check("clear_halt", unsafe {
+            (api.clear_halt)(self.h, ep as c_uint)
+        })
+        .map(drop)
     }
 
-    pub fn control(&self, req_type: u8, req: u8, value: u16, index: u16, data: &mut [u8], timeout: u32) -> Result<usize, i32> {
+    pub fn control(
+        &self,
+        req_type: u8,
+        req: u8,
+        value: u16,
+        index: u16,
+        data: &mut [u8],
+        timeout: u32,
+    ) -> Result<usize, i32> {
         let api = api().map_err(|_| -1)?;
         let r = unsafe {
             (api.control_msg)(
@@ -366,14 +405,30 @@ impl Open {
 
     pub fn write(&self, ep: u8, data: &[u8], timeout: u32) -> Result<usize, i32> {
         let api = api().map_err(|_| -1)?;
-        let r = unsafe { (api.bulk_write)(self.h, ep as c_int, data.as_ptr(), data.len() as c_int, timeout as c_int) };
+        let r = unsafe {
+            (api.bulk_write)(
+                self.h,
+                ep as c_int,
+                data.as_ptr(),
+                data.len() as c_int,
+                timeout as c_int,
+            )
+        };
         check("bulk_write", r).map(|n| n as usize)
     }
 
     /// Bulk read; `Err(TIMEOUT)` when nothing came in time.
     pub fn read(&self, ep: u8, buf: &mut [u8], timeout: u32) -> Result<usize, i32> {
         let api = api().map_err(|_| -1)?;
-        let r = unsafe { (api.bulk_read)(self.h, ep as c_int, buf.as_mut_ptr(), buf.len() as c_int, timeout as c_int) };
+        let r = unsafe {
+            (api.bulk_read)(
+                self.h,
+                ep as c_int,
+                buf.as_mut_ptr(),
+                buf.len() as c_int,
+                timeout as c_int,
+            )
+        };
         if r == TIMEOUT {
             return Err(TIMEOUT);
         }
@@ -400,6 +455,9 @@ mod tests {
         assert_eq!(std::mem::size_of::<InterfaceDesc>(), 9 + 8 + 8 + 4);
         assert_eq!(std::mem::size_of::<ConfigDesc>(), 9 + 8 + 8 + 4);
         assert_eq!(std::mem::size_of::<DeviceDesc>(), 18);
-        assert_eq!(std::mem::offset_of!(UsbDevice, descriptor), 8 + 8 + PATH + 8);
+        assert_eq!(
+            std::mem::offset_of!(UsbDevice, descriptor),
+            8 + 8 + PATH + 8
+        );
     }
 }

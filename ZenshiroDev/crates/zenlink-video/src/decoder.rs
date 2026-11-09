@@ -172,7 +172,14 @@ impl Mft {
                     "decoder output {}x{}, aperture {}, sps window {:?}, shown {:?}",
                     self.width,
                     self.height,
-                    if got > 0 { format!("{}x{}+{}+{}", area.Area.cx, area.Area.cy, area.OffsetX.value, area.OffsetY.value) } else { "none".into() },
+                    if got > 0 {
+                        format!(
+                            "{}x{}+{}+{}",
+                            area.Area.cx, area.Area.cy, area.OffsetX.value, area.OffsetY.value
+                        )
+                    } else {
+                        "none".into()
+                    },
                     self.visible,
                     (self.src.left, self.src.top, self.src.right, self.src.bottom)
                 );
@@ -197,7 +204,12 @@ impl Mft {
         }
         if let Some([l, t, r, b]) = self.visible {
             if r <= self.width && b <= self.height {
-                self.src = RECT { left: l as i32, top: t as i32, right: r as i32, bottom: b as i32 };
+                self.src = RECT {
+                    left: l as i32,
+                    top: t as i32,
+                    right: r as i32,
+                    bottom: b as i32,
+                };
             }
         } else if let Some((w, h)) = self.display {
             // Either way round (the picture turns with the device); only a small pad is cut.
@@ -206,7 +218,12 @@ impl Mft {
             };
             let (w, h) = if fits(w, h) { (w, h) } else { (h, w) };
             if fits(w, h) {
-                self.src = RECT { left: 0, top: 0, right: w as i32, bottom: h as i32 };
+                self.src = RECT {
+                    left: 0,
+                    top: 0,
+                    right: w as i32,
+                    bottom: h as i32,
+                };
             }
         }
     }

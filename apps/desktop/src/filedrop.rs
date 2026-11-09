@@ -287,14 +287,27 @@ mod ios {
         let udid = crate::apple::file_device().ok_or("no device")?;
         let t = std::time::Instant::now();
         let mut last = t;
-        let saved = crate::apple::block_on(zenlink_apple::files::send(&udid, bundle, path, |sent, total| {
-            if last.elapsed() >= Duration::from_millis(200) || sent == total {
-                last = std::time::Instant::now();
-                progress(if total > 0 { sent as f32 / total as f32 } else { 0.0 });
-            }
-        }))
+        let saved = crate::apple::block_on(zenlink_apple::files::send(
+            &udid,
+            bundle,
+            path,
+            |sent, total| {
+                if last.elapsed() >= Duration::from_millis(200) || sent == total {
+                    last = std::time::Instant::now();
+                    progress(if total > 0 {
+                        sent as f32 / total as f32
+                    } else {
+                        0.0
+                    });
+                }
+            },
+        ))
         .inspect_err(|e| log::warn!("files: sending {} to {bundle} failed: {e}", path.display()))?;
-        log::info!("files: {} to {bundle}/Documents/{saved} in {:.1} s", path.display(), t.elapsed().as_secs_f32());
+        log::info!(
+            "files: {} to {bundle}/Documents/{saved} in {:.1} s",
+            path.display(),
+            t.elapsed().as_secs_f32()
+        );
         Ok(())
     }
 

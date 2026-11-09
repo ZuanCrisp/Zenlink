@@ -27,7 +27,13 @@ fn err(what: &str) -> impl Fn(idevice::IdeviceError) -> String + '_ {
 pub fn safe_name(name: &str) -> Option<String> {
     let clean: String = name
         .chars()
-        .map(|c| if (c as u32) < 32 || "\"*/:<>?\\|".contains(c) { '_' } else { c })
+        .map(|c| {
+            if (c as u32) < 32 || "\"*/:<>?\\|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let mut clean = clean.trim().trim_end_matches('.').to_string();
     if clean.is_empty() || clean.chars().all(|c| c == '.' || c == '_') {
@@ -74,7 +80,9 @@ pub async fn sharing_apps(udid: &str) -> Result<Vec<(String, String)>, String> {
             let d = info.as_dictionary()?;
             d.get("UIFileSharingEnabled")?.as_boolean().filter(|b| *b)?;
             let s = |k: &str| d.get(k).and_then(|v| v.as_string()).map(str::to_owned);
-            let name = s("CFBundleDisplayName").or_else(|| s("CFBundleName")).unwrap_or(bundle.clone());
+            let name = s("CFBundleDisplayName")
+                .or_else(|| s("CFBundleName"))
+                .unwrap_or(bundle.clone());
             Some((bundle, name))
         })
         .collect();
@@ -94,7 +102,9 @@ pub async fn send(
         .file_name()
         .and_then(|n| safe_name(&n.to_string_lossy()))
         .ok_or("unusable file name")?;
-    let mut file = tokio::fs::File::open(local).await.map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::open(local)
+        .await
+        .map_err(|e| e.to_string())?;
     let total = file.metadata().await.map_err(|e| e.to_string())?.len();
     let p = provider(udid).await?;
     let mut afc = HouseArrestClient::connect(&p)
@@ -105,7 +115,11 @@ pub async fn send(
         .map_err(err("app folder"))?;
     let mut remote = name.clone();
     let mut n = 0;
-    while afc.get_file_info(format!("{DOCUMENTS}/{remote}")).await.is_ok() {
+    while afc
+        .get_file_info(format!("{DOCUMENTS}/{remote}"))
+        .await
+        .is_ok()
+    {
         n += 1;
         if n > 999 {
             return Err("no free file name".into());

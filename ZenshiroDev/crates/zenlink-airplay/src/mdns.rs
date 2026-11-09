@@ -8,7 +8,15 @@ use crate::info::Receiver;
 
 /// IPv4 addresses of real LAN adapters (no virtual switches, VPN taps, WSL, loopback).
 pub fn lan_ipv4() -> Vec<IpAddr> {
-    const SKIP: [&str; 7] = ["vethernet", "virtual", "vmware", "hyper-v", "loopback", "wsl", "tap"];
+    const SKIP: [&str; 7] = [
+        "vethernet",
+        "virtual",
+        "vmware",
+        "hyper-v",
+        "loopback",
+        "wsl",
+        "tap",
+    ];
     if_addrs::get_if_addrs()
         .unwrap_or_default()
         .into_iter()
@@ -43,7 +51,9 @@ impl Advert {
             let info = ServiceInfo::new(ty, &name, &host, &ips[..], port, &props[..])
                 .map_err(|e| format!("mDNS {ty}: {e}"))?;
             names.push(info.get_fullname().to_string());
-            daemon.register(info).map_err(|e| format!("mDNS {ty}: {e}"))?;
+            daemon
+                .register(info)
+                .map_err(|e| format!("mDNS {ty}: {e}"))?;
         }
         log::info!("airplay: advertised \"{}\" on {ips:?}", r.name);
         Ok(Self { daemon, names })

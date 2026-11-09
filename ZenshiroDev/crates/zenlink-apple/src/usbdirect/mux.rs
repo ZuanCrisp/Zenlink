@@ -57,7 +57,9 @@ impl Shared {
             packet.extend_from_slice(&(8 + payload.len() as u32).to_be_bytes());
         }
         packet.extend_from_slice(payload);
-        self.dev.write(self.ep_out, &packet, 1000).map_err(|e| format!("usbmux write: {e}"))?;
+        self.dev
+            .write(self.ep_out, &packet, 1000)
+            .map_err(|e| format!("usbmux write: {e}"))?;
         if packet.len() % self.max_packet.max(1) == 0 {
             let _ = self.dev.write(self.ep_out, &[], 1000); // a zero-length packet ends the transfer
         }
@@ -68,7 +70,7 @@ impl Shared {
 struct StreamState {
     sport: u16,
     dport: u16,
-    seqs: Mutex<(u32, u32)>, // (tx_seq, tx_ack)
+    seqs: Mutex<(u32, u32)>,        // (tx_seq, tx_ack)
     connected: Mutex<Option<bool>>, // None: waiting; Some(false): refused / reset
     rx: Mutex<Option<Sender<Option<Vec<u8>>>>>,
 }
@@ -179,7 +181,11 @@ impl UsbMux {
             dev,
             ep_out,
             max_packet: max_packet as usize,
-            tx: Mutex::new(Tx { version: 0, seq: 0, rx_seq: 0xFFFF }),
+            tx: Mutex::new(Tx {
+                version: 0,
+                seq: 0,
+                rx_seq: 0xFFFF,
+            }),
             streams: Mutex::new(HashMap::new()),
             stop: AtomicBool::new(false),
         });
@@ -189,13 +195,17 @@ impl UsbMux {
             .name("usbmux".into())
             .spawn(move || read_loop(&s, ep_in, vtx))
             .map_err(|e| e.to_string())?;
-        let mux = Self { shared, reader: Some(reader) };
+        let mux = Self {
+            shared,
+            reader: Some(reader),
+        };
         let mut hello = Vec::new();
         for n in [2u32, 0, 0] {
             hello.extend_from_slice(&n.to_be_bytes());
         }
         mux.shared.send(PROTO_VERSION, &hello)?;
-        vrx.recv_timeout(Duration::from_secs(5)).map_err(|_| "the device did not answer the usbmux handshake".to_string())?;
+        vrx.recv_timeout(Duration::from_secs(5))
+            .map_err(|_| "the device did not answer the usbmux handshake".to_string())?;
         mux.shared.send(PROTO_SETUP, &[7])?;
         Ok(mux)
     }
@@ -210,12 +220,23 @@ impl UsbMux {
             connected: Mutex::new(None),
             rx: Mutex::new(Some(tx)),
         });
-        self.shared.streams.lock().unwrap().insert(sport, state.clone());
+        self.shared
+            .streams
+            .lock()
+            .unwrap()
+            .insert(sport, state.clone());
         state.segment(&self.shared, TH_SYN, &[])?;
         for _ in 0..50 {
             let c = *state.connected.lock().unwrap();
             match c {
-                Some(true) => return Ok(MuxStream { mux: self.shared.clone(), state, rx, closed: false }),
+                Some(true) => {
+                    return Ok(MuxStream {
+                        mux: self.shared.clone(),
+                        state,
+                        rx,
+                        closed: false,
+                    })
+                }
                 Some(false) => break,
                 None => {}
             }
@@ -236,7 +257,9 @@ impl Drop for UsbMux {
 }
 
 fn rand_u16() -> u16 {
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
     (t.subsec_nanos() ^ (t.as_secs() as u32).rotate_left(7)) as u16
 }
 
@@ -269,7 +292,10 @@ fn read_loop(mux: &Shared, ep_in: u8, version: Sender<()>) {
 }
 
 fn dispatch(mux: &Shared, proto: u32, p: &[u8], version: &Sender<()>) {
-    let be32 = |at: usize| p.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()));
+    let be32 = |at: usize| {
+        p.get(at..at + 4)
+            .map(|b| u32::from_be_bytes(b.try_into().unwrap()))
+    };
     if proto == PROTO_VERSION {
         let major = be32(8).unwrap_or(1);
         mux.tx.lock().unwrap().version = if major >= 2 { 2 } else { 1 };

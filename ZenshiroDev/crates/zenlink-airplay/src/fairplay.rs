@@ -23,8 +23,11 @@ pub fn load(dll: &Path) -> Result<(), String> {
         // SAFETY: playfair.dll is ZenLink's own build of the bundled playfair sources;
         // zl_playfair_decrypt(keymsg[164], ekey[72], out[16]) has no other side effects.
         unsafe {
-            let lib = libloading::Library::new(dll).map_err(|e| format!("{}: {e}", dll.display()))?;
-            let f: Decrypt = *lib.get::<Decrypt>(b"zl_playfair_decrypt\0").map_err(|e| e.to_string())?;
+            let lib =
+                libloading::Library::new(dll).map_err(|e| format!("{}: {e}", dll.display()))?;
+            let f: Decrypt = *lib
+                .get::<Decrypt>(b"zl_playfair_decrypt\0")
+                .map_err(|e| e.to_string())?;
             Ok((lib, f))
         }
     })
@@ -61,11 +64,18 @@ impl FairPlay {
 
     /// The session key from SETUP's 72-byte `ekey`.
     pub fn decrypt(&self, ekey: &[u8]) -> Result<[u8; 16], String> {
-        let keymsg = self.keymsg.as_ref().ok_or("FairPlay handshake not finished")?;
+        let keymsg = self
+            .keymsg
+            .as_ref()
+            .ok_or("FairPlay handshake not finished")?;
         if ekey.len() != 72 {
             return Err("FairPlay key is not 72 bytes".into());
         }
-        let (_, f) = DLL.get().ok_or("playfair.dll not loaded")?.as_ref().map_err(Clone::clone)?;
+        let (_, f) = DLL
+            .get()
+            .ok_or("playfair.dll not loaded")?
+            .as_ref()
+            .map_err(Clone::clone)?;
         let mut out = [0u8; 16];
         // SAFETY: keymsg is 164 bytes, ekey 72, out 16, as the function expects.
         unsafe { f(keymsg.as_ptr(), ekey.as_ptr(), out.as_mut_ptr()) };
@@ -83,13 +93,18 @@ mod tests {
             .join("../../resources/windows/native/playfair/playfair.dll");
         load(&dll).unwrap();
         let mut fp = FairPlay::default();
-        let setup = [0x46, 0x50, 0x4C, 0x59, 3, 1, 1, 0, 0, 0, 0, 4, 2, 0, 2, 0xBB];
+        let setup = [
+            0x46, 0x50, 0x4C, 0x59, 3, 1, 1, 0, 0, 0, 0, 4, 2, 0, 2, 0xBB,
+        ];
         assert_eq!(fp.handle(&setup).unwrap(), crate::hex(REPLY_MESSAGES[2]));
         let mut msg3 = vec![0x46, 0x50, 0x4C, 0x59, 3];
         msg3.resize(164, 0);
         assert_eq!(fp.handle(&msg3).unwrap().len(), 12 + 20);
         let ekey: Vec<u8> = (0..72).collect();
-        assert_eq!(fp.decrypt(&ekey).unwrap().to_vec(), crate::hex(crate::vectors::FP_KEY));
+        assert_eq!(
+            fp.decrypt(&ekey).unwrap().to_vec(),
+            crate::hex(crate::vectors::FP_KEY)
+        );
         assert!(fp.handle(&[0; 16]).is_none(), "not FairPlay v3");
     }
 }

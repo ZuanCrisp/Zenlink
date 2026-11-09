@@ -171,7 +171,8 @@ impl Link {
         let domain = Some("com.apple.mobile.iTunes");
         let num = |v: Result<plist::Value, _>| {
             let v = v.ok()?;
-            v.as_unsigned_integer().or_else(|| v.as_signed_integer().map(|i| i as u64))
+            v.as_unsigned_integer()
+                .or_else(|| v.as_signed_integer().map(|i| i as u64))
         };
         let w = num(lockdown.get_value(Some("ScreenWidth"), domain).await)?;
         let h = num(lockdown.get_value(Some("ScreenHeight"), domain).await)?;

@@ -21,8 +21,15 @@ impl Identity {
             let seed: [u8; 32] = crate::hex(v.get("seed")?.as_str().filter(|s| s.len() == 64)?)
                 .try_into()
                 .ok()?;
-            let mac = v.get("mac")?.as_str().filter(|m| m.len() == 17)?.to_string();
-            Some(Self { key: SigningKey::from_bytes(&seed), mac })
+            let mac = v
+                .get("mac")?
+                .as_str()
+                .filter(|m| m.len() == 17)?
+                .to_string();
+            Some(Self {
+                key: SigningKey::from_bytes(&seed),
+                mac,
+            })
         };
         if let Some(id) = read() {
             return id;
@@ -30,12 +37,19 @@ impl Identity {
         let seed: [u8; 32] = rand::random();
         let mut mac: [u8; 6] = rand::random();
         mac[0] = (mac[0] | 0x02) & 0xFE; // locally administered, unicast
-        let mac = mac.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":");
+        let mac = mac
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(":");
         let hex: String = seed.iter().map(|b| format!("{b:02x}")).collect();
         if let Err(e) = std::fs::write(&path, json!({ "seed": hex, "mac": mac }).to_string()) {
             log::warn!("airplay: identity not saved: {e}");
         }
-        Self { key: SigningKey::from_bytes(&seed), mac }
+        Self {
+            key: SigningKey::from_bytes(&seed),
+            mac,
+        }
     }
 
     /// The public key iOS pins (`pk`).
@@ -64,7 +78,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("zl-airplay-py-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let seed: String = (0u8..32).map(|b| format!("{b:02x}")).collect();
-        std::fs::write(dir.join("airplay.json"), format!(r#"{{"seed": "{seed}", "mac": "0A:11:22:33:44:55"}}"#)).unwrap();
+        std::fs::write(
+            dir.join("airplay.json"),
+            format!(r#"{{"seed": "{seed}", "mac": "0A:11:22:33:44:55"}}"#),
+        )
+        .unwrap();
         let id = super::Identity::load(&dir);
         assert_eq!(id.pk().to_vec(), crate::hex(crate::vectors::SERVER_PK));
         assert_eq!(id.mac, "0A:11:22:33:44:55");

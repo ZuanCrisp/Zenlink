@@ -198,7 +198,11 @@ pub async fn prepare(udid: &str) -> Result<bool, String> {
         .await
         .map_err(|e| format!("lockdown session: {e:?}"))?;
     lockdown
-        .set_value("EnableWifiConnections", true.into(), Some("com.apple.mobile.wireless_lockdown"))
+        .set_value(
+            "EnableWifiConnections",
+            true.into(),
+            Some("com.apple.mobile.wireless_lockdown"),
+        )
         .await
         .map_err(|e| format!("Wi-Fi connections: {e:?}"))?;
     let host = hostname();
@@ -229,7 +233,10 @@ pub async fn prepare(udid: &str) -> Result<bool, String> {
         log::info!("wifi: RemotePairing record not written: {e}");
         return Ok(false);
     }
-    if old.as_ref().is_some_and(|r| r.public_key == file.public_key_bytes()) {
+    if old
+        .as_ref()
+        .is_some_and(|r| r.public_key == file.public_key_bytes())
+    {
         return Ok(true); // verified with the stored record
     }
     let Some(irk) = file.alt_irk().map(<[u8]>::to_vec) else {
@@ -237,8 +244,14 @@ pub async fn prepare(udid: &str) -> Result<bool, String> {
     };
     let mut d = plist::Dictionary::new();
     d.insert("peer_alt_irk".into(), plist::Value::Data(irk));
-    d.insert("private_key".into(), plist::Value::Data(file.private_key_bytes()));
-    d.insert("public_key".into(), plist::Value::Data(file.public_key_bytes()));
+    d.insert(
+        "private_key".into(),
+        plist::Value::Data(file.private_key_bytes()),
+    );
+    d.insert(
+        "public_key".into(),
+        plist::Value::Data(file.public_key_bytes()),
+    );
     d.insert("remote_unlock_host_key".into(), "".into());
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     plist::to_file_xml(dir.join(format!("remote_{udid}.plist")), &d).map_err(|e| e.to_string())?;

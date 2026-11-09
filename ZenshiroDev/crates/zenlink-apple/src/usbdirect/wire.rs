@@ -77,7 +77,12 @@ pub struct CmTime {
 
 impl CmTime {
     pub fn ns(value: u64) -> Self {
-        Self { value, scale: 1_000_000_000, flags: 1, epoch: 0 }
+        Self {
+            value,
+            scale: 1_000_000_000,
+            flags: 1,
+            epoch: 0,
+        }
     }
 
     fn parse(d: &[u8], at: usize) -> Option<Self> {
@@ -220,8 +225,10 @@ impl Format {
                     // 49: SampleDescriptionExtensionAtoms; 105 in it is avcC, else any record.
                     if let Some(atoms) = ext.iter().find(|(k, _)| *k == 49).map(|(_, v)| *v) {
                         let atoms = index_dict(atoms, DICT);
-                        let datas: Vec<(u16, &[u8])> =
-                            atoms.iter().filter_map(|(k, v)| Some((*k, body_of(v, DATV)?))).collect();
+                        let datas: Vec<(u16, &[u8])> = atoms
+                            .iter()
+                            .filter_map(|(k, v)| Some((*k, body_of(v, DATV)?)))
+                            .collect();
                         f.config = datas
                             .iter()
                             .find(|(k, _)| *k == 105)
@@ -326,7 +333,13 @@ pub fn hpd1(w: u32, h: u32) -> Vec<u8> {
     let d = dict_bytes(&[
         ("Valeria", Value::Bool(true)),
         ("HEVCDecoderSupports444", Value::Bool(true)),
-        ("DisplaySize", Value::Dict(vec![("Width", Value::F64(w as f64)), ("Height", Value::F64(h as f64))])),
+        (
+            "DisplaySize",
+            Value::Dict(vec![
+                ("Width", Value::F64(w as f64)),
+                ("Height", Value::F64(h as f64)),
+            ]),
+        ),
     ]);
     asyn(HPD1, EMPTY_CF, &d)
 }
@@ -356,7 +369,10 @@ mod tests {
     use super::*;
 
     fn hex(s: &str) -> Vec<u8> {
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     #[test]
@@ -384,7 +400,12 @@ mod tests {
         let ext = idx(49, &atoms);
         let ext = [tag(ext.len() + 8, EXTN), ext].concat();
         let mdia = [tag(12, MDIA), fourcc(b"vide").to_le_bytes().to_vec()].concat();
-        let vdim = [tag(16, VDIM), 1170u32.to_le_bytes().to_vec(), 2532u32.to_le_bytes().to_vec()].concat();
+        let vdim = [
+            tag(16, VDIM),
+            1170u32.to_le_bytes().to_vec(),
+            2532u32.to_le_bytes().to_vec(),
+        ]
+        .concat();
         let codc = [tag(12, CODC), fourcc(b"avc1").to_le_bytes().to_vec()].concat();
         let inner = [mdia, vdim, codc, ext].concat();
         let fdsc = [tag(inner.len() + 8, FDSC), inner].concat();

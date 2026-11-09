@@ -63,7 +63,11 @@ impl Reader<'_> {
 
     fn se(&mut self) -> Option<i32> {
         let k = self.ue()? as i64;
-        Some(if k & 1 == 1 { ((k + 1) / 2) as i32 } else { -(k / 2) as i32 })
+        Some(if k & 1 == 1 {
+            ((k + 1) / 2) as i32
+        } else {
+            -(k / 2) as i32
+        })
     }
 }
 
@@ -98,7 +102,10 @@ impl Writer {
         while self.bits.len() % 8 != 0 {
             self.bits.push(0);
         }
-        self.bits.chunks(8).map(|c| c.iter().fold(0u8, |a, b| (a << 1) | b)).collect()
+        self.bits
+            .chunks(8)
+            .map(|c| c.iter().fold(0u8, |a, b| (a << 1) | b))
+            .collect()
     }
 }
 
@@ -183,7 +190,13 @@ fn parse(r: &mut Reader) -> Option<Sps> {
             r.ue()?;
         }
     }
-    let mut s = Sps { max_refs, vui: false, reorder: None, vui_flag: r.pos, restriction_flag: 0 };
+    let mut s = Sps {
+        max_refs,
+        vui: false,
+        reorder: None,
+        vui_flag: r.pos,
+        restriction_flag: 0,
+    };
     if r.u(1)? == 1 {
         s.vui = true;
         if r.u(1)? == 1 && r.u(8)? == 255 {
@@ -272,7 +285,10 @@ pub fn rewrite_avcc(avcc: &[u8]) -> Vec<u8> {
     let mut out = avcc[..6].to_vec();
     let mut pos = 6;
     for _ in 0..(avcc[5] & 0x1F) {
-        let Some(size) = avcc.get(pos..pos + 2).map(|b| u16::from_be_bytes([b[0], b[1]]) as usize) else {
+        let Some(size) = avcc
+            .get(pos..pos + 2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]) as usize)
+        else {
             return avcc.to_vec();
         };
         let Some(sps) = avcc.get(pos + 2..pos + 2 + size) else {
@@ -314,7 +330,10 @@ mod tests {
     use super::*;
 
     fn hex(s: &str) -> Vec<u8> {
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     #[test]
@@ -324,7 +343,10 @@ mod tests {
         assert_eq!(low_latency_sps(&sps), want);
         assert_eq!(low_latency_sps(&want), want); // already low latency
         let avcc = [&hex("0164001fffe1000a")[..], &sps, &hex("01000468ee3c80")].concat();
-        assert_eq!(rewrite_avcc(&avcc), hex("0164001fffe100116764001facd00f0044c900da0884603c2001000468ee3c80"));
+        assert_eq!(
+            rewrite_avcc(&avcc),
+            hex("0164001fffe100116764001facd00f0044c900da0884603c2001000468ee3c80")
+        );
         assert_eq!(low_latency_sps(&[0x67, 0x64]), vec![0x67, 0x64]); // truncated: unchanged
     }
 }

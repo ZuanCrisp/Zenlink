@@ -18,12 +18,19 @@ use idevice::{
 #[derive(Debug)]
 pub enum Cmd {
     /// x, y in 0..65535 of the portrait screen.
-    Touch { contact: bool, x: u16, y: u16 },
+    Touch {
+        contact: bool,
+        x: u16,
+        y: u16,
+    },
     Button(&'static str),
     /// HID keyboard usages held down; empty releases them all.
     Keys(Vec<u8>),
     /// A shortcut (see `Hid::action`). `text`: the text for `paste-pc`, the passcode for `wake`.
-    Action { name: String, text: String },
+    Action {
+        name: String,
+        text: String,
+    },
 }
 
 const CMD: u8 = 0xE3;
@@ -61,8 +68,8 @@ fn cmd_key(action: &str) -> Option<u8> {
 const PLAIN: &str = "1234567890-=[]\\;',./`";
 const SHIFTED: &str = "!@#$%^&*()_+{}|:\"<>?~";
 const PLAIN_CODES: [u8; 21] = [
-    0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2D, 0x2E, 0x2F, 0x30, 0x31,
-    0x33, 0x34, 0x36, 0x37, 0x38, 0x35,
+    0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x33,
+    0x34, 0x36, 0x37, 0x38, 0x35,
 ];
 
 /// (HID usage, needs shift) for one character on a US layout.
@@ -213,7 +220,9 @@ impl Hid {
             .await
             .map_err(err)?;
         sleep(hold).await;
-        b.send_button(page, code, ButtonState::Up).await.map_err(err)
+        b.send_button(page, code, ButtonState::Up)
+            .await
+            .map_err(err)
     }
 
     async fn tap(&mut self, report: &[u8], down_ms: u64, up_ms: u64) -> Result<(), String> {
@@ -301,7 +310,9 @@ impl Hid {
                     }
                 }
                 Ok(if skipped > 0 {
-                    format!("{skipped} characters can't be typed on a US keyboard and were skipped.")
+                    format!(
+                        "{skipped} characters can't be typed on a US keyboard and were skipped."
+                    )
                 } else {
                     String::new()
                 })
@@ -324,9 +335,15 @@ mod tests {
         assert_eq!(char_usage('?'), Some((0x38, true)));
         assert_eq!(char_usage('`'), Some((0x35, false)));
         assert_eq!(char_usage('é'), None);
-        assert_eq!(passcode_keys("1234"), vec![vec![0x1E], vec![0x1F], vec![0x20], vec![0x21]]);
+        assert_eq!(
+            passcode_keys("1234"),
+            vec![vec![0x1E], vec![0x1F], vec![0x20], vec![0x21]]
+        );
         assert_eq!(passcode_keys("12345").len(), 6); // 5 digits need Return
-        assert_eq!(passcode_keys("aB\n"), vec![vec![0x04], vec![SHIFT, 0x05], vec![ENTER]]);
+        assert_eq!(
+            passcode_keys("aB\n"),
+            vec![vec![0x04], vec![SHIFT, 0x05], vec![ENTER]]
+        );
         assert!(passcode_keys("").is_empty());
         assert_eq!(passcode_keys(&"1".repeat(40)).len(), 33);
     }

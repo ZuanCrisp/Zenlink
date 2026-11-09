@@ -36,18 +36,29 @@ pub fn find_native(sub: &str, name: &str) -> Option<PathBuf> {
         .filter(|s| !s.is_empty())
         .map(PathBuf::from);
     let mut dirs: Vec<PathBuf> = exe.parent().map(Path::to_path_buf).into_iter().collect();
-    dirs.extend(source.into_iter().chain(exe.ancestors().skip(1).map(Path::to_path_buf)).map(|d| {
-        d.join("ZenshiroDev").join("resources").join("windows").join("native").join(sub)
-    }));
+    dirs.extend(
+        source
+            .into_iter()
+            .chain(exe.ancestors().skip(1).map(Path::to_path_buf))
+            .map(|d| {
+                d.join("ZenshiroDev")
+                    .join("resources")
+                    .join("windows")
+                    .join("native")
+                    .join(sub)
+            }),
+    );
     dirs.into_iter().map(|d| d.join(name)).find(|p| p.exists())
 }
 
 /// Portable.exe: the native DLLs are packed in, unpacked to %LOCALAPPDATA%\ZenLink-Next\native
 /// once per size (the service folder is emptied on each new version, so not there).
 #[cfg(feature = "portable")]
-pub static ZLAAC: &[u8] = include_bytes!("../../../ZenshiroDev/resources/windows/native/zlaac/zlaac.dll");
+pub static ZLAAC: &[u8] =
+    include_bytes!("../../../ZenshiroDev/resources/windows/native/zlaac/zlaac.dll");
 #[cfg(feature = "portable")]
-pub static PLAYFAIR: &[u8] = include_bytes!("../../../ZenshiroDev/resources/windows/native/playfair/playfair.dll");
+pub static PLAYFAIR: &[u8] =
+    include_bytes!("../../../ZenshiroDev/resources/windows/native/playfair/playfair.dll");
 #[cfg(not(feature = "portable"))]
 pub static ZLAAC: &[u8] = &[];
 #[cfg(not(feature = "portable"))]
@@ -79,14 +90,23 @@ impl Aac {
         unsafe {
             let lib = LoadLibraryW(PCWSTR(HSTRING::from(dll.as_os_str()).as_ptr()))
                 .map_err(|e| format!("load {}: {e}", dll.display()))?;
-            let open: Open = std::mem::transmute(GetProcAddress(lib, s!("zl_aac_open")).ok_or("zl_aac_open")?);
-            let decode: Decode = std::mem::transmute(GetProcAddress(lib, s!("zl_aac_decode")).ok_or("zl_aac_decode")?);
-            let close: Close = std::mem::transmute(GetProcAddress(lib, s!("zl_aac_close")).ok_or("zl_aac_close")?);
+            let open: Open =
+                std::mem::transmute(GetProcAddress(lib, s!("zl_aac_open")).ok_or("zl_aac_open")?);
+            let decode: Decode = std::mem::transmute(
+                GetProcAddress(lib, s!("zl_aac_decode")).ok_or("zl_aac_decode")?,
+            );
+            let close: Close =
+                std::mem::transmute(GetProcAddress(lib, s!("zl_aac_close")).ok_or("zl_aac_close")?);
             let h = open(asc.as_ptr(), asc.len() as i32, rate, 2, 48000);
             if h.is_null() {
                 return Err("AAC decoder did not open (bad codec config)".into());
             }
-            Ok(Self { h, decode, close, buf: vec![0; CAP * 2] })
+            Ok(Self {
+                h,
+                decode,
+                close,
+                buf: vec![0; CAP * 2],
+            })
         }
     }
 
@@ -95,7 +115,15 @@ impl Aac {
         if au.is_empty() {
             return &[];
         }
-        let n = unsafe { (self.decode)(self.h, au.as_ptr(), au.len() as i32, self.buf.as_mut_ptr(), CAP as i32) };
+        let n = unsafe {
+            (self.decode)(
+                self.h,
+                au.as_ptr(),
+                au.len() as i32,
+                self.buf.as_mut_ptr(),
+                CAP as i32,
+            )
+        };
         let n = (n.max(0) as usize).min(CAP);
         unsafe { std::slice::from_raw_parts(self.buf.as_ptr().cast::<u8>(), n * 4) }
     }
@@ -119,7 +147,12 @@ mod tests {
         let n = data[4] as usize;
         let asc = &data[5..5 + n];
         let mut pos = 9 + n; // ZLAU, length, ASC, u32 rate
-        let mut dec = Aac::with_dll(&root.join("resources/windows/native/zlaac/zlaac.dll"), asc, 48000).unwrap();
+        let mut dec = Aac::with_dll(
+            &root.join("resources/windows/native/zlaac/zlaac.dll"),
+            asc,
+            48000,
+        )
+        .unwrap();
         let mut bytes = 0;
         while pos + 2 <= data.len() {
             let size = u16::from_le_bytes([data[pos], data[pos + 1]]) as usize;

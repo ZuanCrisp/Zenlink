@@ -95,11 +95,34 @@ impl Dots {
             for ty in (0..ph).step_by(TILE as usize) {
                 for tx in (0..pw).step_by(TILE as usize) {
                     let (tw, th) = (TILE.min(pw - tx), TILE.min(ph - ty));
-                    let mut px = vec![Rgba8Pixel { r: 0, g: 0, b: 0, a: 0 }; (tw * th) as usize];
+                    let mut px = vec![
+                        Rgba8Pixel {
+                            r: 0,
+                            g: 0,
+                            b: 0,
+                            a: 0
+                        };
+                        (tw * th) as usize
+                    ];
                     for &(x, y) in &dots {
-                        dot(&mut px, tw, th, x * sf - tx as f32, y * sf - ty as f32, sf, rest);
+                        dot(
+                            &mut px,
+                            tw,
+                            th,
+                            x * sf - tx as f32,
+                            y * sf - ty as f32,
+                            sf,
+                            rest,
+                        );
                     }
-                    self.tiles.push(Tile { x: tx, y: ty, w: tw, h: th, base: px, lit: true });
+                    self.tiles.push(Tile {
+                        x: tx,
+                        y: ty,
+                        w: tw,
+                        h: th,
+                        base: px,
+                        lit: true,
+                    });
                 }
             }
             let rows: Vec<DotTile> = self
@@ -129,7 +152,12 @@ impl Dots {
             let k = (ring * 0.55 + near * 0.9).min(1.0);
             if k > 0.05 {
                 let alpha = hot.3 * (0.75 + k * 0.25);
-                lit.push((x * sf, y * sf, (1.0 + k * 0.9) * sf, Rgba(hot.0, hot.1, hot.2, alpha)));
+                lit.push((
+                    x * sf,
+                    y * sf,
+                    (1.0 + k * 0.9) * sf,
+                    Rgba(hot.0, hot.1, hot.2, alpha),
+                ));
             }
         }
         for (i, tile) in self.tiles.iter_mut().enumerate() {
@@ -162,7 +190,11 @@ impl Dots {
 
 /// Anti-aliased filled circle, premultiplied alpha, "over" blending.
 fn dot(px: &mut [Rgba8Pixel], w: u32, h: u32, cx: f32, cy: f32, r: f32, c: Rgba) {
-    if cx + r + 1.0 < 0.0 || cy + r + 1.0 < 0.0 || cx - r - 1.0 >= w as f32 || cy - r - 1.0 >= h as f32 {
+    if cx + r + 1.0 < 0.0
+        || cy + r + 1.0 < 0.0
+        || cx - r - 1.0 >= w as f32
+        || cy - r - 1.0 >= h as f32
+    {
         return;
     }
     let x0 = (cx - r - 1.0).floor().max(0.0) as u32;
@@ -192,13 +224,23 @@ mod tests {
     #[test]
     fn only_lit_tiles_are_redrawn() {
         let mut d = super::Dots::new();
-        assert!(d.render(1280.0, 760.0, 1.5, 0.5, None, true).is_some(), "first frame lays out");
+        assert!(
+            d.render(1280.0, 760.0, 1.5, 0.5, None, true).is_some(),
+            "first frame lays out"
+        );
         let model = d.model.clone();
         let img = |i: usize| slint::Model::row_data(&*model, i).unwrap().img;
         let before: Vec<_> = (0..d.tiles.len()).map(img).collect();
-        assert!(d.render(1280.0, 760.0, 1.5, 0.55, None, true).is_none(), "same layout");
+        assert!(
+            d.render(1280.0, 760.0, 1.5, 0.55, None, true).is_none(),
+            "same layout"
+        );
         let changed = (0..d.tiles.len()).filter(|&i| img(i) != before[i]).count();
-        assert!(changed > 0 && changed < d.tiles.len() / 2, "{changed} of {} tiles redrawn", d.tiles.len());
+        assert!(
+            changed > 0 && changed < d.tiles.len() / 2,
+            "{changed} of {} tiles redrawn",
+            d.tiles.len()
+        );
     }
 
     #[test]
@@ -207,8 +249,18 @@ mod tests {
         let mut d = super::Dots::new();
         let t0 = std::time::Instant::now();
         for i in 0..30 {
-            d.render(1280.0, 760.0, 1.5, i as f32 / 30.0, Some((300.0, 300.0)), true);
+            d.render(
+                1280.0,
+                760.0,
+                1.5,
+                i as f32 / 30.0,
+                Some((300.0, 300.0)),
+                true,
+            );
         }
-        eprintln!("render: {:.2} ms/frame", t0.elapsed().as_secs_f64() * 1000.0 / 30.0);
+        eprintln!(
+            "render: {:.2} ms/frame",
+            t0.elapsed().as_secs_f64() * 1000.0 / 30.0
+        );
     }
 }

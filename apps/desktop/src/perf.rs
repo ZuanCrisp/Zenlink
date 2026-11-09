@@ -22,15 +22,17 @@ pub fn install(ui: &crate::AppWindow) {
     use slint::ComponentHandle;
     ON.with(|o| o.set(true));
     let start = Cell::new(None::<Instant>);
-    let _ = ui.window().set_rendering_notifier(move |state, _| match state {
-        slint::RenderingState::BeforeRendering => start.set(Some(Instant::now())),
-        slint::RenderingState::AfterRendering => {
-            if let Some(t) = start.take() {
-                add(&RENDER, t.elapsed());
+    let _ = ui
+        .window()
+        .set_rendering_notifier(move |state, _| match state {
+            slint::RenderingState::BeforeRendering => start.set(Some(Instant::now())),
+            slint::RenderingState::AfterRendering => {
+                if let Some(t) = start.take() {
+                    add(&RENDER, t.elapsed());
+                }
             }
-        }
-        _ => {}
-    });
+            _ => {}
+        });
 }
 
 /// Times one frame-timer tick (on drop).
@@ -46,10 +48,12 @@ impl Drop for Tick {
     fn drop(&mut self) {
         let Some(t) = self.0 else { return };
         add(&TICK, t.elapsed());
-        let since = SINCE.with(|s| *s.get().get_or_insert_with(|| {
-            s.set(Some(Instant::now()));
-            Instant::now()
-        }));
+        let since = SINCE.with(|s| {
+            *s.get().get_or_insert_with(|| {
+                s.set(Some(Instant::now()));
+                Instant::now()
+            })
+        });
         if since.elapsed() < Duration::from_secs(5) {
             return;
         }

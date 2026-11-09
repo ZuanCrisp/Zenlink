@@ -85,7 +85,9 @@ pub async fn run(data: UdpSocket, key: [u8; 16], iv: [u8; 16], ct: u64, sink: &d
             if !payload.first().is_some_and(|&b| looks_like_eld(b)) {
                 failed += 1;
                 if matches!(failed, 1 | 50 | 500) {
-                    log::warn!("airplay: audio packet not AAC-ELD after decryption ({failed} so far)");
+                    log::warn!(
+                        "airplay: audio packet not AAC-ELD after decryption ({failed} so far)"
+                    );
                 }
                 continue;
             }
@@ -106,7 +108,8 @@ mod tests {
     #[test]
     fn cbc_matches_pycryptodome() {
         // Scratch: AES.new(0..15, MODE_CBC, 16..31).encrypt(p[:32]) + p[32:], p = 8c 01..27.
-        let mut c = hex("3efbe32a44b2dff306a188b949a98be94a290ca281882feeeff354b2ce5bcef72021222324252627");
+        let mut c =
+            hex("3efbe32a44b2dff306a188b949a98be94a290ca281882feeeff354b2ce5bcef72021222324252627");
         let key: [u8; 16] = std::array::from_fn(|i| i as u8);
         let iv: [u8; 16] = std::array::from_fn(|i| 16 + i as u8);
         decrypt(&Aes128::new(&key.into()), &iv, &mut c);

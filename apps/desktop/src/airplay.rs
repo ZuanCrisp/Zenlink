@@ -59,7 +59,11 @@ impl Inner {
     }
 
     fn reset(&mut self) {
-        *self = Self { phase: self.phase, detail: std::mem::take(&mut self.detail), ..Self::new() };
+        *self = Self {
+            phase: self.phase,
+            detail: std::mem::take(&mut self.detail),
+            ..Self::new()
+        };
     }
 }
 
@@ -89,7 +93,12 @@ impl Sink for Feed {
         let mut g = SHARED.lock().unwrap();
         let sound = g.sound.get_or_insert_with(|| {
             let (tx, rx) = channel();
-            crate::apple::play_sound(rx, true, &zenlink_airplay::audio::ASC, zenlink_airplay::audio::RATE);
+            crate::apple::play_sound(
+                rx,
+                true,
+                &zenlink_airplay::audio::ASC,
+                zenlink_airplay::audio::RATE,
+            );
             tx
         });
         let _ = sound.send(au); // a thread that ended (no decoder / output) stays ended until Waiting
@@ -130,7 +139,14 @@ impl Sink for Feed {
         }
         if let Some(tx) = &g.tx {
             // A full queue means the decoder fell behind: drop the session, it reopens from the GOP.
-            if tx.try_send(Record::Frame { key, rebuild: false, data }).is_err() {
+            if tx
+                .try_send(Record::Frame {
+                    key,
+                    rebuild: false,
+                    data,
+                })
+                .is_err()
+            {
                 g.tx = None;
             }
         }
@@ -201,7 +217,9 @@ impl Hybrid {
     /// Called from the session's own runtime: the server starts on a plain thread.
     pub fn start() -> Result<Self, String> {
         stop_server();
-        std::thread::spawn(start_server).join().map_err(|_| "AirPlay start panicked".to_string())??;
+        std::thread::spawn(start_server)
+            .join()
+            .map_err(|_| "AirPlay start panicked".to_string())??;
         HYBRID.store(true, Relaxed);
         Ok(Self)
     }
@@ -225,7 +243,10 @@ pub fn overlay(st: &mut Value) {
         }
         return;
     }
-    let conn = |k: &str| st.pointer(&format!("/connection/{k}")).and_then(Value::as_str);
+    let conn = |k: &str| {
+        st.pointer(&format!("/connection/{k}"))
+            .and_then(Value::as_str)
+    };
     let wanted = conn("active") == Some("usbdirect") && conn("link") == Some("wireless");
     if !wanted && WANTED.load(Relaxed) {
         PAUSED.store(false, Relaxed); // a mode change clears Stop, as set_link does
@@ -299,7 +320,11 @@ impl VideoSource for AirSource {
                         .gop
                         .iter()
                         .enumerate()
-                        .map(|(i, d)| Record::Frame { key: i == 0, rebuild: false, data: d.clone() })
+                        .map(|(i, d)| Record::Frame {
+                            key: i == 0,
+                            rebuild: false,
+                            data: d.clone(),
+                        })
                         .collect();
                     return Some((info, Box::new(AirRecords { pending, rx })));
                 }
@@ -341,7 +366,9 @@ mod tests {
     use super::clean;
 
     fn au(nals: &[&[u8]]) -> Vec<u8> {
-        nals.iter().flat_map(|n| [&(n.len() as u32).to_be_bytes()[..], n].concat()).collect()
+        nals.iter()
+            .flat_map(|n| [&(n.len() as u32).to_be_bytes()[..], n].concat())
+            .collect()
     }
 
     #[test]

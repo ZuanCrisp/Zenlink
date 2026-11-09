@@ -1,26 +1,26 @@
 #![windows_subsystem = "windows"]
 //! ZenLink (v2.5, generation "Next"): Rust shell (ADR-0001 Stage 1).
 
-mod android;
-mod apple;
 mod aac;
 mod airplay;
+mod android;
+mod apple;
 mod appwin;
 mod backdrop;
+mod backend;
 mod devprofiles;
 mod dots;
-mod ocr;
-mod perf;
+mod drivers;
 mod filedrop;
 mod filewin;
 mod flow;
 mod input;
+mod ocr;
+mod perf;
 mod prefs;
 mod shortcuts;
 mod tray;
 mod updater;
-mod backend;
-mod drivers;
 mod usbdirect;
 mod usbphones;
 
@@ -466,11 +466,7 @@ fn passcode_query(ui: &AppWindow, save: Option<String>) {
                 }
                 None if save.is_some() => show_toast(
                     &ui,
-                    tr_ui(
-                        &ui,
-                        "Gagal menyimpan kode",
-                        "Couldn't save the passcode",
-                    ),
+                    tr_ui(&ui, "Gagal menyimpan kode", "Couldn't save the passcode"),
                 ),
                 None => APP.with_borrow_mut(|a| a.passcode_asked = false),
             }
@@ -1147,12 +1143,7 @@ pub fn backend_data_dir() -> Option<std::path::PathBuf> {
             .into_iter()
             .chain(exe.ancestors().skip(1).map(|d| d.to_path_buf()));
         for dir in dirs {
-            if dir
-                .join("apps")
-                .join("desktop")
-                .join("Cargo.toml")
-                .exists()
-            {
+            if dir.join("apps").join("desktop").join("Cargo.toml").exists() {
                 return Some(data.unwrap_or_else(|| dir.join("data")));
             }
             if dir.join("portable.txt").exists() {
@@ -2024,13 +2015,17 @@ fn copy_screen_text(ui: &AppWindow) {
     );
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        let r = Some(match ocr::add_capture(shot.width, shot.height, &shot.bgra) {
-            Ok((text, added, total)) => json!({ "ok": true, "text": text, "added": added, "total": total }),
-            Err(e) => {
-                log::warn!("ocr: {e}");
-                json!({ "ok": false })
-            }
-        });
+        let r = Some(
+            match ocr::add_capture(shot.width, shot.height, &shot.bgra) {
+                Ok((text, added, total)) => {
+                    json!({ "ok": true, "text": text, "added": added, "total": total })
+                }
+                Err(e) => {
+                    log::warn!("ocr: {e}");
+                    json!({ "ok": false })
+                }
+            },
+        );
         let _ = slint::invoke_from_event_loop(move || {
             BUSY.store(false, Relaxed);
             let Some(ui) = weak.upgrade() else { return };
@@ -2865,7 +2860,8 @@ fn android_start(ui: &AppWindow, index: i32) {
         android::set_active(Some(shared.clone()));
         a.android = Some(shared);
         let src = Arc::new(Mutex::new(source));
-        let source: Box<dyn zenlink_core::source::VideoSource> = Box::new(android::Kept(src.clone()));
+        let source: Box<dyn zenlink_core::source::VideoSource> =
+            Box::new(android::Kept(src.clone()));
         a.android_src = Some(src);
         a.android_index = index;
         a.android_good_saved = false;
@@ -3808,27 +3804,25 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let weak = ui.as_weak();
         let api = api.clone();
-        std::thread::spawn(move || {
-            loop {
-                if let Some(mut st) = api.state() {
-                    apple::overlay(&mut st);
-                    airplay::overlay(&mut st);
-                    usbdirect::overlay(&mut st);
-                    backend::observe(&st);
-                    let w = weak.clone();
-                    let a = api.clone();
-                    if slint::invoke_from_event_loop(move || {
-                        if let Some(ui) = w.upgrade() {
-                            on_state(&ui, &a, &st);
-                        }
-                    })
-                    .is_err()
-                    {
-                        return;
+        std::thread::spawn(move || loop {
+            if let Some(mut st) = api.state() {
+                apple::overlay(&mut st);
+                airplay::overlay(&mut st);
+                usbdirect::overlay(&mut st);
+                backend::observe(&st);
+                let w = weak.clone();
+                let a = api.clone();
+                if slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = w.upgrade() {
+                        on_state(&ui, &a, &st);
                     }
+                })
+                .is_err()
+                {
+                    return;
                 }
-                std::thread::sleep(Duration::from_millis(400));
             }
+            std::thread::sleep(Duration::from_millis(400));
         });
     }
 

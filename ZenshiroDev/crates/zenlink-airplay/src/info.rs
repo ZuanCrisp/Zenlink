@@ -98,10 +98,16 @@ impl Receiver<'_> {
             });
         match qualifier.as_deref() {
             Some("txtAirPlay") => {
-                res.insert("txtAirPlay".into(), Value::Data(Self::txt_bytes(&self.txt_airplay())));
+                res.insert(
+                    "txtAirPlay".into(),
+                    Value::Data(Self::txt_bytes(&self.txt_airplay())),
+                );
             }
             Some("txtRAOP") => {
-                res.insert("txtRAOP".into(), Value::Data(Self::txt_bytes(&self.txt_raop())));
+                res.insert(
+                    "txtRAOP".into(),
+                    Value::Data(Self::txt_bytes(&self.txt_raop())),
+                );
             }
             _ => {}
         }
@@ -143,7 +149,10 @@ impl Receiver<'_> {
             ("keepAliveSendStatsAsBody", true.into()),
             ("model", MODEL.into()),
             ("initialVolume", Value::Real(0.0)),
-            ("audioLatencies", Value::Array(vec![latency(100), latency(101)])),
+            (
+                "audioLatencies",
+                Value::Array(vec![latency(100), latency(101)]),
+            ),
             ("audioFormats", Value::Array(vec![format(100), format(101)])),
             (
                 "displays",
@@ -192,14 +201,26 @@ mod tests {
         let read = |n: &str| Value::from_file(dir.join(n)).unwrap();
         let bp = "application/x-apple-binary-plist";
         for (hevc, tag) in [(true, "hevc"), (false, "h264")] {
-            let r = Receiver { id: &id, name: "ZenLinkStudio", hevc };
+            let r = Receiver {
+                id: &id,
+                name: "ZenLinkStudio",
+                hevc,
+            };
             let got = |b: Vec<u8>| Value::from_reader(std::io::Cursor::new(b)).unwrap();
-            assert_eq!(got(r.info(None, b"")), read(&format!("info_{tag}.bplist")), "{tag}");
+            assert_eq!(
+                got(r.info(None, b"")),
+                read(&format!("info_{tag}.bplist")),
+                "{tag}"
+            );
             for q in ["txtAirPlay", "txtRAOP"] {
                 let mut d = Dictionary::new();
                 d.insert("qualifier".into(), Value::Array(vec![q.into()]));
                 let body = bplist(d);
-                assert_eq!(got(r.info(Some(bp), &body)), read(&format!("info_{tag}_{q}.bplist")), "{tag} {q}");
+                assert_eq!(
+                    got(r.info(Some(bp), &body)),
+                    read(&format!("info_{tag}_{q}.bplist")),
+                    "{tag} {q}"
+                );
             }
         }
     }

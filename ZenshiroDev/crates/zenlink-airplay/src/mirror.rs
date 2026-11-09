@@ -38,7 +38,12 @@ pub struct Decryptor {
 
 impl Decryptor {
     pub fn new(key: [u8; 16], iv: [u8; 16]) -> Self {
-        Self { key, iv, cipher: ctr(&key, &iv), bad: 0 }
+        Self {
+            key,
+            iv,
+            cipher: ctr(&key, &iv),
+            bad: 0,
+        }
     }
 
     pub fn decrypt(&mut self, payload: &[u8]) -> Option<Vec<u8>> {
@@ -57,7 +62,10 @@ impl Decryptor {
         }
         self.bad += 1;
         if matches!(self.bad, 1 | 30 | 300) {
-            log::warn!("airplay: {} video frame(s) didn't decrypt to valid data; skipped", self.bad);
+            log::warn!(
+                "airplay: {} video frame(s) didn't decrypt to valid data; skipped",
+                self.bad
+            );
         }
         None
     }
@@ -80,7 +88,8 @@ pub fn hvcc_from_sample_entry(entry: &[u8]) -> Option<Vec<u8>> {
 pub async fn run<R: AsyncRead + Unpin>(mut r: R, key: [u8; 16], iv: [u8; 16], sink: &dyn Sink) {
     let mut cipher = Decryptor::new(key, iv);
     let mut streaming = false;
-    let (mut t0, mut frames, mut bytes, mut gap, mut last) = (Instant::now(), 0u32, 0usize, 0f32, None::<Instant>);
+    let (mut t0, mut frames, mut bytes, mut gap, mut last) =
+        (Instant::now(), 0u32, 0usize, 0f32, None::<Instant>);
     let mut header = [0u8; 128];
     loop {
         if r.read_exact(&mut header).await.is_err() {
@@ -115,7 +124,9 @@ pub async fn run<R: AsyncRead + Unpin>(mut r: R, key: [u8; 16], iv: [u8; 16], si
         }
         match kind {
             0 => {
-                let Some(au) = cipher.decrypt(&payload) else { continue };
+                let Some(au) = cipher.decrypt(&payload) else {
+                    continue;
+                };
                 frames += 1;
                 bytes += au.len();
                 sink.frame(au);
@@ -138,7 +149,10 @@ pub async fn run<R: AsyncRead + Unpin>(mut r: R, key: [u8; 16], iv: [u8; 16], si
                 } else {
                     (payload, false)
                 };
-                log::info!("airplay: video {w}x{h} {}", if hevc { "HEVC" } else { "H.264" });
+                log::info!(
+                    "airplay: video {w}x{h} {}",
+                    if hevc { "HEVC" } else { "H.264" }
+                );
                 sink.config(desc, hevc, w, h);
             }
             _ => {}
@@ -153,7 +167,10 @@ mod tests {
     #[test]
     fn checks_nal_chains() {
         assert!(valid_au(&[0, 0, 0, 2, 0x65, 1, 0, 0, 0, 1, 0x41]));
-        assert!(!valid_au(&[0, 0, 0, 2, 0x65, 1, 0, 0, 0, 5, 0x41]), "runs past the end");
+        assert!(
+            !valid_au(&[0, 0, 0, 2, 0x65, 1, 0, 0, 0, 5, 0x41]),
+            "runs past the end"
+        );
         assert!(!valid_au(&[0, 0, 0, 2, 0xE5, 1]), "forbidden bit");
         assert!(!valid_au(&[0, 0, 0, 0, 0]), "empty NAL");
     }
@@ -172,8 +189,16 @@ mod tests {
         assert_eq!(d.decrypt(&enc(&mut sender)).unwrap(), au);
         assert_eq!(d.decrypt(&enc(&mut sender)).unwrap(), au);
         let mut restarted = ctr(&key, &iv);
-        assert_eq!(d.decrypt(&enc(&mut restarted)).unwrap(), au, "fresh keystream");
-        assert_eq!(d.decrypt(&enc(&mut restarted)).unwrap(), au, "stays in step");
+        assert_eq!(
+            d.decrypt(&enc(&mut restarted)).unwrap(),
+            au,
+            "fresh keystream"
+        );
+        assert_eq!(
+            d.decrypt(&enc(&mut restarted)).unwrap(),
+            au,
+            "stays in step"
+        );
         assert!(d.decrypt(&[7; 7]).is_none());
     }
 

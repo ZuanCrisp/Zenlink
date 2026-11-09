@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::Duration;
 
 use idevice::core_device::{
-    build_keyframe_request, build_receiver_report, build_screen_audio_offer, build_screen_video_offer, build_sdes,
-    build_start_audio_parameters, build_start_video_parameters, is_rtcp, CallInfoBlob,
-    DisplayServiceClient, HevcDepacketizer, ReportBlock, RtpPacket,
+    build_keyframe_request, build_receiver_report, build_screen_audio_offer,
+    build_screen_video_offer, build_sdes, build_start_audio_parameters,
+    build_start_video_parameters, is_rtcp, CallInfoBlob, DisplayServiceClient, HevcDepacketizer,
+    ReportBlock, RtpPacket,
 };
 use idevice::RsdService as _;
 
@@ -77,9 +78,9 @@ struct Rtcp {
 fn rtcp_of(answer: &plist::Value) -> Option<Rtcp> {
     fn find<'a>(v: &'a plist::Value, key: &str) -> Option<&'a plist::Value> {
         match v {
-            plist::Value::Dictionary(d) => d
-                .get(key)
-                .or_else(|| d.values().find_map(|x| find(x, key))),
+            plist::Value::Dictionary(d) => {
+                d.get(key).or_else(|| d.values().find_map(|x| find(x, key)))
+            }
             plist::Value::Array(a) => a.iter().find_map(|x| find(x, key)),
             _ => None,
         }
@@ -116,7 +117,8 @@ fn extend_seq(highest: u32, seq: u16) -> u32 {
 }
 
 /// The device refuses screen streaming during a call (CoreDevice 9022). The app translates it.
-pub const IN_CALL: &str = "The iPhone or iPad is in a phone or video call. End the call, then try again.";
+pub const IN_CALL: &str =
+    "The iPhone or iPad is in a phone or video call. End the call, then try again.";
 
 /// A short reason for a CoreDevice error, instead of its full dump (kilobytes of plist bytes).
 fn device_error(dump: &str) -> String {
@@ -124,7 +126,11 @@ fn device_error(dump: &str) -> String {
         return IN_CALL.into();
     }
     if let Some(i) = dump.find("NSLocalizedDescription") {
-        if let Some(text) = dump[i..].split("String(\\\"").nth(1).and_then(|t| t.split("\\\"").next()) {
+        if let Some(text) = dump[i..]
+            .split("String(\\\"")
+            .nth(1)
+            .and_then(|t| t.split("\\\"").next())
+        {
             return text.into();
         }
     }
@@ -185,12 +191,17 @@ pub async fn stream(
         Ok(answer) => {
             let rtcp = rtcp_of(&answer);
             if rtcp.is_none() {
-                log::warn!("sound: no RTCP target in the answer; the device may stop the sound after 20 s");
+                log::warn!(
+                    "sound: no RTCP target in the answer; the device may stop the sound after 20 s"
+                );
             }
             rtcp
         }
         Err(e) => {
-            log::warn!("sound: not started, mirroring without sound: {}", device_error(&format!("{e:?}")));
+            log::warn!(
+                "sound: not started, mirroring without sound: {}",
+                device_error(&format!("{e:?}"))
+            );
             None
         }
     };

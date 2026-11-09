@@ -12,27 +12,41 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use super::mux::MuxStream;
 
-pub const NOT_TRUSTED: &str = "This PC isn't trusted by the device yet. Use Apple mode once (or iTunes / Apple Devices), \
+pub const NOT_TRUSTED: &str =
+    "This PC isn't trusted by the device yet. Use Apple mode once (or iTunes / Apple Devices), \
                                tap Trust on the device, then switch back to USB Direct.";
 
 fn lockdown_dir() -> PathBuf {
-    PathBuf::from(std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into())).join("Apple").join("Lockdown")
+    PathBuf::from(std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into()))
+        .join("Apple")
+        .join("Lockdown")
 }
 
 /// `<udid>.plist`, dashed after 8 characters for the 24-character UDIDs of newer devices.
 pub fn pair_record_path(udid: &str) -> PathBuf {
     let udid = udid.trim_matches('\0');
-    let name = if udid.len() == 24 && !udid.contains('-') { format!("{}-{}", &udid[..8], &udid[8..]) } else { udid.to_string() };
+    let name = if udid.len() == 24 && !udid.contains('-') {
+        format!("{}-{}", &udid[..8], &udid[8..])
+    } else {
+        udid.to_string()
+    };
     lockdown_dir().join(format!("{name}.plist"))
 }
 
 /// The pair record iTunes / Apple Devices wrote, completed with what Windows keeps elsewhere.
 pub fn load_pair_record(udid: &str) -> Option<PairingFile> {
-    let mut record = plist::Value::from_file(pair_record_path(udid)).ok()?.into_dictionary()?;
+    let mut record = plist::Value::from_file(pair_record_path(udid))
+        .ok()?
+        .into_dictionary()?;
     if !record.contains_key("SystemBUID") {
         let buid = plist::Value::from_file(lockdown_dir().join("SystemConfiguration.plist"))
             .ok()
-            .and_then(|v| v.into_dictionary()?.get("SystemBUID")?.as_string().map(String::from))
+            .and_then(|v| {
+                v.into_dictionary()?
+                    .get("SystemBUID")?
+                    .as_string()
+                    .map(String::from)
+            })
             .unwrap_or_default();
         record.insert("SystemBUID".into(), buid.into());
     }
@@ -41,15 +55,21 @@ pub fn load_pair_record(udid: &str) -> Option<PairingFile> {
         record.insert("WiFiMACAddress".into(), "00:00:00:00:00:00".into());
     }
     let mut bytes = Vec::new();
-    plist::Value::Dictionary(record).to_writer_xml(&mut bytes).ok()?;
+    plist::Value::Dictionary(record)
+        .to_writer_xml(&mut bytes)
+        .ok()?;
     PairingFile::from_bytes(&bytes).ok()
 }
 
 /// StartSession + StopSession over `stream`; errors carry lockdown's own error names
-/// (PasswordProtected, InvalidHostID, ...).
-pub fn check(stream: MuxStream, udid: &str) -> Result<(), String> {
+/// (PasswordProtected, InvalidHostID, ...). `Ok` carries the ProductType (e.g. "iPad13,18") when
+/// lockdown told it.
+pub fn check(stream: MuxStream, udid: &str) -> Result<Option<String>, String> {
     let pairing = load_pair_record(udid).ok_or(NOT_TRUSTED)?;
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
     let stream = Arc::new(Mutex::new(stream));
     let done = Arc::new(AtomicBool::new(false));
     let (ours, theirs) = tokio::io::duplex(1 << 16);
@@ -92,9 +112,18 @@ pub fn check(stream: MuxStream, udid: &str) -> Result<(), String> {
         });
         let session = async {
             let mut client = LockdownClient::new(Idevice::new(Box::new(ours), "ZenLink"));
-            client.start_session(&pairing).await.map_err(|e| format!("{e:?}"))?;
+            // Readable before a session; the exact model for the device list (session.py).
+            let product = client
+                .get_value(Some("ProductType"), None)
+                .await
+                .ok()
+                .and_then(|v| v.as_string().map(String::from));
+            client
+                .start_session(&pairing)
+                .await
+                .map_err(|e| format!("{e:?}"))?;
             let _ = client.stop_session().await;
-            Ok::<_, String>(())
+            Ok::<_, String>(product)
         };
         let r = tokio::time::timeout(Duration::from_secs(10), session)
             .await

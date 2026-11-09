@@ -452,34 +452,36 @@ impl<R: Read + Send + 'static> Drop for Records<R> {
         let session = self._session.take();
         let pacer = self.pacer.take();
         log::info!("android: off screen; the session keeps running");
-        let _ = std::thread::Builder::new().name("android-parked".into()).spawn(move || {
-            while s.parked.load(Relaxed) && !s.stop.load(Relaxed) {
-                match video.next_packet() {
-                    Ok(Packet::Config(c)) => {
-                        if let Some(i) = codec_info(video.codec, &c) {
-                            info = i;
+        let _ = std::thread::Builder::new()
+            .name("android-parked".into())
+            .spawn(move || {
+                while s.parked.load(Relaxed) && !s.stop.load(Relaxed) {
+                    match video.next_packet() {
+                        Ok(Packet::Config(c)) => {
+                            if let Some(i) = codec_info(video.codec, &c) {
+                                info = i;
+                            }
+                        }
+                        Ok(Packet::Session { width, height, .. }) => s.set_frame(width, height),
+                        Ok(_) => {}
+                        Err(e) => {
+                            log::info!("android: parked stream ended: {e}");
+                            return;
                         }
                     }
-                    Ok(Packet::Session { width, height, .. }) => s.set_frame(width, height),
-                    Ok(_) => {}
-                    Err(e) => {
-                        log::info!("android: parked stream ended: {e}");
-                        return;
-                    }
                 }
-            }
-            if s.stop.load(Relaxed) {
-                return;
-            }
-            let back = Records {
-                video: Some(video),
-                pacer,
-                shared: s.clone(),
-                _session: session,
-                info: Some(info.clone()),
-            };
-            *s.held.lock().unwrap() = Some((info, Box::new(back)));
-        });
+                if s.stop.load(Relaxed) {
+                    return;
+                }
+                let back = Records {
+                    video: Some(video),
+                    pacer,
+                    shared: s.clone(),
+                    _session: session,
+                    info: Some(info.clone()),
+                };
+                *s.held.lock().unwrap() = Some((info, Box::new(back)));
+            });
     }
 }
 
@@ -746,7 +748,10 @@ impl DeviceSource {
         let mut asked = false;
         while at.elapsed() < Duration::from_secs(2) && !self.shared.stop.load(Relaxed) {
             if let Some(back) = self.shared.held.lock().unwrap().take() {
-                log::info!("android: back on screen after {} ms", at.elapsed().as_millis());
+                log::info!(
+                    "android: back on screen after {} ms",
+                    at.elapsed().as_millis()
+                );
                 return Some(back);
             }
             if !asked {

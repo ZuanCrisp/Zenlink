@@ -56,7 +56,10 @@ fn update(f: impl FnOnce(&mut Map<String, Value>)) {
     f(&mut data);
     let tmp = p.with_extension("tmp");
     let body = serde_json::to_vec_pretty(&Value::Object(data)).unwrap_or_default();
-    if std::fs::write(&tmp, body).and_then(|_| std::fs::rename(&tmp, &p)).is_err() {
+    if std::fs::write(&tmp, body)
+        .and_then(|_| std::fs::rename(&tmp, &p))
+        .is_err()
+    {
         log::warn!("could not save {}", p.display());
     }
 }
@@ -65,13 +68,31 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
     let mut g = STATE.lock().unwrap();
     let s = g.get_or_insert_with(|| {
         let d = load();
-        let saved = d.get("connectionMode").and_then(Value::as_str).filter(|m| MODES.contains(m)).map(String::from);
-        let remember = d.get("rememberConnectionMode").and_then(Value::as_bool).unwrap_or(false) && saved.is_some();
+        let saved = d
+            .get("connectionMode")
+            .and_then(Value::as_str)
+            .filter(|m| MODES.contains(m))
+            .map(String::from);
+        let remember = d
+            .get("rememberConnectionMode")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && saved.is_some();
         let saved = saved.filter(|_| remember);
-        let link = d.get("appleLink").and_then(Value::as_str).filter(|l| LINKS.contains(l)).unwrap_or("wired");
+        let link = d
+            .get("appleLink")
+            .and_then(Value::as_str)
+            .filter(|l| LINKS.contains(l))
+            .unwrap_or("wired");
         State {
             // A remembered mode applies straight away; otherwise wait for a choice.
-            conn: Conn { active: saved.clone(), pending: None, saved, remember, link: link.into() },
+            conn: Conn {
+                active: saved.clone(),
+                pending: None,
+                saved,
+                remember,
+                link: link.into(),
+            },
             error: None,
             drivers: json!({ "apple": {}, "libusb0": {}, "devices": [] }),
             drivers_at: None,
@@ -98,9 +119,52 @@ fn model_name(serial: &str, family: &str) -> String {
         .get(serial)
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
-        .or_else(|| names.pointer(&format!("/_models/{serial}")).and_then(Value::as_str))
+        .or_else(|| {
+            names
+                .pointer(&format!("/_models/{serial}"))
+                .and_then(Value::as_str)
+        })
         .map(String::from)
         .unwrap_or_else(|| zenlink_apple::models::series_name(serial, family))
+}
+
+/// Stores the exact model learned over the cable in devices.json `_models` (models.py
+/// remember_product); unknown product types are skipped.
+pub fn remember_product(serial: &str, product_type: &str) {
+    let (Some(dir), Some(model)) = (
+        crate::backend_data_dir(),
+        zenlink_apple::models::product_name(product_type),
+    ) else {
+        return;
+    };
+    if serial.is_empty() {
+        return;
+    }
+    let p = dir.join("devices.json");
+    let mut names: Value = std::fs::read(&p)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    if names
+        .pointer(&format!("/_models/{serial}"))
+        .and_then(Value::as_str)
+        == Some(model)
+    {
+        return;
+    }
+    if !names.is_object() {
+        names = json!({});
+    }
+    names["_models"][serial] = json!(model);
+    let tmp = p.with_extension("tmp");
+    let body = serde_json::to_vec_pretty(&names).unwrap_or_default();
+    if std::fs::create_dir_all(&dir)
+        .and_then(|_| std::fs::write(&tmp, body))
+        .and_then(|_| std::fs::rename(&tmp, &p))
+        .is_err()
+    {
+        log::warn!("devices.json: could not save the model of {serial}");
+    }
 }
 
 /// What stands between a Windows-listed device and the chosen mode (None = ready).
@@ -115,7 +179,13 @@ fn need(s: &State, d: &Value) -> Option<&'static str> {
             return None;
         }
         // A missing per-model package is built during the install.
-        return Some(if s.drivers["libusb0"]["available"].as_bool() == Some(true) { "bind" } else { "package" });
+        return Some(
+            if s.drivers["libusb0"]["available"].as_bool() == Some(true) {
+                "bind"
+            } else {
+                "package"
+            },
+        );
     }
     replaced.then_some("restore")
 }
@@ -144,7 +214,9 @@ fn refresh_drivers(s: &mut State) {
 }
 
 fn snapshot(s: &mut State) -> Value {
-    let stale = s.drivers_at.is_none_or(|t| t.elapsed() > Duration::from_secs(4));
+    let stale = s
+        .drivers_at
+        .is_none_or(|t| t.elapsed() > Duration::from_secs(4));
     if stale && !CASTING.load(Relaxed) && !DRIVER_BUSY.load(Relaxed) {
         refresh_drivers(s);
     }
@@ -154,12 +226,22 @@ fn snapshot(s: &mut State) -> Value {
             "id": "airplay", "family": "iOS device", "name": "AirPlay (Wi-Fi)", "deviceName": null, "os": null,
             "ready": true, "wifi": true, "airplay": true, "receiver": RECEIVER })],
         // Apple Driver: apple.rs lists the devices; these are the ones whose driver is wrong.
-        (Some("apple"), _) => windows_presence(s).into_iter().filter(|d| !d["need"].is_null()).collect(),
+        (Some("apple"), _) => windows_presence(s)
+            .into_iter()
+            .filter(|d| !d["need"].is_null())
+            .collect(),
         _ => windows_presence(s),
     };
     let d = load();
-    let known = d.get("appleDevices").and_then(Value::as_object).cloned().unwrap_or_default();
-    let selected = d.get("appleDevice").and_then(Value::as_str).filter(|s| !s.is_empty());
+    let known = d
+        .get("appleDevices")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let selected = d
+        .get("appleDevice")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
     let present = |id: &str| devices.iter().any(|x| x["id"] == id);
     let known: Vec<Value> = known
         .iter()
@@ -188,12 +270,20 @@ pub fn state() -> Value {
 /// user's device name of trusted Apple devices (listed later even when not connected).
 pub fn observe(st: &Value) {
     let phase = st["phase"].as_str().unwrap_or("idle");
-    CASTING.store(matches!(phase, "connecting" | "activating" | "streaming"), Relaxed);
+    CASTING.store(
+        matches!(phase, "connecting" | "activating" | "streaming"),
+        Relaxed,
+    );
     let devices: Vec<&Value> = st["devices"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|d| d["ready"] == true && d["id"].as_str().is_some_and(|i| !i.is_empty() && i != "airplay"))
+        .filter(|d| {
+            d["ready"] == true
+                && d["id"]
+                    .as_str()
+                    .is_some_and(|i| !i.is_empty() && i != "airplay")
+        })
         .collect();
     if devices.is_empty() {
         return;
@@ -204,7 +294,13 @@ pub fn observe(st: &Value) {
         let id = d["id"].as_str().unwrap();
         let old = &known[id];
         // Keep a name read earlier when this read had none.
-        let pick = |k: &str| if d[k].is_null() || d[k] == "" { old[k].clone() } else { d[k].clone() };
+        let pick = |k: &str| {
+            if d[k].is_null() || d[k] == "" {
+                old[k].clone()
+            } else {
+                d[k].clone()
+            }
+        };
         let merged = json!({ "name": pick("name"), "deviceName": pick("deviceName"), "family": pick("family") });
         if *old != merged {
             changed.push((id.to_string(), merged));
@@ -244,7 +340,8 @@ pub fn handle(method: &str, path: &str, body: Option<&Value>) -> (u16, Value) {
         }
         ("POST", "/api/device/select") => {
             let id = b["id"].as_str().unwrap_or("").to_string();
-            let valid = (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+            let valid = (8..=64).contains(&id.len())
+                && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
             if !id.is_empty() && !valid {
                 return bad(400, "bad id");
             }
@@ -304,7 +401,11 @@ pub fn handle(method: &str, path: &str, body: Option<&Value>) -> (u16, Value) {
                     _ => c.pending = None,
                 }
                 s.error = None;
-                log::info!("connection mode: active={:?} pending={:?} remember={remember}", c.active, c.pending);
+                log::info!(
+                    "connection mode: active={:?} pending={:?} remember={remember}",
+                    c.active,
+                    c.pending
+                );
                 conn_snapshot(c)
             }))
         }
@@ -322,7 +423,10 @@ pub fn handle(method: &str, path: &str, body: Option<&Value>) -> (u16, Value) {
             if DRIVER_BUSY.swap(true, Relaxed) {
                 return bad(409, "Another driver change is running.");
             }
-            let r = crate::drivers::run_action(b["action"].as_str().unwrap_or(""), b["instance"].as_str().unwrap_or(""));
+            let r = crate::drivers::run_action(
+                b["action"].as_str().unwrap_or(""),
+                b["instance"].as_str().unwrap_or(""),
+            );
             DRIVER_BUSY.store(false, Relaxed);
             with(refresh_drivers);
             ok(r.unwrap_or_else(|m| json!({ "ok": false, "message": m })))
@@ -350,7 +454,13 @@ mod tests {
 
     fn state_with(mode: Option<&str>, available: bool) -> State {
         State {
-            conn: Conn { active: mode.map(String::from), pending: None, saved: None, remember: false, link: "wired".into() },
+            conn: Conn {
+                active: mode.map(String::from),
+                pending: None,
+                saved: None,
+                remember: false,
+                link: "wired".into(),
+            },
             error: None,
             drivers: json!({ "libusb0": { "available": available } }),
             drivers_at: None,
@@ -366,7 +476,10 @@ mod tests {
         assert_eq!(need(&s, &replaced), None);
         assert_eq!(need(&s, &apple), Some("bind"));
         assert_eq!(need(&s, &coexist), Some("removefilter"));
-        assert_eq!(need(&state_with(Some("usbdirect"), false), &apple), Some("package"));
+        assert_eq!(
+            need(&state_with(Some("usbdirect"), false), &apple),
+            Some("package")
+        );
         let s = state_with(Some("apple"), true);
         assert_eq!(need(&s, &apple), None);
         assert_eq!(need(&s, &replaced), Some("restore"));

@@ -50,7 +50,13 @@ struct Streams {
 impl Streams {
     fn close(&mut self) {
         // The listener and the live connections: a replaced device must not keep feeding frames.
-        for h in self.mirror.take().into_iter().chain(self.video.drain(..)).chain(self.audio.drain(..)) {
+        for h in self
+            .mirror
+            .take()
+            .into_iter()
+            .chain(self.video.drain(..))
+            .chain(self.audio.drain(..))
+        {
             h.abort();
         }
         if let Some(h) = self.timing.take() {
@@ -77,12 +83,14 @@ pub struct Server {
 impl Server {
     /// Binds the RTSP port and starts advertising. Call inside a tokio runtime.
     pub async fn start(cfg: Config, sink: Arc<dyn Sink>) -> Result<Self, String> {
-        let listener = TcpListener::bind(("0.0.0.0", cfg.port)).await.map_err(|e| {
-            format!(
-                "ZenLink couldn't open the AirPlay port ({e}). Close other AirPlay receivers \
+        let listener = TcpListener::bind(("0.0.0.0", cfg.port))
+            .await
+            .map_err(|e| {
+                format!(
+                    "ZenLink couldn't open the AirPlay port ({e}). Close other AirPlay receivers \
                  (TikTok LIVE Studio, UxPlay, LonelyScreen) and try again."
-            )
-        })?;
+                )
+            })?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let inner = Arc::new(Inner {
             id: Identity::load(&cfg.data_dir),
@@ -101,7 +109,13 @@ impl Server {
                 let me2 = me.clone();
                 let ip = peer.ip().to_string();
                 let task = tokio::spawn(async move { me2.rtsp(s, peer).await });
-                if let Some(old) = me.streams.lock().unwrap().rtsp.insert(ip, task.abort_handle()) {
+                if let Some(old) = me
+                    .streams
+                    .lock()
+                    .unwrap()
+                    .rtsp
+                    .insert(ip, task.abort_handle())
+                {
                     old.abort(); // the same device reconnected
                 }
             }
@@ -109,7 +123,12 @@ impl Server {
         .abort_handle();
         log::info!("airplay: receiver \"{}\" on port {port}", inner.cfg.name);
         inner.sink.state(State::Waiting);
-        Ok(Self { inner, accept, _advert: advert, port })
+        Ok(Self {
+            inner,
+            accept,
+            _advert: advert,
+            port,
+        })
     }
 
     pub fn stop(&self) {
@@ -158,7 +177,11 @@ fn unsigned(v: Option<&Value>) -> u64 {
 
 impl Inner {
     fn receiver(&self) -> Receiver<'_> {
-        Receiver { id: &self.id, name: &self.cfg.name, hevc: self.cfg.hevc }
+        Receiver {
+            id: &self.id,
+            name: &self.cfg.name,
+            hevc: self.cfg.hevc,
+        }
     }
 
     async fn rtsp(self: Arc<Self>, stream: TcpStream, peer: SocketAddr) {
@@ -166,14 +189,28 @@ impl Inner {
         log::info!("airplay: connection from {ip}");
         let (r, mut w) = stream.into_split();
         let mut r = BufReader::new(r);
-        let mut conn = Conn { peer: ip.clone(), fairplay: FairPlay::default(), pair: PairVerify::default(), keys: None };
+        let mut conn = Conn {
+            peer: ip.clone(),
+            fairplay: FairPlay::default(),
+            pair: PairVerify::default(),
+            keys: None,
+        };
         while let Some(req) = crate::rtsp::read(&mut r).await {
             let (status, extra, body) = self.dispatch(&mut conn, &req).await;
             if !(req.method == "POST" && req.url == "/feedback") {
-                log::info!("airplay: {} {} ({} bytes) -> {status} ({} bytes)", req.method, req.url, req.body.len(), body.len());
+                log::info!(
+                    "airplay: {} {} ({} bytes) -> {status} ({} bytes)",
+                    req.method,
+                    req.url,
+                    req.body.len(),
+                    body.len()
+                );
             }
             let cseq = req.headers.get("cseq").map(String::as_str).unwrap_or("0");
-            if w.write_all(&crate::rtsp::reply(status, cseq, &extra, &body)).await.is_err() {
+            if w.write_all(&crate::rtsp::reply(status, cseq, &extra, &body))
+                .await
+                .is_err()
+            {
                 break;
             }
             let idle = {
@@ -194,9 +231,18 @@ impl Inner {
         }
     }
 
-    async fn dispatch(self: &Arc<Self>, conn: &mut Conn, req: &crate::rtsp::Request) -> (&'static str, Vec<(&'static str, String)>, Vec<u8>) {
+    async fn dispatch(
+        self: &Arc<Self>,
+        conn: &mut Conn,
+        req: &crate::rtsp::Request,
+    ) -> (&'static str, Vec<(&'static str, String)>, Vec<u8>) {
         const OK: &str = "200 OK";
-        let bplist_type = || vec![("Content-Type", "application/x-apple-binary-plist".to_string())];
+        let bplist_type = || {
+            vec![(
+                "Content-Type",
+                "application/x-apple-binary-plist".to_string(),
+            )]
+        };
         let octet = || vec![("Content-Type", "application/octet-stream".to_string())];
         match (req.method.as_str(), req.url.as_str()) {
             ("GET", "/info") => {
@@ -211,7 +257,10 @@ impl Inner {
             },
             ("OPTIONS", _) => (
                 OK,
-                vec![("Public", "SETUP, RECORD, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER".into())],
+                vec![(
+                    "Public",
+                    "SETUP, RECORD, FLUSH, TEARDOWN, OPTIONS, GET_PARAMETER, SET_PARAMETER".into(),
+                )],
                 vec![],
             ),
             ("SETUP", _) => (OK, bplist_type(), self.setup(conn, &req.body).await),
@@ -233,7 +282,11 @@ impl Inner {
                 let types: Vec<u64> = d
                     .get("streams")
                     .and_then(Value::as_array)
-                    .map(|a| a.iter().map(|s| unsigned(s.as_dictionary().and_then(|d| d.get("type")))).collect())
+                    .map(|a| {
+                        a.iter()
+                            .map(|s| unsigned(s.as_dictionary().and_then(|d| d.get("type"))))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 let mut s = self.streams.lock().unwrap();
                 if types.is_empty() || types.contains(&110) {
@@ -262,7 +315,9 @@ impl Inner {
         let mut res = Dictionary::new();
         if let (Some(ekey), Some(eiv)) = (
             req.get("ekey").and_then(Value::as_data),
-            req.get("eiv").and_then(Value::as_data).and_then(|d| <[u8; 16]>::try_from(d).ok()),
+            req.get("eiv")
+                .and_then(Value::as_data)
+                .and_then(|d| <[u8; 16]>::try_from(d).ok()),
         ) {
             let fp = match conn.fairplay.decrypt(ekey) {
                 Ok(k) => k,
@@ -271,7 +326,10 @@ impl Inner {
                     return bplist(res);
                 }
             };
-            conn.keys = Some(AudioKeys { key: session_key(&fp, conn.pair.secret.as_ref()), iv: eiv });
+            conn.keys = Some(AudioKeys {
+                key: session_key(&fp, conn.pair.secret.as_ref()),
+                iv: eiv,
+            });
             {
                 let mut s = self.streams.lock().unwrap();
                 if let Some(old) = s.client.clone().filter(|c| *c != conn.peer) {
@@ -284,7 +342,10 @@ impl Inner {
                 s.client = Some(conn.peer.clone());
             }
             let s = |k: &str| req.get(k).and_then(Value::as_string);
-            let name = s("name").or(s("model")).unwrap_or("iPhone/iPad").to_string();
+            let name = s("name")
+                .or(s("model"))
+                .unwrap_or("iPhone/iPad")
+                .to_string();
             log::info!("airplay: {name} ({}) connected", s("model").unwrap_or(""));
             self.sink.state(State::Connected(name));
             if let Ok(sock) = UdpSocket::bind("0.0.0.0:0").await {
@@ -303,8 +364,15 @@ impl Inner {
             }
         }
         let mut streams = Vec::new();
-        for st in req.get("streams").and_then(Value::as_array).into_iter().flatten() {
-            let Some((d, Some(keys))) = st.as_dictionary().map(|d| (d, conn.keys)) else { continue };
+        for st in req
+            .get("streams")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some((d, Some(keys))) = st.as_dictionary().map(|d| (d, conn.keys)) else {
+                continue;
+            };
             match unsigned(d.get("type")) {
                 110 => {
                     let id = unsigned(d.get("streamConnectionID"));
@@ -320,12 +388,21 @@ impl Inner {
                     }
                 }
                 96 => {
-                    let (Ok(data), Ok(control)) = (UdpSocket::bind("0.0.0.0:0").await, UdpSocket::bind("0.0.0.0:0").await) else {
+                    let (Ok(data), Ok(control)) = (
+                        UdpSocket::bind("0.0.0.0:0").await,
+                        UdpSocket::bind("0.0.0.0:0").await,
+                    ) else {
                         continue;
                     };
-                    let ports = (data.local_addr().map(|a| a.port()).unwrap_or(0), control.local_addr().map(|a| a.port()).unwrap_or(0));
+                    let ports = (
+                        data.local_addr().map(|a| a.port()).unwrap_or(0),
+                        control.local_addr().map(|a| a.port()).unwrap_or(0),
+                    );
                     let ct = unsigned(d.get("ct"));
-                    log::info!("airplay: audio stream ct={ct} spf={:?}", d.get("spf").and_then(Value::as_unsigned_integer));
+                    log::info!(
+                        "airplay: audio stream ct={ct} spf={:?}",
+                        d.get("spf").and_then(Value::as_unsigned_integer)
+                    );
                     let sink = self.sink.clone();
                     let task = tokio::spawn(async move {
                         let _control = control; // shortcut: no RTCP/retransmit requests, as receiver.py
@@ -338,10 +415,14 @@ impl Inner {
                     s.audio.push(task.abort_handle());
                     drop(s);
                     streams.push(Value::Dictionary(
-                        [("dataPort", ports.0 as u64), ("controlPort", ports.1 as u64), ("type", 96)]
-                            .into_iter()
-                            .map(|(k, v)| (k.to_string(), Value::Integer(v.into())))
-                            .collect(),
+                        [
+                            ("dataPort", ports.0 as u64),
+                            ("controlPort", ports.1 as u64),
+                            ("type", 96),
+                        ]
+                        .into_iter()
+                        .map(|(k, v)| (k.to_string(), Value::Integer(v.into())))
+                        .collect(),
                     ));
                 }
                 _ => {}
@@ -382,7 +463,11 @@ impl Inner {
 /// Asks the sender for its clock every 3 s, as UxPlay does (keeps it happy).
 async fn ntp_requests(sock: UdpSocket, peer: &str, port: u16) {
     loop {
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs_f64() + 2_208_988_800.0;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64()
+            + 2_208_988_800.0;
         let mut pkt = vec![0x80, 0xD2, 0x00, 0x07];
         pkt.extend([0; 20]);
         pkt.extend((now as u32).to_be_bytes());

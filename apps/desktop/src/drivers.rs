@@ -21,12 +21,12 @@ use std::time::Instant;
 use serde_json::{json, Value};
 use windows::core::{HSTRING, PWSTR};
 use windows::Win32::Devices::DeviceAndDriverInstallation::{
-    CM_Get_DevNode_Status, CM_Locate_DevNodeW, CM_DEVNODE_STATUS_FLAGS, CM_LOCATE_DEVNODE_NORMAL, CM_PROB,
-    CR_SUCCESS, DN_STARTED,
+    CM_Get_DevNode_Status, CM_Locate_DevNodeW, CM_DEVNODE_STATUS_FLAGS, CM_LOCATE_DEVNODE_NORMAL,
+    CM_PROB, CR_SUCCESS, DN_STARTED,
 };
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, REG_MULTI_SZ,
-    REG_VALUE_TYPE,
+    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE,
+    KEY_READ, REG_MULTI_SZ, REG_VALUE_TYPE,
 };
 
 const NO_WINDOW: u32 = 0x0800_0000;
@@ -37,7 +37,9 @@ struct Key(HKEY);
 impl Key {
     fn open(parent: HKEY, path: &str) -> Option<Self> {
         let mut h = HKEY::default();
-        unsafe { RegOpenKeyExW(parent, &HSTRING::from(path), None, KEY_READ, &mut h) }.ok().ok()?;
+        unsafe { RegOpenKeyExW(parent, &HSTRING::from(path), None, KEY_READ, &mut h) }
+            .ok()
+            .ok()?;
         Some(Self(h))
     }
 
@@ -49,18 +51,33 @@ impl Key {
     fn strings(&self, name: &str) -> Vec<String> {
         let name = HSTRING::from(name);
         let (mut kind, mut size) = (REG_VALUE_TYPE::default(), 0u32);
-        if unsafe { RegQueryValueExW(self.0, &name, None, Some(&mut kind), None, Some(&mut size)) }.is_err() || size == 0 {
+        if unsafe { RegQueryValueExW(self.0, &name, None, Some(&mut kind), None, Some(&mut size)) }
+            .is_err()
+            || size == 0
+        {
             return Vec::new();
         }
         let mut buf = vec![0u16; size as usize / 2 + 1];
-        if unsafe { RegQueryValueExW(self.0, &name, None, None, Some(buf.as_mut_ptr().cast()), Some(&mut size)) }
-            .is_err()
+        if unsafe {
+            RegQueryValueExW(
+                self.0,
+                &name,
+                None,
+                None,
+                Some(buf.as_mut_ptr().cast()),
+                Some(&mut size),
+            )
+        }
+        .is_err()
         {
             return Vec::new();
         }
         buf.truncate(size as usize / 2);
-        let all: Vec<String> =
-            buf.split(|&c| c == 0).filter(|s| !s.is_empty()).map(String::from_utf16_lossy).collect();
+        let all: Vec<String> = buf
+            .split(|&c| c == 0)
+            .filter(|s| !s.is_empty())
+            .map(String::from_utf16_lossy)
+            .collect();
         if kind == REG_MULTI_SZ {
             all
         } else {
@@ -77,7 +94,18 @@ impl Key {
         for i in 0.. {
             let mut buf = [0u16; 256];
             let mut len = buf.len() as u32;
-            let r = unsafe { RegEnumKeyExW(self.0, i, Some(PWSTR(buf.as_mut_ptr())), &mut len, None, None, None, None) };
+            let r = unsafe {
+                RegEnumKeyExW(
+                    self.0,
+                    i,
+                    Some(PWSTR(buf.as_mut_ptr())),
+                    &mut len,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            };
             if r.is_err() {
                 break;
             }
@@ -100,7 +128,9 @@ fn windir() -> PathBuf {
 /// "Started", "Problem (code N)" or "Stopped" for a present device node; None when absent.
 fn devnode_status(instance: &str) -> Option<String> {
     let mut dev = 0u32;
-    if unsafe { CM_Locate_DevNodeW(&mut dev, &HSTRING::from(instance), CM_LOCATE_DEVNODE_NORMAL) } != CR_SUCCESS {
+    if unsafe { CM_Locate_DevNodeW(&mut dev, &HSTRING::from(instance), CM_LOCATE_DEVNODE_NORMAL) }
+        != CR_SUCCESS
+    {
         return None;
     }
     let (mut status, mut problem) = (CM_DEVNODE_STATUS_FLAGS::default(), CM_PROB::default());
@@ -148,11 +178,19 @@ fn connected_nodes() -> Vec<Node> {
         return Vec::new();
     };
     let mut out = Vec::new();
-    for hwid in usb.subkeys().into_iter().filter(|h| parse_hwid(h).is_some()) {
+    for hwid in usb
+        .subkeys()
+        .into_iter()
+        .filter(|h| parse_hwid(h).is_some())
+    {
         let Some(dev) = usb.sub(&hwid) else { continue };
         for serial in dev.subkeys() {
             if let Some(status) = devnode_status(&format!(r"USB\{hwid}\{serial}")) {
-                out.push(Node { hwid: hwid.clone(), serial, status });
+                out.push(Node {
+                    hwid: hwid.clone(),
+                    serial,
+                    status,
+                });
             }
         }
     }
@@ -167,8 +205,16 @@ struct EnumInfo {
 }
 
 fn enum_key(instance: &str) -> EnumInfo {
-    let Some(k) = Key::open(HKEY_LOCAL_MACHINE, &format!(r"SYSTEM\CurrentControlSet\Enum\{instance}")) else {
-        return EnumInfo { service: String::new(), upper: vec![], lower: vec![], desc: String::new() };
+    let Some(k) = Key::open(
+        HKEY_LOCAL_MACHINE,
+        &format!(r"SYSTEM\CurrentControlSet\Enum\{instance}"),
+    ) else {
+        return EnumInfo {
+            service: String::new(),
+            upper: vec![],
+            lower: vec![],
+            desc: String::new(),
+        };
     };
     let mut desc = k.string("FriendlyName");
     if desc.is_empty() {
@@ -183,7 +229,12 @@ fn enum_key(instance: &str) -> EnumInfo {
 }
 
 fn service_state(name: &str) -> (bool, bool) {
-    if Key::open(HKEY_LOCAL_MACHINE, &format!(r"SYSTEM\CurrentControlSet\Services\{name}")).is_none() {
+    if Key::open(
+        HKEY_LOCAL_MACHINE,
+        &format!(r"SYSTEM\CurrentControlSet\Services\{name}"),
+    )
+    .is_none()
+    {
         return (false, false);
     }
     let running = Command::new("sc")
@@ -198,10 +249,28 @@ fn service_state(name: &str) -> (bool, bool) {
 /// ZenLink.exe), unpacked on first use. Paths keep the installed layout: tools\ next to drivers\.
 #[cfg(feature = "portable")]
 const KIT: &[(&str, &[u8])] = &[
-    ("tools/usb_filter.ps1", include_bytes!("../../../ZenshiroDev/tooling/windows/tools/usb_filter.ps1")),
-    ("drivers/libusb-win32/amd64/libusb0.sys", include_bytes!("../../../ZenshiroDev/resources/windows/drivers/libusb-win32/amd64/libusb0.sys")),
-    ("drivers/libusb-win32/amd64/libusb0.dll", include_bytes!("../../../ZenshiroDev/resources/windows/drivers/libusb-win32/amd64/libusb0.dll")),
-    ("drivers/libusb-win32/x86/libusb0_x86.dll", include_bytes!("../../../ZenshiroDev/resources/windows/drivers/libusb-win32/x86/libusb0_x86.dll")),
+    (
+        "tools/usb_filter.ps1",
+        include_bytes!("../../../ZenshiroDev/tooling/windows/tools/usb_filter.ps1"),
+    ),
+    (
+        "drivers/libusb-win32/amd64/libusb0.sys",
+        include_bytes!(
+            "../../../ZenshiroDev/resources/windows/drivers/libusb-win32/amd64/libusb0.sys"
+        ),
+    ),
+    (
+        "drivers/libusb-win32/amd64/libusb0.dll",
+        include_bytes!(
+            "../../../ZenshiroDev/resources/windows/drivers/libusb-win32/amd64/libusb0.dll"
+        ),
+    ),
+    (
+        "drivers/libusb-win32/x86/libusb0_x86.dll",
+        include_bytes!(
+            "../../../ZenshiroDev/resources/windows/drivers/libusb-win32/x86/libusb0_x86.dll"
+        ),
+    ),
 ];
 #[cfg(not(feature = "portable"))]
 const KIT: &[(&str, &[u8])] = &[];
@@ -225,13 +294,17 @@ fn app_dir(repo: &[&str], frozen: &str) -> PathBuf {
     if beside.exists() {
         return beside;
     }
-    let source = std::env::var_os("ZENLINK_SOURCE").filter(|s| !s.is_empty()).map(PathBuf::from);
+    let source = std::env::var_os("ZENLINK_SOURCE")
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
     let in_repo = source
         .into_iter()
         .chain(exe.ancestors().skip(1).map(Path::to_path_buf))
         .map(|d| repo.iter().fold(d, |p, s| p.join(s)))
         .find(|p| p.exists());
-    in_repo.or_else(|| unpack_kit().map(|k| k.join(frozen))).unwrap_or(beside)
+    in_repo
+        .or_else(|| unpack_kit().map(|k| k.join(frozen)))
+        .unwrap_or(beside)
 }
 
 pub fn tools_dir() -> PathBuf {
@@ -239,7 +312,11 @@ pub fn tools_dir() -> PathBuf {
 }
 
 fn bundled_libusb() -> PathBuf {
-    app_dir(&["ZenshiroDev", "resources", "windows", "drivers"], "drivers").join("libusb-win32")
+    app_dir(
+        &["ZenshiroDev", "resources", "windows", "drivers"],
+        "drivers",
+    )
+    .join("libusb-win32")
 }
 
 fn libusb0_status(packages: &BTreeMap<String, String>) -> Value {
@@ -249,7 +326,13 @@ fn libusb0_status(packages: &BTreeMap<String, String>) -> Value {
     let dll_path = sys32.join("libusb0.dll");
     let dll = dll_path.exists();
     let b = bundled_libusb();
-    let bundled = [r"amd64\libusb0.sys", r"amd64\libusb0.dll", r"x86\libusb0_x86.dll"].iter().all(|f| b.join(f).exists());
+    let bundled = [
+        r"amd64\libusb0.sys",
+        r"amd64\libusb0.dll",
+        r"x86\libusb0_x86.dll",
+    ]
+    .iter()
+    .all(|f| b.join(f).exists());
     let installed = service && sys && dll;
     json!({
         "service": service, "sys": sys, "dll": dll, "dllPath": dll_path,
@@ -263,18 +346,28 @@ static INF_CACHE: Mutex<Option<InfCache>> = Mutex::new(None);
 
 /// Text without INF comments; INF files are ANSI/UTF-8 or UTF-16 (libwdi writes UTF-16).
 fn inf_text(raw: &[u8]) -> String {
-    let utf16 = raw.starts_with(&[0xFF, 0xFE]) || raw.starts_with(&[0xFE, 0xFF]) || raw.get(1) == Some(&0);
+    let utf16 =
+        raw.starts_with(&[0xFF, 0xFE]) || raw.starts_with(&[0xFE, 0xFF]) || raw.get(1) == Some(&0);
     let text = if utf16 {
         let be = raw.starts_with(&[0xFE, 0xFF]);
         let units: Vec<u16> = raw
             .chunks_exact(2)
-            .map(|c| if be { u16::from_be_bytes([c[0], c[1]]) } else { u16::from_le_bytes([c[0], c[1]]) })
+            .map(|c| {
+                if be {
+                    u16::from_be_bytes([c[0], c[1]])
+                } else {
+                    u16::from_le_bytes([c[0], c[1]])
+                }
+            })
             .collect();
         String::from_utf16_lossy(&units)
     } else {
         String::from_utf8_lossy(raw).into_owned()
     };
-    text.lines().map(|l| l.split(';').next().unwrap_or("")).collect::<Vec<_>>().join("\n")
+    text.lines()
+        .map(|l| l.split(';').next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// USB PIDs a libusb0 driver package covers (`AddService = libusb0` and `VID_05AC&PID_xxxx`).
@@ -283,7 +376,8 @@ fn inf_pids(text: &str) -> Vec<String> {
     let adds = low.lines().any(|l| {
         let l = l.replace([' ', '\t', '"'], "");
         l.strip_prefix("addservice=").is_some_and(|r| {
-            r.strip_prefix("libusb0").is_some_and(|t| !t.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
+            r.strip_prefix("libusb0")
+                .is_some_and(|t| !t.starts_with(|c: char| c.is_alphanumeric() || c == '_'))
         })
     });
     if !adds {
@@ -319,7 +413,12 @@ pub fn libusb0_packages() -> BTreeMap<String, String> {
                         return None;
                     }
                     let m = e.metadata().ok()?;
-                    let t = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos() as u64;
+                    let t = m
+                        .modified()
+                        .ok()?
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .ok()?
+                        .as_nanos() as u64;
                     Some((name, t, m.len()))
                 })
                 .collect()
@@ -358,7 +457,9 @@ pub fn device_states(packages: &BTreeMap<String, String>) -> Vec<Value> {
     }
     let mut out = Vec::new();
     for n in &nodes {
-        let Some((pid, None)) = parse_hwid(&n.hwid) else { continue };
+        let Some((pid, None)) = parse_hwid(&n.hwid) else {
+            continue;
+        };
         let instance = format!(r"USB\{}\{}", n.hwid, n.serial);
         let info = enum_key(&instance);
         let service = info.service.to_lowercase();
@@ -374,7 +475,12 @@ pub fn device_states(packages: &BTreeMap<String, String>) -> Vec<Value> {
         let stale: Vec<Value> = kids
             .iter()
             .filter(|c| {
-                c["upper"].as_array().is_some_and(|u| u.iter().any(|f| f.as_str().is_some_and(|f| f.eq_ignore_ascii_case("libusb0"))))
+                c["upper"].as_array().is_some_and(|u| {
+                    u.iter().any(|f| {
+                        f.as_str()
+                            .is_some_and(|f| f.eq_ignore_ascii_case("libusb0"))
+                    })
+                })
             })
             .map(|c| c["interface"].clone())
             .collect();
@@ -410,7 +516,10 @@ pub fn run_action(action: &str, instance: &str) -> Result<Value, String> {
     if !ACTIONS.contains(&action) {
         return Err(format!("Unknown action: {action}"));
     }
-    if !device_states(&BTreeMap::new()).iter().any(|d| d["instance"] == instance) {
+    if !device_states(&BTreeMap::new())
+        .iter()
+        .any(|d| d["instance"] == instance)
+    {
         return Err("That device is not connected anymore. Plug it in and try again.".into());
     }
     let script = tools_dir().join("usb_filter.ps1");
@@ -429,7 +538,13 @@ pub fn run_action(action: &str, instance: &str) -> Result<Value, String> {
     log::info!("driver action {action} on {instance} (elevated)");
     let started = Instant::now();
     let code = Command::new("powershell.exe")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &launcher])
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &launcher,
+        ])
         .creation_flags(NO_WINDOW)
         .output()
         .map_err(|e| e.to_string())?
@@ -450,12 +565,18 @@ pub fn run_action(action: &str, instance: &str) -> Result<Value, String> {
             )
         })?;
     result["seconds"] = json!((started.elapsed().as_secs_f64() * 10.0).round() / 10.0);
-    log::info!("driver action result: ok={} message={}", result["ok"], result["message"]);
+    log::info!(
+        "driver action result: ok={} message={}",
+        result["ok"],
+        result["message"]
+    );
     Ok(result)
 }
 
 fn uuid_hex() -> String {
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
     format!("{:x}{:x}", t.as_nanos(), std::process::id())
 }
 
@@ -466,7 +587,10 @@ mod tests {
     #[test]
     fn hardware_ids() {
         assert_eq!(parse_hwid("VID_05AC&PID_12A8"), Some(("12A8".into(), None)));
-        assert_eq!(parse_hwid("vid_05ac&pid_12ab&mi_01"), Some(("12AB".into(), Some(1))));
+        assert_eq!(
+            parse_hwid("vid_05ac&pid_12ab&mi_01"),
+            Some(("12AB".into(), Some(1)))
+        );
         assert_eq!(parse_hwid("VID_05AC&PID_8600"), None);
         assert_eq!(parse_hwid("VID_1234&PID_12A8"), None);
     }
@@ -476,8 +600,14 @@ mod tests {
         let inf = "[Devices]\n\"iPhone\" = LIBUSB_DEV, USB\\VID_05AC&PID_12A8\n; USB\\VID_05AC&PID_12AB\n\
                    [LIBUSB_DEV.Services]\nAddService = libusb0, 0x00000002, LIBUSB.AddService\n\
                    x = USB\\VID_05AC&PID_12AA&MI_00\n";
-        assert_eq!(inf_pids(&inf_text(inf.as_bytes())), vec!["12A8".to_string()]);
-        let utf16: Vec<u8> = [0xFFu8, 0xFE].into_iter().chain(inf.encode_utf16().flat_map(u16::to_le_bytes)).collect();
+        assert_eq!(
+            inf_pids(&inf_text(inf.as_bytes())),
+            vec!["12A8".to_string()]
+        );
+        let utf16: Vec<u8> = [0xFFu8, 0xFE]
+            .into_iter()
+            .chain(inf.encode_utf16().flat_map(u16::to_le_bytes))
+            .collect();
         assert_eq!(inf_pids(&inf_text(&utf16)), vec!["12A8".to_string()]);
         assert!(inf_pids("AddService = libusb0x, 2\nUSB\\VID_05AC&PID_12A8").is_empty());
         assert!(inf_pids("AddService = WinUSB\nUSB\\VID_05AC&PID_12A8").is_empty());

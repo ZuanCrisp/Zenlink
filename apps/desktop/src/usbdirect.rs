@@ -77,27 +77,51 @@ pub fn running() -> bool {
 struct Feed;
 
 impl session::Sink for Feed {
+    fn product(&self, product_type: &str) {
+        let serial = SHARED.lock().unwrap().device["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        crate::backend::remember_product(&serial, product_type);
+    }
+
     fn state(&self, phase: &'static str, detail: &str) {
         let mut g = SHARED.lock().unwrap();
         // The window's checklist knows connecting / activating / streaming.
-        g.phase = if matches!(phase, "waiting" | "handshake") { "activating" } else { phase };
+        g.phase = if matches!(phase, "waiting" | "handshake") {
+            "activating"
+        } else {
+            phase
+        };
         g.detail = detail.into();
     }
 
     fn format(&self, f: &Format) {
         let mut g = SHARED.lock().unwrap();
-        if g.format.as_ref().is_some_and(|(c, cfg)| *c == f.codec && *cfg == f.config) {
+        if g.format
+            .as_ref()
+            .is_some_and(|(c, cfg)| *c == f.codec && *cfg == f.config)
+        {
             return; // the device repeats it with every keyframe
         }
         g.format = Some((f.codec, f.config.clone()));
         let hevc = f.is_hevc();
         let info = CodecInfo {
             codec: if hevc { Codec::Hevc } else { Codec::H264 },
-            description: if hevc { f.config.clone() } else { h264::rewrite_avcc(&f.config) },
+            description: if hevc {
+                f.config.clone()
+            } else {
+                h264::rewrite_avcc(&f.config)
+            },
             keyframes_on_request: false,
             display: None,
         };
-        log::info!("usb direct: {} {}x{}", if hevc { "HEVC" } else { "H.264" }, f.width, f.height);
+        log::info!(
+            "usb direct: {} {}x{}",
+            if hevc { "HEVC" } else { "H.264" },
+            f.width,
+            f.height
+        );
         g.gop.clear();
         g.key_in_gop = false;
         g.size = (f.width, f.height);
@@ -131,7 +155,14 @@ impl session::Sink for Feed {
         }
         if let Some(tx) = &g.tx {
             // A full queue means the decoder fell behind: drop the session, it reopens from the GOP.
-            if tx.try_send(Record::Frame { key, rebuild: false, data }).is_err() {
+            if tx
+                .try_send(Record::Frame {
+                    key,
+                    rebuild: false,
+                    data,
+                })
+                .is_err()
+            {
                 g.tx = None;
             }
         }
@@ -165,7 +196,10 @@ impl session::Sink for Feed {
 /// Called with each backend state: remembers the mode and the device list, and lays the
 /// session's state over the backend's while Studio over the cable is the mode.
 pub fn overlay(st: &mut Value) {
-    let conn = |k: &str| st.pointer(&format!("/connection/{k}")).and_then(Value::as_str);
+    let conn = |k: &str| {
+        st.pointer(&format!("/connection/{k}"))
+            .and_then(Value::as_str)
+    };
     let wanted = conn("active") == Some("usbdirect") && conn("link") != Some("wireless");
     if WANTED.swap(wanted, Relaxed) && !wanted {
         stop(); // the mode changed away
@@ -174,7 +208,10 @@ pub fn overlay(st: &mut Value) {
         return;
     }
     *DEVICES.lock().unwrap() = (
-        st.get("devices").and_then(Value::as_array).cloned().unwrap_or_default(),
+        st.get("devices")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default(),
         st.get("selected").and_then(Value::as_str).map(String::from),
     );
     if let Some(c) = SHARED.lock().unwrap().control.as_ref() {
@@ -204,6 +241,29 @@ pub fn overlay(st: &mut Value) {
     }
 }
 
+/// Short advice for errors the user can act on (castmanager.py _friendly_error).
+fn friendly(text: &str) -> String {
+    let low = text.to_lowercase();
+    if ["developer mode", "libusb0", "settings >"]
+        .iter()
+        .any(|k| low.contains(k))
+    {
+        text.into()
+    } else if low.contains("pair") || low.contains("trust") {
+        "Unlock the device and tap Trust, then try again.".into()
+    } else if ["not connected", "not found", "no device"]
+        .iter()
+        .any(|k| low.contains(k))
+    {
+        "The device was disconnected. Plug it back in and try again.".into()
+    } else if ["in use", "busy", "access"].iter().any(|k| low.contains(k)) {
+        "Another app is using the device's screen (Xcode, QuickTime, TikTok LIVE Studio). Close it and try again."
+            .into()
+    } else {
+        text.into()
+    }
+}
+
 fn fail(msg: &str) {
     let mut g = SHARED.lock().unwrap();
     g.phase = "error";
@@ -223,19 +283,31 @@ pub fn start() -> bool {
     let target = devices
         .iter()
         .find(|d| id(d).is_some() && id(d) == selected)
-        .or_else(|| devices.iter().find(|d| d.get("ready").and_then(Value::as_bool) == Some(true)))
+        .or_else(|| {
+            devices
+                .iter()
+                .find(|d| d.get("ready").and_then(Value::as_bool) == Some(true))
+        })
         .or_else(|| devices.first());
     let Some(target) = target.cloned() else {
         fail("Connect an iPhone or iPad with a USB cable.");
         return true;
     };
     if let Some(need) = target.get("need").and_then(Value::as_str) {
-        let msg = NEED.iter().find(|(k, _)| *k == need).map_or("Unlock the device and tap Trust, then try again.", |m| m.1);
+        let msg = NEED
+            .iter()
+            .find(|(k, _)| *k == need)
+            .map_or("Unlock the device and tap Trust, then try again.", |m| m.1);
         fail(msg);
         return true;
     }
     let serial = id(&target).unwrap_or_default();
-    let (s, control) = session::Session::new(&serial, Arc::new(Feed), DISPLAY, crate::apple::audio_to_pc());
+    let (s, control) = session::Session::new(
+        &serial,
+        Arc::new(Feed),
+        DISPLAY,
+        crate::apple::audio_to_pc(),
+    );
     {
         let mut g = SHARED.lock().unwrap();
         *g = Inner::new();
@@ -257,7 +329,7 @@ pub fn start() -> bool {
             g.tx = None;
             match r {
                 Ok(()) => (g.phase, g.detail) = ("idle", "Casting stopped".into()),
-                Err(e) => (g.phase, g.error) = ("error", Some(e)),
+                Err(e) => (g.phase, g.error) = ("error", Some(friendly(&e))),
             }
         })
         .expect("usbdirect thread");
@@ -292,7 +364,11 @@ impl VideoSource for UsbSource {
                         .gop
                         .iter()
                         .enumerate()
-                        .map(|(i, d)| Record::Frame { key: i == 0, rebuild: false, data: d.clone() })
+                        .map(|(i, d)| Record::Frame {
+                            key: i == 0,
+                            rebuild: false,
+                            data: d.clone(),
+                        })
                         .collect();
                     return Some((info, Box::new(UsbRecords { pending, rx })));
                 }
@@ -326,5 +402,23 @@ impl RecordStream for UsbRecords {
                 Err(_) => return None,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::friendly;
+
+    #[test]
+    fn errors_get_short_advice() {
+        assert_eq!(
+            friendly("InvalidHostID: pairing gone"),
+            "Unlock the device and tap Trust, then try again."
+        );
+        assert!(friendly("usb: no device").starts_with("The device was disconnected"));
+        assert!(friendly("resource busy").starts_with("Another app"));
+        let own = "Install libusb0 first (Settings > Connection & Drivers).";
+        assert_eq!(friendly(own), own);
+        assert_eq!(friendly("odd"), "odd");
     }
 }

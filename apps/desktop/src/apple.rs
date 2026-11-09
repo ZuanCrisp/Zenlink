@@ -77,7 +77,10 @@ impl Sess {
     }
 
     fn live(&self) -> bool {
-        matches!(self.state.lock().unwrap().phase, "connecting" | "activating" | "streaming")
+        matches!(
+            self.state.lock().unwrap().phase,
+            "connecting" | "activating" | "streaming"
+        )
     }
 
     fn send(&self, i: Input) {
@@ -146,7 +149,10 @@ pub fn audio_to_pc() -> bool {
 
 /// Settings > Audio: volume 0..1 and mute.
 pub fn audio_level() -> (f32, bool) {
-    (f32::from_bits(AUDIO_VOLUME.load(Relaxed)), AUDIO_MUTED.load(Relaxed))
+    (
+        f32::from_bits(AUDIO_VOLUME.load(Relaxed)),
+        AUDIO_MUTED.load(Relaxed),
+    )
 }
 
 /// The button that turns the volume `down` (or up). iPadOS swaps the two at rotation 270
@@ -223,14 +229,20 @@ pub fn in_use() -> bool {
     IN_USE.load(Relaxed)
 }
 
-
 /// The device to send files to: the one on screen, else the picked one, else the first trusted.
 pub fn file_device() -> Option<String> {
     let e = engine();
     let shown = e.view.lock().unwrap().clone();
     shown
         .or_else(|| PICKED.lock().unwrap().clone())
-        .or_else(|| e.devices.lock().unwrap().iter().find(|d| d.paired).map(|d| d.udid.clone()))
+        .or_else(|| {
+            e.devices
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|d| d.paired)
+                .map(|d| d.udid.clone())
+        })
 }
 
 /// One-time Wi-Fi setup over the cable (Settings), in the backend's reply shape
@@ -249,19 +261,36 @@ pub fn prepare_wifi() -> Value {
         Err(err) => return fail(&format!("Wi-Fi setup failed: {err}")),
     };
     let dir = zenlink_apple::wifi::record_dir();
-    let has_record = |u: &str| dir.as_ref().is_some_and(|d| d.join(format!("remote_{u}.plist")).is_file());
-    let name = |u: &str| custom_name(u).or_else(|| {
-        let n = e.info.lock().unwrap().get(u)?.name.clone();
-        (!n.is_empty()).then_some(n)
-    });
-    let mut ready: Vec<String> = usb.iter().filter(|(_, p)| *p).map(|(u, _)| u.clone()).collect();
+    let has_record = |u: &str| {
+        dir.as_ref()
+            .is_some_and(|d| d.join(format!("remote_{u}.plist")).is_file())
+    };
+    let name = |u: &str| {
+        custom_name(u).or_else(|| {
+            let n = e.info.lock().unwrap().get(u)?.name.clone();
+            (!n.is_empty()).then_some(n)
+        })
+    };
+    let mut ready: Vec<String> = usb
+        .iter()
+        .filter(|(_, p)| *p)
+        .map(|(u, _)| u.clone())
+        .collect();
     if ready.is_empty() {
         if !usb.is_empty() {
             return fail("Unlock the device and tap Trust, then try again.");
         }
-        let wifi = e.devices.lock().unwrap().iter().find(|d| d.addr.is_some()).map(|d| d.udid.clone());
+        let wifi = e
+            .devices
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|d| d.addr.is_some())
+            .map(|d| d.udid.clone());
         return match wifi {
-            Some(u) => json!({ "ok": true, "message": "Wi-Fi is already set up.", "device": name(&u) }),
+            Some(u) => {
+                json!({ "ok": true, "message": "Wi-Fi is already set up.", "device": name(&u) })
+            }
             None => fail("Connect the device with the cable, unlock it and tap Trust first."),
         };
     }
@@ -290,7 +319,10 @@ pub fn overlay(st: &mut Value) {
     };
     let apple = conn("active") == Some("apple");
     WIRELESS.store(conn("link") == Some("wireless"), Relaxed);
-    let picked = st.get("selected").and_then(Value::as_str).map(str::to_string);
+    let picked = st
+        .get("selected")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let changed = {
         let mut p = PICKED.lock().unwrap();
         let changed = *p != picked;
@@ -442,9 +474,25 @@ fn dpapi(data: &[u8], protect: bool) -> Option<Vec<u8>> {
     // SAFETY: `input` points at `data`, alive for the call; `out` is freed with LocalFree.
     unsafe {
         let r = if protect {
-            CryptProtectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
+            CryptProtectData(
+                &input,
+                None,
+                None,
+                None,
+                None,
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut out,
+            )
         } else {
-            CryptUnprotectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
+            CryptUnprotectData(
+                &input,
+                None,
+                None,
+                None,
+                None,
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut out,
+            )
         };
         r.ok()?;
         let v = std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec();
@@ -466,7 +514,11 @@ fn passcode() -> String {
 
 /// Whether a passcode is saved.
 pub fn has_passcode() -> bool {
-    secrets().is_some_and(|(_, m)| m.get("passcode").and_then(Value::as_str).is_some_and(|s| !s.is_empty()))
+    secrets().is_some_and(|(_, m)| {
+        m.get("passcode")
+            .and_then(Value::as_str)
+            .is_some_and(|s| !s.is_empty())
+    })
 }
 
 /// Saves the passcode (cleaned to what can be typed; empty removes it). `Some(saved)`,
@@ -479,7 +531,12 @@ pub fn save_passcode(raw: &str) -> Option<bool> {
         m.remove("passcode");
     } else {
         let sealed = dpapi(code.as_bytes(), true)?;
-        m.insert("passcode".into(), base64::engine::general_purpose::STANDARD.encode(sealed).into());
+        m.insert(
+            "passcode".into(),
+            base64::engine::general_purpose::STANDARD
+                .encode(sealed)
+                .into(),
+        );
     }
     std::fs::create_dir_all(path.parent()?).ok()?;
     std::fs::write(path, Value::Object(m).to_string()).ok()?;
@@ -563,7 +620,9 @@ impl Engine {
         };
         let mut tried = self.wifi_tried.lock().unwrap();
         for d in usb.iter().filter(|d| d.paired) {
-            let due = tried.get(&d.udid).is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
+            let due = tried
+                .get(&d.udid)
+                .is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
             if !due || dir.join(format!("remote_{}.plist", d.udid)).is_file() {
                 continue;
             }
@@ -571,7 +630,9 @@ impl Engine {
             let udid = d.udid.clone();
             tokio::spawn(async move {
                 match wifi::prepare(&udid).await {
-                    Ok(paired) => log::info!("wifi: auto setup of {udid} done (RemotePairing record: {paired})"),
+                    Ok(paired) => log::info!(
+                        "wifi: auto setup of {udid} done (RemotePairing record: {paired})"
+                    ),
                     Err(e) => log::warn!("wifi: auto setup of {udid} failed: {e}"),
                 }
             });
@@ -613,7 +674,10 @@ impl Engine {
         let _ = std::thread::Builder::new()
             .name("zenlink-apple-info".into())
             .spawn(move || {
-                let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+                let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                else {
                     return;
                 };
                 let ask = async {
@@ -675,7 +739,11 @@ impl Engine {
         let devices: Vec<Value> = devs.iter().map(|d| self.entry(d)).collect();
         let shown = self.shown();
         let idle = State {
-            phase: if self.fail.lock().unwrap().is_some() { "error" } else { "idle" },
+            phase: if self.fail.lock().unwrap().is_some() {
+                "error"
+            } else {
+                "idle"
+            },
             error: self.fail.lock().unwrap().clone(),
             ..State::default()
         };
@@ -731,7 +799,12 @@ impl Engine {
             self.show(None);
             return;
         };
-        let version = self.info.lock().unwrap().get(&dev.udid).map(|i| i.version.clone());
+        let version = self
+            .info
+            .lock()
+            .unwrap()
+            .get(&dev.udid)
+            .map(|i| i.version.clone());
         let hybrid = version.is_some_and(|v| hybrid_version(&v));
         let name = self
             .entry(&dev)
@@ -751,7 +824,12 @@ impl Engine {
             screen: Mutex::new(None),
         });
         // Start again on a running device: the old session ends first.
-        if let Some(old) = self.sessions.lock().unwrap().insert(dev.udid.clone(), sess.clone()) {
+        if let Some(old) = self
+            .sessions
+            .lock()
+            .unwrap()
+            .insert(dev.udid.clone(), sess.clone())
+        {
             old.stop.store(true, Relaxed);
         }
         self.show(Some(dev.udid.clone()));
@@ -881,12 +959,19 @@ impl Engine {
             while let Some(i) = irx.recv().await {
                 let cmd = match i {
                     Input::Hid(hid::Cmd::Action { name, .. }) if name == "wake" => {
-                        hid::Cmd::Action { name, text: passcode() }
+                        hid::Cmd::Action {
+                            name,
+                            text: passcode(),
+                        }
                     }
                     // AirPlay shows the screen already turned: map back to the portrait touch space.
                     Input::Hid(hid::Cmd::Touch { contact, x, y }) if hybrid => {
                         let rot = sess.state.lock().unwrap().rotation;
-                        let (x, y) = zenlink_core::api::device_point(x as f32 / 65535.0, y as f32 / 65535.0, rot);
+                        let (x, y) = zenlink_core::api::device_point(
+                            x as f32 / 65535.0,
+                            y as f32 / 65535.0,
+                            rot,
+                        );
                         hid::Cmd::Touch { contact, x, y }
                     }
                     Input::Hid(c) => c,
@@ -900,7 +985,14 @@ impl Engine {
                         match press(&mut hid, volume_button(down, ipad, rot), times).await {
                             Ok(()) => {
                                 quiet.set(down);
-                                log::info!("apple: device volume {}", if down { "down (PC only)" } else { "back to half" });
+                                log::info!(
+                                    "apple: device volume {}",
+                                    if down {
+                                        "down (PC only)"
+                                    } else {
+                                        "back to half"
+                                    }
+                                );
                             }
                             Err(e) => log::warn!("apple: device volume: {e}"),
                         }
@@ -913,12 +1005,16 @@ impl Engine {
                         {
                             continue;
                         }
-                        if !relock_allowed(at, unlocked_at, &mut recent, UNLOCK_LIMIT.load(Relaxed)) {
+                        if !relock_allowed(at, unlocked_at, &mut recent, UNLOCK_LIMIT.load(Relaxed))
+                        {
                             log::info!("apple: lock not unlocked (just unlocked, or 3 in 30 s)");
                             continue;
                         }
                         tokio::time::sleep(Duration::from_millis(800)).await; // let the lock finish
-                        hid::Cmd::Action { name: "wake".into(), text: passcode() }
+                        hid::Cmd::Action {
+                            name: "wake".into(),
+                            text: passcode(),
+                        }
                     }
                 };
                 let wake = matches!(&cmd, hid::Cmd::Action { name, .. } if name == "wake");
@@ -1014,7 +1110,10 @@ impl Engine {
             // Give the device its sound back (half: the old level cannot be read).
             let rot = sess.state.lock().unwrap().rotation;
             let up = press(&mut hid, volume_button(false, ipad, rot), VOLUME_STEPS / 2);
-            if !matches!(tokio::time::timeout(Duration::from_secs(5), up).await, Ok(Ok(()))) {
+            if !matches!(
+                tokio::time::timeout(Duration::from_secs(5), up).await,
+                Ok(Ok(()))
+            ) {
                 log::info!("apple: device volume not restored (link gone)");
             }
         }
@@ -1123,7 +1222,9 @@ impl RecordStream for AppleRecords {
                 Err(RecvTimeoutError::Disconnected) => return None,
             };
             // New parameter sets (rotation, size change): reconfigure first.
-            if let Some(info) = codec_info(&au, self.screen).filter(|i| i.description != self.config) {
+            if let Some(info) =
+                codec_info(&au, self.screen).filter(|i| i.description != self.config)
+            {
                 self.config = info.description.clone();
                 self.pending = frame(&au);
                 return Some(Record::Config(info));
@@ -1219,7 +1320,10 @@ impl Pic {
             if !key {
                 return false;
             }
-            log::info!("apple: keyframe {} ms after the request", w.elapsed().as_millis());
+            log::info!(
+                "apple: keyframe {} ms after the request",
+                w.elapsed().as_millis()
+            );
             self.wait = None;
         }
         let au = if key && bare && !self.ps.is_empty() {
@@ -1253,7 +1357,10 @@ mod tests {
         let e = engine();
         let sess = || {
             Arc::new(Sess {
-                state: Mutex::new(State { phase: "streaming", ..State::default() }),
+                state: Mutex::new(State {
+                    phase: "streaming",
+                    ..State::default()
+                }),
                 stop: AtomicBool::new(false),
                 input: Mutex::new(None),
                 key: AtomicBool::new(false),
@@ -1341,8 +1448,18 @@ mod tests {
         assert!(!relock_allowed(s(6_508), Some(s(6_500)), &mut recent, true));
         assert!(relock_allowed(s(9_000), Some(s(6_500)), &mut recent, true));
         // A 4th within 30 s: stop.
-        assert!(!relock_allowed(s(12_000), Some(s(10_000)), &mut recent, true));
-        assert!(relock_allowed(s(40_000), Some(s(10_000)), &mut recent, true));
+        assert!(!relock_allowed(
+            s(12_000),
+            Some(s(10_000)),
+            &mut recent,
+            true
+        ));
+        assert!(relock_allowed(
+            s(40_000),
+            Some(s(10_000)),
+            &mut recent,
+            true
+        ));
         // Limit off: no cap.
         let mut recent = Vec::new();
         for n in 0..6 {

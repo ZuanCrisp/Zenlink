@@ -39,7 +39,9 @@ impl PairVerify {
             self.theirs_ed = body[36..68].try_into().unwrap();
             let ours = StaticSecret::from(our_secret);
             let ours_pub = PublicKey::from(&ours).to_bytes();
-            let secret = ours.diffie_hellman(&PublicKey::from(self.theirs_x)).to_bytes();
+            let secret = ours
+                .diffie_hellman(&PublicKey::from(self.theirs_x))
+                .to_bytes();
             let mut msg = ours_pub.to_vec();
             msg.extend_from_slice(&self.theirs_x);
             let mut sig = key.sign(&msg).to_bytes();
@@ -50,7 +52,9 @@ impl PairVerify {
             out.extend_from_slice(&sig);
             return out;
         }
-        if let (true, Some(secret), Some(ours)) = (body.len() == 68 && body[0] == 0, self.secret, &self.ours) {
+        if let (true, Some(secret), Some(ours)) =
+            (body.len() == 68 && body[0] == 0, self.secret, &self.ours)
+        {
             let mut c = Self::cipher(&secret);
             c.apply_keystream(&mut [0u8; 64]); // the first 64 bytes signed our reply
             let mut sig: [u8; 64] = body[4..68].try_into().unwrap();

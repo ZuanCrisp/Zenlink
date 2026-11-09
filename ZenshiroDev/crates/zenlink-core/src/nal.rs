@@ -304,7 +304,12 @@ mod tests {
         let mut bits = String::new();
         let ue = |v: u32| {
             let n = 32 - (v + 1).leading_zeros() - 1;
-            format!("{}{:0width$b}", "0".repeat(n as usize), v + 1, width = n as usize + 1)
+            format!(
+                "{}{:0width$b}",
+                "0".repeat(n as usize),
+                v + 1,
+                width = n as usize + 1
+            )
         };
         bits += "0000"; // vps id
         bits += "000"; // max_sub_layers_minus1
@@ -320,7 +325,11 @@ mod tests {
             bits.push('1');
         }
         let mut au = vec![0, 0, 0, 1, 33 << 1, 1];
-        au.extend(bits.as_bytes().chunks(8).map(|c| u8::from_str_radix(std::str::from_utf8(c).unwrap(), 2).unwrap()));
+        au.extend(
+            bits.as_bytes()
+                .chunks(8)
+                .map(|c| u8::from_str_radix(std::str::from_utf8(c).unwrap(), 2).unwrap()),
+        );
         assert_eq!(super::hevc_visible(&au), Some([0, 0, 1206, 2622]));
     }
 

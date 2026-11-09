@@ -34,7 +34,10 @@ fn recognize(width: u32, height: u32, bgra: &[u8]) -> windows::core::Result<Vec<
 }
 
 fn norm(line: &str) -> String {
-    line.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    line.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 /// Appends `new` to `old`, skipping lines already at the end of `old`. Returns how many
@@ -60,7 +63,10 @@ pub fn add_capture(width: u32, height: u32, bgra: &[u8]) -> Result<(String, usiz
     let read = lines.len();
     let mut all = LINES.lock().unwrap();
     let added = merge(&mut all, lines);
-    log::info!("ocr: {read} lines read, {added} new, {} stitched", all.len());
+    log::info!(
+        "ocr: {read} lines read, {added} new, {} stitched",
+        all.len()
+    );
     Ok((all.join("\n"), added, all.len()))
 }
 
@@ -80,7 +86,10 @@ mod tests {
     #[test]
     #[ignore]
     fn winrt_reads_a_blank_picture() {
-        assert_eq!(super::recognize(64, 64, &[255; 64 * 64 * 4]).unwrap(), Vec::<String>::new());
+        assert_eq!(
+            super::recognize(64, 64, &[255; 64 * 64 * 4]).unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

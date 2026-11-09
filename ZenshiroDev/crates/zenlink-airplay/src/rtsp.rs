@@ -39,13 +39,21 @@ pub async fn read<R: AsyncBufRead + Unpin>(r: &mut R) -> Option<Request> {
         .filter_map(|l| l.split_once(':'))
         .map(|(k, v)| (k.trim().to_lowercase(), v.trim().to_string()))
         .collect();
-    let len: usize = headers.get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let len: usize = headers
+        .get("content-length")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     if len > LIMIT {
         return None;
     }
     let mut body = vec![0; len];
     r.read_exact(&mut body).await.ok()?;
-    Some(Request { method, url, headers, body })
+    Some(Request {
+        method,
+        url,
+        headers,
+        body,
+    })
 }
 
 pub fn reply(status: &str, cseq: &str, extra: &[(&str, String)], body: &[u8]) -> Vec<u8> {
@@ -69,10 +77,16 @@ mod tests {
         let raw = b"POST /pair-verify RTSP/1.0\r\nCSeq: 3\r\nContent-Length: 4\r\nX-Apple: a:b\r\n\r\nabcdGET /info RTSP/1.0\r\nCSeq: 4\r\n\r\n";
         let mut r = tokio::io::BufReader::new(&raw[..]);
         let a = super::read(&mut r).await.unwrap();
-        assert_eq!((a.method.as_str(), a.url.as_str(), &a.body[..]), ("POST", "/pair-verify", &b"abcd"[..]));
+        assert_eq!(
+            (a.method.as_str(), a.url.as_str(), &a.body[..]),
+            ("POST", "/pair-verify", &b"abcd"[..])
+        );
         assert_eq!(a.headers["x-apple"], "a:b");
         let b = super::read(&mut r).await.unwrap();
-        assert_eq!((b.method.as_str(), b.headers["cseq"].as_str()), ("GET", "4"));
+        assert_eq!(
+            (b.method.as_str(), b.headers["cseq"].as_str()),
+            ("GET", "4")
+        );
         assert!(super::read(&mut r).await.is_none());
         let out = super::reply("200 OK", "4", &[("Content-Type", "x".into())], b"hi");
         assert_eq!(
