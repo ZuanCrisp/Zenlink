@@ -70,18 +70,20 @@ $pyiArgs = @(
     "--add-data", "$root\ZenshiroDev\resources\assets${sep}assets",
     "--add-data", "$root\ZenshiroDev\tooling\windows\tools${sep}tools",
     "--add-data", "$root\ZenshiroDev\resources\windows\drivers${sep}drivers",
-    "--collect-all", "pymobiledevice3",
+    # Not --collect-all: that also copies every .py source next to the
+    # bytecode already in the PYZ (529 files, 6.3 MB).
+    "--collect-submodules", "pymobiledevice3", "--collect-data", "pymobiledevice3", "--collect-binaries", "pymobiledevice3",
     # Package metadata (dist-info) of pymobiledevice3 and everything it
     # depends on: some read their own version at import (pyimg4 does), and
     # without it the developer image / tunnel import fails in the exe.
     "--recursive-copy-metadata", "pymobiledevice3",
-    "--collect-all", "pmd_pytcp",
-    "--collect-all", "pmd_net_addr",
-    "--collect-all", "pytun_pmd3",  # wintun.dll, loaded when the tunnel module is imported
+    "--collect-submodules", "pmd_pytcp", "--collect-data", "pmd_pytcp", "--collect-binaries", "pmd_pytcp",
+    "--collect-submodules", "pmd_net_addr", "--collect-data", "pmd_net_addr", "--collect-binaries", "pmd_net_addr",
+    "--collect-submodules", "pytun_pmd3", "--collect-data", "pytun_pmd3", "--collect-binaries", "pytun_pmd3",  # wintun.dll, loaded when the tunnel module is imported
     # Only the x64 PortAudio (ZenshiroDev\tooling\windows\packaging\pyi-hooks\hook-sounddevice.py).
     "--additional-hooks-dir", "$root\ZenshiroDev\tooling\windows\packaging\pyi-hooks",
     "--hidden-import", "_sounddevice_data",
-    "--collect-all", "zeroconf",
+    "--collect-submodules", "zeroconf", "--collect-data", "zeroconf", "--collect-binaries", "zeroconf",
     "--add-binary", "$root\apps\desktop\backend\zenlink\airplay\playfair.dll${sep}zenlink\airplay",
     # Sound: minimal FFmpeg AAC decoder (ZenshiroDev\resources\windows\native\zlaac). PyAV (full FFmpeg,
     # ~65 MB) is only pulled in by pymobiledevice3's unused VNC transcoder.

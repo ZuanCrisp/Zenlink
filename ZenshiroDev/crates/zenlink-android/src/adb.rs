@@ -286,6 +286,13 @@ impl AdbClient {
             .map_err(|_| AdbError::Protocol(format!("bad version {s:?}")))
     }
 
+    /// Asks the server to exit (`host:kill`, what `adb kill-server` sends).
+    pub fn kill_server(&self) -> Result<()> {
+        let mut s = self.connect()?;
+        write_request(&mut s, "host:kill")?;
+        read_status(&mut s)
+    }
+
     /// `host:devices-l` text, for [`crate::devices::parse_list`].
     pub fn devices_l(&self) -> Result<String> {
         Ok(String::from_utf8_lossy(&self.host_query("host:devices-l")?).into_owned())
@@ -582,6 +589,13 @@ mod tests {
     use super::fake::*;
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn kill_server_sends_host_kill() {
+        let adb = FakeAdb::start(HashMap::from([("host:kill".to_string(), Reply::Okay)]));
+        adb.client().kill_server().unwrap();
+        assert_eq!(adb.requests(), ["host:kill"]);
+    }
 
     #[test]
     fn framing_round_trip() {
