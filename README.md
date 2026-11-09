@@ -75,7 +75,7 @@
 | **📋 OCR copy & paste** | `Alt+C` copies the text on the device screen to the PC (Windows OCR, stitches scrolled pages). Paste the PC clipboard: `Alt+V` (Apple), `Ctrl+V` (Android). |
 | **🌑 Stealth dim, wake & lock** | `Alt+D` dims the device to 0% while the picture stays bright; `Alt+U` wakes and types your passcode (DPAPI-encrypted); `Alt+L` locks. |
 | **🛠️ Safe driver manager** | Install / restore drivers only after you confirm, with UAC, a backup and automatic rollback. Never stacks a libusb0 filter on Apple's driver. |
-| **📥 Tray & start with Windows** | Optional: close to the notification area (the session keeps running) and start with Windows straight into the tray. One ZenLink at a time: opening it again brings the window back. |
+| **📥 Closing, tray & start with Windows** | The close button asks whether to keep ZenLink in the notification area (the session keeps running) or quit, with "Remember my choice"; Settings › Startup & closing changes it later. Start with Windows is off by default and follows Task Manager › Startup apps. Quitting also stops the `adb` server ZenLink started. One ZenLink at a time: opening it again brings the window back. |
 | **🇮🇩 / 🇬🇧 Bilingual UI** | Bahasa Indonesia by default, English with one click. Liquid Glass Dark by default; Light and System too. |
 
 ---
