@@ -503,6 +503,12 @@ fn tr_backend(ui: &AppWindow, en: &str) -> String {
         return en.into();
     }
     const MAP: &[(&str, &str)] = &[
+        ("Administrator permission was not given. Nothing was changed.", "Izin administrator tidak diberikan. Tidak ada yang diubah."),
+        ("The device was disconnected. Plug it back in and try again.", "Perangkat terputus. Colok lagi, lalu coba lagi."),
+        (
+            "Another app is using the device's screen (Xcode, QuickTime, TikTok LIVE Studio). Close it and try again.",
+            "Aplikasi lain sedang memakai layar perangkat (Xcode, QuickTime, TikTok LIVE Studio). Tutup dulu, lalu coba lagi.",
+        ),
         ("Unlock the device and tap Trust, then try again.", "Buka kunci perangkat dan tekan Percayai (Trust), lalu coba lagi."),
         ("Connect the device with the cable, unlock it and tap Trust first.", "Colokkan perangkat pakai kabel, buka kunci, lalu tekan Percayai (Trust) dulu."),
         ("Wi-Fi is already set up.", "Wi-Fi sudah siap. Bisa tanpa kabel."),
@@ -894,7 +900,20 @@ fn on_state(ui: &AppWindow, st: &Value) {
         .and_then(|d| d.get("airplay"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    ui.set_apple_listening(receiver && matches!(phase.as_str(), "connecting" | "activating"));
+    let listening = receiver && matches!(phase.as_str(), "connecting" | "activating");
+    ui.set_apple_listening(listening);
+    // Waiting for AirPlay: say so when Windows Firewall keeps the device out (checked every 3 s).
+    thread_local!(static FW: std::cell::Cell<Option<(Instant, bool)>> = const { std::cell::Cell::new(None) });
+    let blocked = listening
+        && FW.with(|c| match c.get() {
+            Some((at, b)) if at.elapsed() < Duration::from_secs(3) => b,
+            _ => {
+                let b = drivers::firewall_blocked();
+                c.set(Some((Instant::now(), b)));
+                b
+            }
+        });
+    ui.set_firewall_blocked(blocked);
     ui.set_device_wifi(
         wifi || str_of(st, &["device", "wifi"]).is_some()
             && st["device"]["wifi"].as_bool().unwrap_or(false),
@@ -3879,6 +3898,37 @@ fn main() -> Result<(), slint::PlatformError> {
             let id = id.to_string();
             std::thread::spawn(move || {
                 a.post("/api/device/select", &json!({ "id": id, "forget": true }))
+            });
+        });
+    }
+    {
+        // AirPlay waiting view: Windows Firewall keeps the device out.
+        let weak = ui.as_weak();
+        ui.on_allow_network(move || {
+            let weak = weak.clone();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_firewall_msg(
+                    tr_ui(
+                        &ui,
+                        "Menunggu izin administrator…",
+                        "Waiting for administrator permission…",
+                    )
+                    .into(),
+                );
+            }
+            std::thread::spawn(move || {
+                let r = drivers::allow_network();
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    let msg = match r {
+                        Ok(()) => {
+                            ui.set_firewall_blocked(false);
+                            String::new()
+                        }
+                        Err(e) => tr_backend(&ui, &e),
+                    };
+                    ui.set_firewall_msg(msg.into());
+                });
             });
         });
     }

@@ -357,6 +357,28 @@ component FlowStep inherits Rectangle {
 
 // Shown in the stage while there is no picture: the device ready to start
 // (phone, cable, name), then the 1-2-3-4 connect card like v2.
+// Numbered how-to steps (1, 2, 3...) so anyone can follow them.
+component HowTo inherits VerticalLayout {
+    in property <[string]> steps;
+    spacing: 9px;
+    for s[i] in steps: HorizontalLayout {
+        spacing: 10px;
+        VerticalLayout {
+            alignment: start;
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: 11px;
+                background: Theme.accent.with-alpha(0.16);
+                border-width: 1px;
+                border-color: Theme.accent.with-alpha(0.55);
+                Text { text: "\{i + 1}"; font-size: 11.5px; font-weight: 700; color: Theme.text; horizontal-alignment: center; vertical-alignment: center; }
+            }
+        }
+        Text { text: s; font-size: 12.5px; color: Theme.text-2; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
+    }
+}
+
 component Placeholder inherits Rectangle {
     in property <string> phase;
     in property <string> device;
@@ -377,6 +399,10 @@ component Placeholder inherits Rectangle {
     in property <[AppleDev]> devices;
     // AirPlay receiver on (ZenLink Studio Wi-Fi): waiting for the device.
     in property <bool> listening;
+    // Windows Firewall keeps the device out of the receiver; the button's result.
+    in property <bool> firewall-blocked;
+    in property <string> firewall-msg;
+    callback allow-network();
     callback pick(string);
     callback forget(string);
     callback stop();
@@ -386,6 +412,23 @@ component Placeholder inherits Rectangle {
     callback set-link(string);
     callback change-mode();
     property <bool> card: flow-step >= 0;
+    property <string> s-same-wifi: I18n.t("Sambungkan iPhone/iPad dan PC ke Wi-Fi yang sama.", "Connect the iPhone/iPad and the PC to the same Wi-Fi.");
+    property <string> s-cc: I18n.t("Di iPhone/iPad, buka Pusat Kontrol: usap ke bawah dari pojok kanan atas layar.", "On the iPhone/iPad, open Control Center: swipe down from the top-right corner of the screen.");
+    property <string> s-tap: I18n.t("Ketuk Pencerminan Layar (ikon dua kotak bertumpuk).", "Tap Screen Mirroring (the two stacked rectangles).");
+    property <string> s-pick: I18n.t("Pilih ZenLinkStudio. Layarnya muncul di sini.", "Pick ZenLinkStudio. The screen shows up here.");
+    property <string> s-start: I18n.t("Tekan Mulai di bawah.", "Press Start below.");
+    // How to connect, step by step, while no device is there yet.
+    property <[string]> steps: listening ? [s-same-wifi, s-cc, s-tap, s-pick]
+        : device != "" ? []
+        : air && mode == "usbdirect" ? [s-start, s-same-wifi, s-cc, s-tap, s-pick]
+        : air ? [s-same-wifi,
+            I18n.t("Pertama kali saja: colok kabel USB, lalu tekan Atur Wi-Fi di Pengaturan › Koneksi & driver.", "First time only: plug in the USB cable, then press Set up Wi-Fi in Settings › Connection & driver."),
+            I18n.t("Buka kunci iPhone/iPad, lalu tekan Mulai.", "Unlock the iPhone/iPad, then press Start.")]
+        : [I18n.t("Colok iPhone/iPad ke PC pakai kabel USB.", "Plug the iPhone/iPad into the PC with a USB cable."),
+            I18n.t("Buka kunci layarnya.", "Unlock its screen."),
+            I18n.t("Kalau muncul \"Percayai komputer ini?\", ketuk Percayai lalu masukkan kode sandi.", "If it asks \"Trust this computer?\", tap Trust and enter the passcode."),
+            s-start];
+    property <bool> show-steps: message == "" && !(device != "" && need != "") && steps.length > 0;
     property <bool> air: link == "wireless";
     property <color> tone: device == "" ? Theme.text-3 : need != "" ? Theme.warn : Theme.ok;
     property <string> need-label: need == "trust" ? I18n.t("Perlu Trust", "Needs Trust")
@@ -489,18 +532,44 @@ component Placeholder inherits Rectangle {
             color: Theme.text;
             horizontal-alignment: center;
         }
-        Text {
+        if !show-steps: Text {
             text: message != "" ? message
-                : listening ? I18n.t("Di iPhone/iPad: buka Pusat Kontrol → Pencerminan Layar → pilih ZenLinkStudio. PC dan perangkat harus di jaringan yang sama.", "On the iPhone/iPad: open Control Center → Screen Mirroring → pick ZenLinkStudio. The PC and the device must be on the same network.")
                 : device != "" && need != "" ? root.need-hint
-                : device == "" && air && mode == "usbdirect" ? I18n.t("Di iPhone/iPad: Pusat Kontrol → Pencerminan Layar → ZenLinkStudio.", "On the iPhone/iPad: Control Center → Screen Mirroring → ZenLinkStudio.")
-                : device == "" && air ? I18n.t("Wi-Fi: PC dan perangkat di jaringan yang sama. Pertama kali, tekan Atur Wi-Fi di Pengaturan dengan kabel tersambung.", "Wi-Fi: the PC and the device on the same network. The first time, press Set up Wi-Fi in Settings with the cable in.")
-                : device == "" ? I18n.t("Pakai kabel USB, buka kunci, lalu tekan Percayai (Trust).", "Use a USB cable, unlock it and tap Trust.")
                 : I18n.t("Buka kunci, lalu tekan Mulai mirroring.", "Unlock it, then press Start mirroring.");
             font-size: 12.5px;
             color: message != "" ? #ff8a80 : Theme.text-2;
             horizontal-alignment: center;
             wrap: word-wrap;
+        }
+        if show-steps: HorizontalLayout {
+            alignment: center;
+            HowTo { width: min(root.width - 48px, 420px); steps: root.steps; }
+        }
+        // The device picked ZenLinkStudio but Windows Firewall turns it away.
+        if listening && firewall-blocked: HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: min(root.width - 48px, 420px);
+                border-radius: 12px;
+                background: Theme.warn.with-alpha(0.10);
+                border-width: 1px;
+                border-color: Theme.warn.with-alpha(0.5);
+                VerticalLayout {
+                    padding: 12px;
+                    spacing: 8px;
+                    Text {
+                        text: I18n.t("Windows Firewall memblokir ZenLink, jadi iPhone/iPad tidak bisa tersambung. Tekan tombol di bawah, lalu pilih Ya.", "Windows Firewall blocks ZenLink, so the iPhone/iPad cannot connect. Press the button below, then choose Yes.");
+                        font-size: 12px;
+                        color: Theme.text;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: LayoutAlignment.start;
+                        GlassButton { primary: true; icon: "\u{E83D}"; label: I18n.t("Izinkan ZenLink di jaringan", "Allow ZenLink on the network"); clicked => { root.allow-network(); } }
+                    }
+                    if firewall-msg != "": Text { text: firewall-msg; font-size: 11.5px; color: Theme.text-2; wrap: word-wrap; }
+                }
+            }
         }
         // Devices: connected ones and the ones trusted before.
         if devices.length > 0 && !listening: HorizontalLayout {
@@ -2707,6 +2776,9 @@ export component AppWindow inherits Window {
     // Apple device list (connected + trusted before) and the AirPlay wait.
     in property <[AppleDev]> apple-devices;
     in property <bool> apple-listening;
+    in-out property <bool> firewall-blocked;
+    in-out property <string> firewall-msg;
+    callback allow-network();
     callback apple-pick(string);
     callback apple-forget(string);
     in property <bool> drv-restore;
@@ -3139,6 +3211,9 @@ export component AppWindow inherits Window {
                             fix => { root.need-fix(); }
                             devices: root.apple-devices;
                             listening: root.apple-listening;
+                            firewall-blocked: root.firewall-blocked;
+                            firewall-msg: root.firewall-msg;
+                            allow-network => { root.allow-network(); }
                             pick(id) => { root.apple-pick(id); }
                             forget(id) => { root.apple-forget(id); }
                             stop => { root.stop-cast(); }

@@ -25,8 +25,8 @@ use windows::Win32::Devices::DeviceAndDriverInstallation::{
     CM_PROB, CR_SUCCESS, DN_STARTED,
 };
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE,
-    KEY_READ, REG_MULTI_SZ, REG_VALUE_TYPE,
+    RegCloseKey, RegEnumKeyExW, RegEnumValueW, RegOpenKeyExW, RegQueryValueExW, HKEY,
+    HKEY_LOCAL_MACHINE, KEY_READ, REG_MULTI_SZ, REG_VALUE_TYPE,
 };
 
 const NO_WINDOW: u32 = 0x0800_0000;
@@ -83,6 +83,31 @@ impl Key {
         } else {
             all.into_iter().take(1).collect()
         }
+    }
+
+    fn value_names(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for i in 0.. {
+            let mut buf = [0u16; 1024];
+            let mut len = buf.len() as u32;
+            let r = unsafe {
+                RegEnumValueW(
+                    self.0,
+                    i,
+                    Some(PWSTR(buf.as_mut_ptr())),
+                    &mut len,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            };
+            if r.is_err() {
+                break;
+            }
+            out.push(String::from_utf16_lossy(&buf[..len as usize]));
+        }
+        out
     }
 
     fn string(&self, name: &str) -> String {
@@ -512,6 +537,75 @@ pub fn snapshot() -> Value {
 
 /// One elevated action on one device; blocks until it finishes. The result is the tool's
 /// own report ({ok, message, rolledBack, backup}).
+const FIREWALL_RULES: &str =
+    r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules";
+
+/// True when Windows Firewall keeps devices out of this ZenLink.exe: an active inbound block rule
+/// names it (a dismissed "Allow access" prompt leaves one), or no inbound allow rule does.
+pub fn firewall_blocked() -> bool {
+    let Ok(exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Some(k) = Key::open(HKEY_LOCAL_MACHINE, FIREWALL_RULES) else {
+        return false;
+    };
+    let rules: Vec<String> = k.value_names().iter().map(|n| k.string(n)).collect();
+    blocked_by(&rules, &exe.to_string_lossy())
+}
+
+fn blocked_by(rules: &[String], exe: &str) -> bool {
+    let app = format!("|app={}|", exe.to_lowercase());
+    let mut allowed = false;
+    for r in rules.iter().map(|r| r.to_lowercase()) {
+        if !(r.contains("|dir=in|") && r.contains("|active=true|") && r.contains(&app)) {
+            continue;
+        }
+        if r.contains("|action=block|") {
+            return true;
+        }
+        allowed = true;
+    }
+    !allowed
+}
+
+/// Replaces this exe's inbound rules with one allow rule for the local network (the installer's
+/// "ZenLink (AirPlay)" rule). Asks for administrator permission.
+pub fn allow_network() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let exe = exe.display().to_string().replace('"', "");
+    let cmd = format!(
+        "/c netsh advfirewall firewall delete rule name=all dir=in program=\"{exe}\" & \
+         netsh advfirewall firewall add rule name=\"ZenLink (AirPlay)\" dir=in action=allow \
+         program=\"{exe}\" enable=yes profile=any remoteip=localsubnet"
+    );
+    let launcher = format!(
+        "try {{ $p = Start-Process -FilePath cmd.exe -Verb RunAs -WindowStyle Hidden -Wait -PassThru \
+         -ArgumentList '{}'; exit $p.ExitCode }} catch {{ exit 1223 }}",
+        cmd.replace('\'', "''")
+    );
+    log::info!("firewall: allowing {exe} on the local network (elevated)");
+    let code = Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &launcher,
+        ])
+        .creation_flags(NO_WINDOW)
+        .status()
+        .map_err(|e| e.to_string())?
+        .code();
+    match code {
+        Some(0) if !firewall_blocked() => Ok(()),
+        Some(1223) => Err("Administrator permission was not given. Nothing was changed.".into()),
+        c => Err(format!(
+            "Windows Firewall did not take the rule (exit {}).",
+            c.unwrap_or(-1)
+        )),
+    }
+}
+
 pub fn run_action(action: &str, instance: &str) -> Result<Value, String> {
     if !ACTIONS.contains(&action) {
         return Err(format!("Unknown action: {action}"));
@@ -582,6 +676,22 @@ fn uuid_hex() -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn firewall_rules_for_this_exe() {
+        let exe = r"E:\ZenLink\ZenLink.exe";
+        let allow =
+            r"v2.10|Action=Allow|Active=TRUE|Dir=In|Protocol=6|App=e:\zenlink\zenlink.exe|Name=x|"
+                .to_string();
+        let block = r"v2.10|Action=Block|Active=TRUE|Dir=In|Protocol=6|Profile=Public|App=E:\zenlink\zenlink.exe|Name=x|".to_string();
+        let other = r"v2.10|Action=Allow|Active=TRUE|Dir=In|App=C:\other.exe|Name=y|".to_string();
+        let off = r"v2.10|Action=Block|Active=FALSE|Dir=In|App=E:\zenlink\zenlink.exe|Name=x|"
+            .to_string();
+        assert!(!blocked_by(&[allow.clone(), other.clone(), off], exe));
+        assert!(blocked_by(&[allow, block], exe));
+        assert!(blocked_by(&[other], exe)); // no rule: Windows keeps it out
+    }
+
     use super::*;
 
     #[test]
