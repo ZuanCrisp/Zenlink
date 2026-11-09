@@ -2,13 +2,37 @@
 //! `apps/desktop/backend/zenlink/airplay` (protocol after UxPlay / shairplay, GPL-3.0).
 //! Serves ZenLink Studio over Wi-Fi and the Hybrid picture (iOS 17-26).
 //!
-//! Step 1 (this file set): receiver identity, `GET /info`, pair-verify, FairPlay and the
-//! session and stream keys. RTSP, mDNS, the mirror stream and audio follow (ROADMAP "M3 plan").
+//! Done: identity, `GET /info`, pair-verify, FairPlay, keys (step 1); RTSP server, mDNS and the
+//! mirror stream (step 2). Audio follows (ROADMAP "M3 plan").
 
 pub mod fairplay;
 pub mod identity;
 pub mod info;
+pub mod mdns;
+pub mod mirror;
 pub mod pair;
+pub mod rtsp;
+pub mod server;
+
+/// What the receiver is doing, for the window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum State {
+    /// Advertised; no device mirroring.
+    Waiting,
+    /// A device finished SETUP (its name).
+    Connected(String),
+    /// Pictures arrive.
+    Streaming,
+}
+
+/// Where the receiver delivers. Called from tokio tasks: keep it quick.
+pub trait Sink: Send + Sync + 'static {
+    fn state(&self, s: State);
+    /// Decoder configuration: avcC (H.264) or hvcC (HEVC), and the picture size.
+    fn config(&self, description: Vec<u8>, hevc: bool, width: u32, height: u32);
+    /// One access unit of 4-byte length-prefixed NAL units.
+    fn frame(&self, au: Vec<u8>);
+}
 
 use sha2::{Digest, Sha512};
 

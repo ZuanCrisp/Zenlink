@@ -6531,12 +6531,15 @@ dependencies = [
  "aes",
  "ctr",
  "ed25519-dalek",
+ "if-addrs",
  "libloading",
  "log",
+ "mdns-sd",
  "plist",
  "rand 0.8.8",
  "serde_json",
  "sha2",
+ "tokio",
  "x25519-dalek",
 ]
 
