@@ -2931,6 +2931,7 @@ fn rail_refresh(ui: &AppWindow) {
     }
     let apple_live = ui.get_phase().as_str() == "streaming";
     let mut apple_default = None;
+    let mut apple_streaming = None;
     for r in ui.get_apple_devices().iter() {
         let key = format!("i:{}", r.id);
         if r.selected {
@@ -2943,6 +2944,10 @@ fn rail_refresh(ui: &AppWindow) {
             "need" => "need",
             _ => "off",
         };
+        // The engine's own "live" beats the guess from the selected device.
+        if r.state.as_str() == "live" || (state == "live" && apple_streaming.is_none()) {
+            apple_streaming = Some(key.clone());
+        }
         rows.push(RailDev {
             kind: "apple".into(),
             title: r.title.clone(),
@@ -2967,7 +2972,10 @@ fn rail_refresh(ui: &AppWindow) {
         "android" => "a:",
         _ => "",
     };
-    let sel = sel
+    // The device on screen wins over an older pick (the picture is the iPad, so is the highlight).
+    let sel = apple_streaming
+        .filter(|_| want == "i:")
+        .or(sel)
         .filter(|k| keys.contains(k) && k.starts_with(want))
         .or_else(|| {
             if ui.get_screen().as_str() == "apple" {
