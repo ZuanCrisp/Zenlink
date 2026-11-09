@@ -254,8 +254,8 @@ fn install_ios(ui: &AppWindow) {
     });
 }
 
-/// iPhone/iPad (Apple Driver mode): the backend streams the files into the
-/// Documents folder of an app with File Sharing (zenlink/apple/files.py).
+/// iPhone/iPad (Apple Driver mode): the files go into the Documents folder of an app with
+/// File Sharing (zenlink_apple::files; `ZL_ENGINE=python`: the backend's files.py).
 mod ios {
     use std::cell::RefCell;
     use std::path::PathBuf;
@@ -282,6 +282,75 @@ mod ios {
             .to_string()
     }
 
+    /// The File Sharing apps: (bundle id, name). `Err(None)`: no message to show.
+    fn list_apps() -> Result<Vec<(String, String)>, Option<String>> {
+        if !crate::apple::python_engine() {
+            let udid = crate::apple::file_device().ok_or(None)?;
+            return crate::apple::block_on(zenlink_apple::files::sharing_apps(&udid)).map_err(|e| {
+                log::warn!("files: app list failed: {e}");
+                None
+            });
+        }
+        let r = Api::new().get_slow("/api/files/apps", 30);
+        if r.as_ref().and_then(|v| v.get("ok")).and_then(Value::as_bool) != Some(true) {
+            return Err(r.as_ref().map(msg).filter(|m| !m.is_empty()));
+        }
+        Ok(r.as_ref()
+            .and_then(|v| v.get("apps"))
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| {
+                        Some((
+                            x.get("bundle")?.as_str()?.to_string(),
+                            x.get("name")?.as_str()?.to_string(),
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Sends one file; `progress` gets 0..1.
+    fn send(path: &std::path::Path, bundle: &str, app: &str, progress: impl Fn(f32)) -> Result<(), String> {
+        if !crate::apple::python_engine() {
+            let udid = crate::apple::file_device().ok_or("no device")?;
+            let t = std::time::Instant::now();
+            let mut last = t;
+            let saved = crate::apple::block_on(zenlink_apple::files::send(&udid, bundle, path, |sent, total| {
+                if last.elapsed() >= Duration::from_millis(200) || sent == total {
+                    last = std::time::Instant::now();
+                    progress(if total > 0 { sent as f32 / total as f32 } else { 0.0 });
+                }
+            }))
+            .inspect_err(|e| log::warn!("files: sending {} to {bundle} failed: {e}", path.display()))?;
+            log::info!("files: {} to {bundle}/Documents/{saved} in {:.1} s", path.display(), t.elapsed().as_secs_f32());
+            return Ok(());
+        }
+        let api = Api::new();
+        let r = api.post_slow(
+            "/api/files/send",
+            &json!({"path": path.to_string_lossy(), "bundle": bundle, "app": app}),
+            15,
+        );
+        if r.as_ref().and_then(|v| v.get("ok")).and_then(Value::as_bool) != Some(true) {
+            return Err(r.as_ref().map(msg).unwrap_or_else(|| "backend".into()));
+        }
+        loop {
+            std::thread::sleep(Duration::from_millis(200));
+            let Some(j) = api.get("/api/files/job") else {
+                continue;
+            };
+            let done = j.get("sent").and_then(Value::as_u64).unwrap_or(0);
+            let size = j.get("total").and_then(Value::as_u64).unwrap_or(0);
+            match j.get("state").and_then(Value::as_str).unwrap_or("") {
+                "running" => progress(if size > 0 { done as f32 / size as f32 } else { 0.0 }),
+                "done" => return Ok(()),
+                _ => return Err(msg(&j)),
+            }
+        }
+    }
+
     fn set_title(ui: &AppWindow) {
         let n = PENDING.with_borrow(Vec::len);
         let t = tr_ui(
@@ -292,9 +361,8 @@ mod ios {
         ui.set_files_title(t.into());
     }
 
-    fn list_error(ui: &AppWindow, v: Option<&Value>) -> String {
-        let m = v.map(msg).unwrap_or_default();
-        if !m.is_empty() {
+    fn list_error(ui: &AppWindow, m: Option<String>) -> String {
+        if let Some(m) = m {
             return m;
         }
         tr_ui(
@@ -348,35 +416,18 @@ mod ios {
         );
         let weak = ui.as_weak();
         std::thread::spawn(move || {
-            let r = Api::new().get_slow("/api/files/apps", 30);
+            let r = list_apps();
             let _ = slint::invoke_from_event_loop(move || {
                 let Some(ui) = weak.upgrade() else { return };
                 ui.set_files_busy(false);
-                let ok = r
-                    .as_ref()
-                    .and_then(|v| v.get("ok"))
-                    .and_then(Value::as_bool)
-                    == Some(true);
-                if !ok {
-                    let m = list_error(&ui, r.as_ref());
-                    ui.set_files_status(m.into());
-                    return;
-                }
-                let apps: Vec<(String, String)> = r
-                    .as_ref()
-                    .and_then(|v| v.get("apps"))
-                    .and_then(Value::as_array)
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|x| {
-                                Some((
-                                    x.get("bundle")?.as_str()?.to_string(),
-                                    x.get("name")?.as_str()?.to_string(),
-                                ))
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let apps = match r {
+                    Ok(a) => a,
+                    Err(m) => {
+                        let m = list_error(&ui, m);
+                        ui.set_files_status(m.into());
+                        return;
+                    }
+                };
                 let rows: Vec<AppRow> = apps
                     .iter()
                     .map(|(b, n)| AppRow {
@@ -420,7 +471,6 @@ mod ios {
         ui.set_files_open(false);
         let weak = ui.as_weak();
         std::thread::spawn(move || {
-            let api = Api::new();
             let total = paths.len();
             let mut sent = 0;
             let mut last_error = String::new();
@@ -434,46 +484,9 @@ mod ios {
                     "Mengirim {name} ke {app} ({k}/{total})…|Sending {name} to {app} ({k}/{total})…"
                 );
                 pill(&weak, &label, 0.0);
-                let r = api.post_slow(
-                    "/api/files/send",
-                    &json!({"path": path.to_string_lossy(), "bundle": bundle, "app": app}),
-                    15,
-                );
-                if r.as_ref()
-                    .and_then(|v| v.get("ok"))
-                    .and_then(Value::as_bool)
-                    != Some(true)
-                {
-                    last_error = r.as_ref().map(msg).unwrap_or_else(|| "backend".into());
-                    log::warn!("files: {} not started: {last_error}", path.display());
-                    continue;
-                }
-                loop {
-                    std::thread::sleep(Duration::from_millis(200));
-                    let Some(j) = api.get("/api/files/job") else {
-                        continue;
-                    };
-                    let state = j.get("state").and_then(Value::as_str).unwrap_or("");
-                    let done = j.get("sent").and_then(Value::as_u64).unwrap_or(0);
-                    let size = j.get("total").and_then(Value::as_u64).unwrap_or(0);
-                    match state {
-                        "running" => {
-                            let p = if size > 0 {
-                                done as f32 / size as f32
-                            } else {
-                                0.0
-                            };
-                            pill(&weak, &label, p);
-                        }
-                        "done" => {
-                            sent += 1;
-                            break;
-                        }
-                        _ => {
-                            last_error = msg(&j);
-                            break;
-                        }
-                    }
+                match send(path, &bundle, &app, |p| pill(&weak, &label, p)) {
+                    Ok(()) => sent += 1,
+                    Err(e) => last_error = e,
                 }
             }
             pill(&weak, "", -1.0);

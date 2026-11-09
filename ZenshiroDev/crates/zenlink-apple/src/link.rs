@@ -99,7 +99,7 @@ async fn read_info(lockdown: &mut LockdownClient) -> Info {
     }
 }
 
-async fn provider(udid: &str) -> Result<UsbmuxdProvider, String> {
+pub(crate) async fn provider(udid: &str) -> Result<UsbmuxdProvider, String> {
     let mut mux = usbmux().await?;
     let dev = mux.get_device(udid).await.map_err(err("device"))?;
     let addr = UsbmuxdAddr::from_env_var().map_err(|e| format!("usbmuxd address: {e}"))?;

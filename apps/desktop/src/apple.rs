@@ -211,6 +211,25 @@ pub fn in_use() -> bool {
     IN_USE.load(Relaxed) && !HYBRID.load(Relaxed)
 }
 
+/// `ZL_ENGINE=python`: the parts already ported to Rust go back to the backend (until M5).
+pub fn python_engine() -> bool {
+    std::env::var("ZL_ENGINE").is_ok_and(|v| v == "python")
+}
+
+/// The device to send files to: the one on screen, else the picked one, else the first trusted.
+pub fn file_device() -> Option<String> {
+    let e = engine();
+    let shown = e.view.lock().unwrap().clone();
+    shown
+        .or_else(|| PICKED.lock().unwrap().clone())
+        .or_else(|| e.devices.lock().unwrap().iter().find(|d| d.paired).map(|d| d.udid.clone()))
+}
+
+/// Runs `f` on the engine's runtime; call from a plain thread, never from the runtime.
+pub fn block_on<F: std::future::Future>(f: F) -> F::Output {
+    engine().rt.block_on(f)
+}
+
 /// Lays the engine's state over the backend's while the mode is Apple Driver.
 /// The backend keeps the mode, the picked device, the saved devices and the drivers.
 pub fn overlay(st: &mut Value) {
@@ -343,38 +362,74 @@ fn custom_name(udid: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The saved passcode (the backend's secrets.json, sealed with DPAPI for this Windows user).
-fn passcode() -> String {
-    use base64::Engine as _;
+/// secrets.json: small secrets sealed with DPAPI (only this Windows user on this PC opens
+/// them), base64 per name. Shared with the backend's secret.py.
+fn secrets() -> Option<(std::path::PathBuf, serde_json::Map<String, Value>)> {
+    let p = crate::backend_data_dir()?.join("secrets.json");
+    let m = std::fs::read(&p)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    Some((p, m))
+}
+
+/// DPAPI seal (`protect`) or open, no UI.
+fn dpapi(data: &[u8], protect: bool) -> Option<Vec<u8>> {
     use windows::Win32::Foundation::{LocalFree, HLOCAL};
     use windows::Win32::Security::Cryptography::{
-        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
-    };
-    let Some(sealed) = crate::backend_data_dir()
-        .and_then(|d| std::fs::read(d.join("secrets.json")).ok())
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .and_then(|v| v.get("passcode")?.as_str().map(str::to_string))
-        .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
-    else {
-        return String::new();
+        CryptProtectData, CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
     };
     let input = CRYPT_INTEGER_BLOB {
-        cbData: sealed.len() as u32,
-        pbData: sealed.as_ptr() as *mut u8,
+        cbData: data.len() as u32,
+        pbData: data.as_ptr() as *mut u8,
     };
     let mut out = CRYPT_INTEGER_BLOB::default();
-    // SAFETY: `input` points at `sealed`, alive for the call; `out` is freed with LocalFree.
+    // SAFETY: `input` points at `data`, alive for the call; `out` is freed with LocalFree.
     unsafe {
-        if CryptUnprotectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
-            .is_err()
-        {
-            return String::new();
-        }
-        let code = String::from_utf8_lossy(std::slice::from_raw_parts(out.pbData, out.cbData as usize))
-            .into_owned();
+        let r = if protect {
+            CryptProtectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
+        } else {
+            CryptUnprotectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
+        };
+        r.ok()?;
+        let v = std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec();
         let _ = LocalFree(Some(HLOCAL(out.pbData.cast())));
-        code
+        Some(v)
     }
+}
+
+/// The saved passcode.
+fn passcode() -> String {
+    use base64::Engine as _;
+    secrets()
+        .and_then(|(_, m)| m.get("passcode")?.as_str().map(str::to_string))
+        .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
+        .and_then(|b| dpapi(&b, false))
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default()
+}
+
+/// Whether a passcode is saved.
+pub fn has_passcode() -> bool {
+    secrets().is_some_and(|(_, m)| m.get("passcode").and_then(Value::as_str).is_some_and(|s| !s.is_empty()))
+}
+
+/// Saves the passcode (cleaned to what can be typed; empty removes it). `Some(saved)`,
+/// or `None` when it could not be written.
+pub fn save_passcode(raw: &str) -> Option<bool> {
+    use base64::Engine as _;
+    let code = zenlink_apple::hid::clean_passcode(raw);
+    let (path, mut m) = secrets()?;
+    if code.is_empty() {
+        m.remove("passcode");
+    } else {
+        let sealed = dpapi(code.as_bytes(), true)?;
+        m.insert("passcode".into(), base64::engine::general_purpose::STANDARD.encode(sealed).into());
+    }
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    std::fs::write(path, Value::Object(m).to_string()).ok()?;
+    Some(!code.is_empty())
 }
 
 impl Engine {

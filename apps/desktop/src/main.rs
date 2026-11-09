@@ -8,6 +8,7 @@ mod appwin;
 mod backdrop;
 mod devprofiles;
 mod dots;
+mod ocr;
 mod perf;
 mod filedrop;
 mod filewin;
@@ -440,14 +441,18 @@ fn passcode_query(ui: &AppWindow, api: &Api, save: Option<String>) {
     let api = api.clone();
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        let r = match &save {
-            Some(code) => api.post("/api/passcode", &json!({ "passcode": code })),
-            None => api.get("/api/passcode"),
+        let set = if !apple::python_engine() {
+            match &save {
+                Some(code) => apple::save_passcode(code),
+                None => Some(apple::has_passcode()),
+            }
+        } else {
+            let r = match &save {
+                Some(code) => api.post("/api/passcode", &json!({ "passcode": code })),
+                None => api.get("/api/passcode"),
+            };
+            r.as_ref().and_then(|v| v.get("set")).and_then(Value::as_bool)
         };
-        let set = r
-            .as_ref()
-            .and_then(|v| v.get("set"))
-            .and_then(Value::as_bool);
         let _ = slint::invoke_from_event_loop(move || {
             let Some(ui) = weak.upgrade() else { return };
             match set {
@@ -470,8 +475,8 @@ fn passcode_query(ui: &AppWindow, api: &Api, save: Option<String>) {
                     &ui,
                     tr_ui(
                         &ui,
-                        "Gagal menyimpan kode: layanan ZenLink belum jalan",
-                        "Couldn't save the passcode: the ZenLink service is not running",
+                        "Gagal menyimpan kode",
+                        "Couldn't save the passcode",
                     ),
                 ),
                 None => APP.with_borrow_mut(|a| a.passcode_asked = false),
@@ -2010,11 +2015,21 @@ fn copy_screen_text(ui: &AppWindow) {
     );
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        let image = format!(
-            "data:image/bmp;base64,{}",
-            shortcuts::base64(&shortcuts::bmp(shot.width, shot.height, &shot.bgra))
-        );
-        let r = Api::new().post_slow("/api/ocr", &json!({ "image": image }), 40);
+        let r = if !apple::python_engine() {
+            Some(match ocr::add_capture(shot.width, shot.height, &shot.bgra) {
+                Ok((text, added, total)) => json!({ "ok": true, "text": text, "added": added, "total": total }),
+                Err(e) => {
+                    log::warn!("ocr: {e}");
+                    json!({ "ok": false })
+                }
+            })
+        } else {
+            let image = format!(
+                "data:image/bmp;base64,{}",
+                shortcuts::base64(&shortcuts::bmp(shot.width, shot.height, &shot.bgra))
+            );
+            Api::new().post_slow("/api/ocr", &json!({ "image": image }), 40)
+        };
         let _ = slint::invoke_from_event_loop(move || {
             BUSY.store(false, Relaxed);
             let Some(ui) = weak.upgrade() else { return };
@@ -3299,7 +3314,11 @@ fn run_shortcut(
         Shortcut::Lock => ui.invoke_action("lock".into()),
         Shortcut::CopyText => copy_screen_text(ui),
         Shortcut::ClearText => {
-            std::thread::spawn(|| Api::new().post("/api/ocr/clear", &json!({})));
+            if apple::python_engine() {
+                std::thread::spawn(|| Api::new().post("/api/ocr/clear", &json!({})));
+            } else {
+                ocr::clear();
+            }
             show_toast(
                 ui,
                 tr_ui(

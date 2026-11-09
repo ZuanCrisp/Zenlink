@@ -24,6 +24,8 @@ idevice = { version = "=0.1.68", default-features = false, features = [
     "remote_pairing",
     "springboardservices",
     "notification_proxy",
+    "house_arrest",
+    "installation_proxy",
 ] }
 mdns-sd = "0.21.7"
 plist = "1.8"

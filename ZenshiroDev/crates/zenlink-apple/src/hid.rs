@@ -87,14 +87,18 @@ fn report(ch: char) -> Option<Vec<u8>> {
     char_usage(ch).map(|(u, shift)| if shift { vec![SHIFT, u] } else { vec![u] })
 }
 
+/// The passcode as saved: up to 32 characters typeable on a US keyboard.
+pub fn clean_passcode(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| !"\r\n\t".contains(*c) && char_usage(*c).is_some())
+        .take(MAX_PASSCODE)
+        .collect()
+}
+
 /// Key reports that type `code` on the lock screen: up to 32 typeable characters; a 4- or
 /// 6-digit code unlocks by itself, any other needs Return.
 pub fn passcode_keys(raw: &str) -> Vec<Vec<u8>> {
-    let code: String = raw
-        .chars()
-        .filter(|c| !"\r\n\t".contains(*c) && char_usage(*c).is_some())
-        .take(MAX_PASSCODE)
-        .collect();
+    let code = clean_passcode(raw);
     let mut out: Vec<Vec<u8>> = code.chars().filter_map(report).collect();
     let digits = code.chars().all(|c| c.is_ascii_digit()) && matches!(code.len(), 4 | 6);
     if !code.is_empty() && !digits {
