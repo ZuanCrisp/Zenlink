@@ -433,3 +433,48 @@ export component Chip inherits Rectangle {
         }
     }
 }
+
+// Window buttons (minimise, maximise, close) of the frameless windows.
+export component TrafficLights inherits HorizontalLayout {
+    callback act(string);
+    in property <bool> maximized;
+    spacing: 8px;
+    alignment: center;
+    for b in [
+        { id: "min", c: #febc2e, g: "\u{E921}" },
+        { id: "max", c: #28c840, g: "\u{E922}" },
+        { id: "close", c: #ff5f57, g: "\u{E8BB}" },
+    ]: Rectangle {
+        width: 16px;
+        height: 16px;
+        y: (parent.height - self.height) / 2;
+        border-radius: 8px;
+        background: ta.pressed ? b.c.darker(25%) : ta.has-hover ? b.c.brighter(10%) : b.c;
+        border-width: 0.5px;
+        border-color: #00000030;
+        Text {
+            text: b.id == "max" && root.maximized ? "\u{E923}" : b.g;
+            font-family: Theme.icons;
+            font-size: 8px;
+            color: #000000a0;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        ta := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { Tip.shown = false; root.act(b.id); }
+            changed has-hover => {
+                if self.has-hover {
+                    Tip.text = b.id == "min" ? I18n.t("Kecilkan", "Minimise") : b.id == "close" ? I18n.t("Tutup", "Close")
+                        : root.maximized ? I18n.t("Pulihkan", "Restore") : I18n.t("Perbesar", "Maximise");
+                    Tip.x = self.absolute-position.x + self.width / 2;
+                    Tip.top = self.absolute-position.y;
+                    Tip.bottom = self.absolute-position.y + self.height;
+                    Tip.shown = true;
+                } else {
+                    Tip.shown = false;
+                }
+            }
+        }
+    }
+}

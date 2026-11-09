@@ -1,20 +1,20 @@
 // One Android app in its own window (v2.5.1): `ZenLink.exe --android-app`.
 // The app runs on its own virtual display on the phone (scrcpy new_display);
 // the picture is the same native D3D11 child window as the main window's.
-// v2.6: same look as the main window (glass bar and glass stage).
+// v2.6: frameless glass window like the main one (own header, traffic
+// lights, glass stage, resize from every edge).
 import { Theme, I18n } from "theme.slint";
-import { Glass, GlassButton } from "widgets.slint";
+import { Glass, GlassButton, TrafficLights } from "widgets.slint";
 
 export component AppWin inherits Window {
     title: root.screen ? root.device + " · ZenLink" : root.app-name + " · " + root.device + " · ZenLink";
     icon: @image-url("../../../ZenshiroDev/resources/assets/logo-256.png");
-    background: Theme.dark
-        ? @linear-gradient(160deg, #1f1b26 0%, #121216 55%, #1c1319 100%)
-        : @linear-gradient(160deg, #eef0f7 0%, #f6f6f9 55%, #f7eef3 100%);
+    no-frame: true;
+    background: transparent;
     // A phone-like start size; the virtual display follows the window.
     preferred-width: 430px;
     preferred-height: 820px;
-    min-width: 280px;
+    min-width: 300px;
     min-height: 320px;
     default-font-family: "Segoe UI Variable Text";
 
@@ -25,13 +25,17 @@ export component AppWin inherits Window {
     // "connecting" | "streaming" | "error"
     in property <string> phase: "connecting";
     in property <string> message;
-    // Layout Rust needs to place the video: outer padding, bar height, gap
-    // between bar and stage, and the picture inset inside the stage.
+    in property <bool> is-maximized;
+    in property <bool> is-fullscreen;
+    // Layout Rust needs to place the video: outer padding, header height, gap
+    // between header and stage, and the picture inset inside the stage.
     out property <length> pad: 8px;
-    out property <length> bar-h: 44px;
+    out property <length> bar-h: 40px;
     out property <length> gap: 8px;
     out property <length> inset: 10px;
+    out property <length> dock-h: 42px;
     callback action(string);
+    callback window-action(string);
     callback retry();
     callback key-input(string, bool, bool, bool) -> bool;
     public function focus-keys() {
@@ -45,15 +49,28 @@ export component AppWin inherits Window {
             }
             return reject;
         }
+    }
+    Rectangle {
+        // As the main window: full screen has nothing behind the glass, so a solid theme colour.
+        background: root.is-fullscreen ? (Theme.dark ? #121214 : #f2f2f7) : Theme.base;
+        border-radius: root.is-maximized || root.is-fullscreen ? 0px : 12px;
+        clip: true;
         VerticalLayout {
             padding: root.pad;
             spacing: root.gap;
-            Glass {
+            // Header: part of the glass window, drag it to move the window.
+            Rectangle {
                 height: root.bar-h;
-                border-radius: 16px;
+                TouchArea {
+                    pointer-event(e) => {
+                        if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                            root.window-action("drag");
+                        }
+                    }
+                }
                 HorizontalLayout {
-                    padding: 6px;
-                    padding-left: 10px;
+                    padding-left: 4px;
+                    padding-right: 4px;
                     spacing: 6px;
                     VerticalLayout {
                         alignment: center;
@@ -63,24 +80,12 @@ export component AppWin inherits Window {
                         alignment: center;
                         horizontal-stretch: 1;
                         min-width: 0px;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Text {
-                                text: root.screen ? root.device : root.app-name;
-                                font-size: 12.5px;
-                                font-weight: 650;
-                                color: Theme.text;
-                                overflow: elide;
-                            }
-                            VerticalLayout {
-                                alignment: center;
-                                Rectangle {
-                                    width: 7px;
-                                    height: 7px;
-                                    border-radius: 3.5px;
-                                    background: root.phase == "streaming" ? Theme.accent : root.phase == "error" ? Theme.warn : Theme.text-3;
-                                }
-                            }
+                        Text {
+                            text: root.screen ? root.device : root.app-name;
+                            font-size: 12.5px;
+                            font-weight: 650;
+                            color: Theme.text;
+                            overflow: elide;
                         }
                         Text {
                             text: root.phase == "streaming" ? (root.screen ? "Live" : root.device)
@@ -90,22 +95,28 @@ export component AppWin inherits Window {
                             overflow: elide;
                         }
                     }
-                    GlassButton { icon: "\u{E72B}"; tip: I18n.t("Kembali", "Back"); enabled: root.phase == "streaming"; clicked => { root.action("back"); } }
-                    if root.screen: GlassButton { icon: "\u{E80F}"; tip: I18n.t("Beranda", "Home"); enabled: root.phase == "streaming"; clicked => { root.action("home"); } }
-                    if root.screen: GlassButton { icon: "\u{E8A9}"; tip: I18n.t("Aplikasi terbaru", "Recent apps"); enabled: root.phase == "streaming"; clicked => { root.action("switcher"); } }
-                    if !root.screen: GlassButton { icon: "\u{E777}"; tip: I18n.t("Mulai ulang app", "Restart the app"); enabled: root.phase == "streaming"; clicked => { root.action("restart-app"); } }
                     // Back into the main window (like dropping a Chrome tab back).
                     if root.screen: GlassButton {
                         primary: true;
                         icon: "\u{E8A0}";
                         label: I18n.t("Gabung", "Merge");
-                        tip: I18n.t("Gabung: kembalikan HP ini ke jendela utama ZenLink", "Merge: move this phone back into the main ZenLink window");
+                        tip: I18n.t("Kembalikan HP ini ke jendela utama ZenLink", "Move this phone back into the main ZenLink window");
                         clicked => { root.action("merge"); }
+                    }
+                    GlassButton {
+                        icon: root.is-fullscreen ? "\u{E73F}" : "\u{E740}";
+                        tip: root.is-fullscreen ? I18n.t("Keluar layar penuh", "Exit full screen") : I18n.t("Layar penuh", "Full screen");
+                        clicked => { root.window-action("fullscreen"); }
+                    }
+                    TrafficLights {
+                        maximized: root.is-maximized;
+                        act(a) => { root.window-action(a); }
                     }
                 }
             }
             // Glass stage, as in the main window; the picture sits inside it.
             Rectangle {
+                vertical-stretch: 1;
                 border-radius: 22px;
                 background: Theme.panel;
                 border-width: 1px;
@@ -129,6 +140,62 @@ export component AppWin inherits Window {
                         GlassButton { primary: true; icon: "\u{E72C}"; label: I18n.t("Coba lagi", "Try again"); clicked => { root.retry(); } }
                     }
                 }
+            }
+            // Phone buttons under the picture: the same set as the main window's dock.
+            Rectangle {
+                height: root.dock-h;
+                dock := Glass {
+                    width: min(parent.width, row.min-width);
+                    x: (parent.width - self.width) / 2;
+                    height: parent.height;
+                    border-radius: self.height / 2;
+                    fl := Flickable {
+                        content-width: max(self.width, row.min-width);
+                        interactive: row.min-width > self.width;
+                        row := HorizontalLayout {
+                            width: fl.content-width;
+                            height: dock.height;
+                            padding: 4px;
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            spacing: 4px;
+                            alignment: center;
+                            GlassButton { icon: "\u{E72B}"; tip: I18n.t("Kembali", "Back"); enabled: root.phase == "streaming"; clicked => { root.action("back"); } }
+                            if root.screen: GlassButton { icon: "\u{E80F}"; tip: I18n.t("Beranda", "Home"); enabled: root.phase == "streaming"; clicked => { root.action("home"); } }
+                            if root.screen: GlassButton { icon: "\u{E8A9}"; tip: I18n.t("Aplikasi terbaru", "Recent apps"); enabled: root.phase == "streaming"; clicked => { root.action("switcher"); } }
+                            if !root.screen: GlassButton { icon: "\u{E777}"; tip: I18n.t("Mulai ulang app", "Restart the app"); enabled: root.phase == "streaming"; clicked => { root.action("restart-app"); } }
+                            Rectangle { width: 1px; background: Theme.dark ? #ffffff1f : #0000001a; }
+                            GlassButton { icon: "\u{E9E9}"; tip: "Quick Settings"; enabled: root.phase == "streaming"; clicked => { root.action("quick-settings"); } }
+                            GlassButton { icon: "\u{EA8F}"; tip: I18n.t("Notifikasi", "Notifications"); enabled: root.phase == "streaming"; clicked => { root.action("notifications"); } }
+                            GlassButton { icon: "\u{E993}"; tip: I18n.t("Volume HP turun", "Phone volume down"); enabled: root.phase == "streaming"; clicked => { root.action("vol-down"); } }
+                            GlassButton { icon: "\u{E995}"; tip: I18n.t("Volume HP naik", "Phone volume up"); enabled: root.phase == "streaming"; clicked => { root.action("vol-up"); } }
+                            GlassButton { icon: "\u{E72E}"; tip: I18n.t("Tombol daya (kunci / nyalakan layar)", "Power button (lock / wake the screen)"); enabled: root.phase == "streaming"; clicked => { root.action("lock"); } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Resize from every edge and corner (no system frame).
+    for e in [
+        { id: "n", x: 10px, y: 0px, w: -20px, h: 5px, c: MouseCursor.ns-resize },
+        { id: "s", x: 10px, y: -5px, w: -20px, h: 5px, c: MouseCursor.ns-resize },
+        { id: "w", x: 0px, y: 10px, w: 5px, h: -20px, c: MouseCursor.ew-resize },
+        { id: "e", x: -5px, y: 10px, w: 5px, h: -20px, c: MouseCursor.ew-resize },
+        { id: "nw", x: 0px, y: 0px, w: 10px, h: 10px, c: MouseCursor.nwse-resize },
+        { id: "se", x: -10px, y: -10px, w: 10px, h: 10px, c: MouseCursor.nwse-resize },
+        { id: "ne", x: -10px, y: 0px, w: 10px, h: 10px, c: MouseCursor.nesw-resize },
+        { id: "sw", x: 0px, y: -10px, w: 10px, h: 10px, c: MouseCursor.nesw-resize },
+    ]: TouchArea {
+        enabled: !root.is-maximized && !root.is-fullscreen;
+        x: e.x < 0 ? parent.width + e.x : e.x;
+        y: e.y < 0 ? parent.height + e.y : e.y;
+        width: e.w < 0 ? parent.width + e.w : e.w;
+        height: e.h < 0 ? parent.height + e.h : e.h;
+        mouse-cursor: e.c;
+        pointer-event(ev) => {
+            if ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left {
+                root.window-action("resize-" + e.id);
             }
         }
     }

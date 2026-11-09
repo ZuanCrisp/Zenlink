@@ -37,8 +37,9 @@ export global Theme {
     out property <color> fill-hover: dark ? #48484a.mix(#ffffff2b, 1 - glass) : #ffffff.mix(#ffffffcc, 1 - glass);
     out property <color> line: dark ? #ffffff1a : #0000001a;
     out property <color> shadow: dark ? #00000059 : #0000001a;
-    out property <color> ok: #2fc26b;
-    out property <color> warn: #f2a53a;
+    // Darker on light glass, else they wash out (measured on the light theme).
+    out property <color> ok: dark ? #2fc26b : #15803d;
+    out property <color> warn: dark ? #f2a53a : #b45309;
     out property <color> bad: #ef5466;
     out property <length> radius: 14px;
     // Set from Rust: "Segoe Fluent Icons" (Windows 11) or "Segoe MDL2 Assets"

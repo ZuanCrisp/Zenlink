@@ -4,7 +4,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme, I18n } from "theme.slint";
-import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip, Tip, UiTest } from "widgets.slint";
+import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip, Tip, UiTest, TrafficLights } from "widgets.slint";
 // v2.5.1: an Android app in its own window (ZenLink.exe --android-app).
 export { AppWin } from "appwin.slint";
 import { FilePane, Files, FileRow, PlaceRow } from "filewin.slint";
@@ -45,7 +45,7 @@ export struct Prefs {
     keyboard: bool,
     gestures: bool,
     start-with-windows: bool,
-    close-to-tray: bool,
+    close-action: string,
     auto-unlock: bool,
     unlock-on-lock: bool, // unlock again when the device locks while mirroring
     on-top: bool,
@@ -65,50 +65,6 @@ export struct Prefs {
 
 // Window controls, Windows order (min, max, close) on the right, drawn as
 // coloured dots with the Windows glyph always visible inside.
-component TrafficLights inherits HorizontalLayout {
-    callback act(string);
-    in property <bool> maximized;
-    spacing: 8px;
-    alignment: center;
-    for b in [
-        { id: "min", c: #febc2e, g: "\u{E921}" },
-        { id: "max", c: #28c840, g: "\u{E922}" },
-        { id: "close", c: #ff5f57, g: "\u{E8BB}" },
-    ]: Rectangle {
-        width: 16px;
-        height: 16px;
-        y: (parent.height - self.height) / 2;
-        border-radius: 8px;
-        background: ta.pressed ? b.c.darker(25%) : ta.has-hover ? b.c.brighter(10%) : b.c;
-        border-width: 0.5px;
-        border-color: #00000030;
-        Text {
-            text: b.id == "max" && root.maximized ? "\u{E923}" : b.g;
-            font-family: Theme.icons;
-            font-size: 8px;
-            color: #000000a0;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-        ta := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { Tip.shown = false; root.act(b.id); }
-            changed has-hover => {
-                if self.has-hover {
-                    Tip.text = b.id == "min" ? I18n.t("Kecilkan", "Minimise") : b.id == "close" ? I18n.t("Tutup", "Close")
-                        : root.maximized ? I18n.t("Pulihkan", "Restore") : I18n.t("Perbesar", "Maximise");
-                    Tip.x = self.absolute-position.x + self.width / 2;
-                    Tip.top = self.absolute-position.y;
-                    Tip.bottom = self.absolute-position.y + self.height;
-                    Tip.shown = true;
-                } else {
-                    Tip.shown = false;
-                }
-            }
-        }
-    }
-}
-
 // The window's own header: no card of its own, it is the top of the glass
 // window (no header-inside-a-header).
 component TopBar inherits Rectangle {
@@ -746,7 +702,7 @@ component ModeCard inherits Rectangle {
                     width: badgeT.preferred-width + 14px;
                     border-radius: 10px;
                     background: root.tint.with-alpha(0.18);
-                    badgeT := Text { text: root.badge; font-size: 10.5px; font-weight: 700; color: root.tint; }
+                    badgeT := Text { text: root.badge; font-size: 10.5px; font-weight: 700; color: Theme.dark ? root.tint : root.tint.darker(0.5); }
                 }
             }
             // Radio dot.
@@ -821,6 +777,87 @@ component NoticeSheet inherits Rectangle {
     }
 }
 
+// Close button / Alt+F4 while the close action is "ask". choose(act, remember):
+// act is "tray", "quit" or "" (cancel). Esc cancels, Enter takes the primary.
+component CloseDialog inherits Rectangle {
+    callback choose(string, bool);
+    property <bool> remember;
+    property <float> t: 0;
+    init => { self.t = 1; keys.focus(); }
+    animate t { duration: 300ms; easing: cubic-bezier(0.05, 0.7, 0.1, 1); }
+    background: #000000.with-alpha(0.5 * t);
+    TouchArea { clicked => { root.choose("", false); } }
+    keys := FocusScope {
+        key-pressed(ev) => {
+            if ev.text == Key.Escape { root.choose("", false); return accept; }
+            if ev.text == Key.Return { root.choose("tray", root.remember); return accept; }
+            reject
+        }
+    }
+    Glass {
+        strong: true;
+        background: Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
+        border-radius: 20px;
+        width: min(parent.width - 24px, 420px);
+        height: min(parent.height - 24px, ccol.preferred-height + 2px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + 20px * (1 - root.t);
+        opacity: root.t;
+        TouchArea { } // clicks on the card don't cancel
+        ccol := VerticalLayout {
+            width: parent.width;
+            padding: 20px;
+            spacing: 12px;
+            HorizontalLayout {
+                spacing: 12px;
+                Image { source: @image-url("../../../ZenshiroDev/resources/assets/logo-256.png"); width: 36px; height: 36px; }
+                Text { text: I18n.t("Tutup ZenLink?", "Close ZenLink?"); font-size: 16px; font-weight: 800; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; wrap: word-wrap; }
+            }
+            Text {
+                text: I18n.t("ZenLink bisa tetap berjalan di system tray agar perangkat tetap terhubung.", "ZenLink can keep running in the system tray so your devices stay connected.");
+                font-size: 12px;
+                color: Theme.text-2;
+                wrap: word-wrap;
+            }
+            // The TouchArea covers the whole row (inside a layout it would only take a cell).
+            Rectangle {
+                height: rrow.preferred-height;
+                accessible-role: checkbox;
+                accessible-checked: root.remember;
+                accessible-label: I18n.t("Ingat pilihan saya", "Remember my choice");
+                TouchArea { mouse-cursor: pointer; clicked => { root.remember = !root.remember; } }
+            rrow := HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 5px;
+                    background: root.remember ? Theme.accent : transparent;
+                    border-width: root.remember ? 0px : 1.5px;
+                    border-color: Theme.text-3;
+                    if root.remember: Icon { text: "\u{E73E}"; font-size: 11px; color: white; }
+                }
+                Text { text: I18n.t("Ingat pilihan saya", "Remember my choice"); font-size: 12px; color: Theme.text; vertical-alignment: center; }
+            }
+            }
+            if root.remember: Text {
+                text: I18n.t("Bisa diubah di Pengaturan.", "You can change this in Settings.");
+                font-size: 11px;
+                color: Theme.text-3;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                GlassButton { label: I18n.t("Batal", "Cancel"); clicked => { root.choose("", false); } }
+                Rectangle { horizontal-stretch: 1; }
+                GlassButton { label: I18n.t("Keluar dari ZenLink", "Quit ZenLink"); clicked => { root.choose("quit", root.remember); } }
+                GlassButton { primary: true; icon: "\u{E73F}"; label: I18n.t("Kecilkan ke tray", "Minimize to tray"); clicked => { root.choose("tray", root.remember); } }
+            }
+        }
+    }
+}
+
 // First-run (or "change mode") sheet: nothing connects and no driver
 // changes until a mode is chosen here.
 component ModeChooser inherits Rectangle {
@@ -870,7 +907,8 @@ component ModeChooser inherits Rectangle {
                     }
                     if root.cancelable: VerticalLayout { alignment: start; GlassButton { icon: "\u{E711}"; tip: I18n.t("Batal", "Cancel"); clicked => { root.cancel(); } } }
                 }
-                HorizontalLayout {
+                // Inline on Home the language lives in Settings; keeps the stage uncrowded.
+                if !root.inline: HorizontalLayout {
                     spacing: 10px;
                     Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
                     Seg {
@@ -930,7 +968,7 @@ component ModeChooser inherits Rectangle {
                     Text { text: I18n.t("Ingat pilihan ini", "Remember my choice"); font-size: 12px; color: Theme.text; vertical-alignment: center; horizontal-stretch: 1; }
                     Toggle { checked: root.keep; toggled(v) => { root.keep = v; } }
                 }
-                Text {
+                if !root.inline: Text {
                     text: I18n.t("Bisa diganti kapan saja di Pengaturan › Koneksi & driver. Ganti mode bisa perlu restart app dan colok ulang kabel.",
                         "You can change it any time in Settings › Connection & driver. Changing it may need an app restart and reconnecting the cable.");
                     font-size: 11px;
@@ -959,6 +997,7 @@ component ModeChooser inherits Rectangle {
 // Click or Space selects it; Enter or a double-click also continues.
 component PlatformCard inherits Rectangle {
     in property <string> icon;
+    in property <string> glyph; // SVG path (24x24) drawn instead of the font icon
     in property <string> title;
     in property <string> desc;
     in property <[string]> points;
@@ -1003,7 +1042,8 @@ component PlatformCard inherits Rectangle {
                 height: 46px;
                 border-radius: 14px;
                 background: @linear-gradient(135deg, root.tint 0%, root.tint.darker(0.35) 100%);
-                Icon { text: root.icon; color: white; font-size: 22px; }
+                if root.glyph == "": Icon { text: root.icon; color: white; font-size: 22px; }
+                if root.glyph != "": Path { width: 25px; height: 25px; viewbox-width: 24; viewbox-height: 24; commands: root.glyph; fill: white; }
             }
             VerticalLayout {
                 alignment: center;
@@ -1017,7 +1057,7 @@ component PlatformCard inherits Rectangle {
                         width: badgeT.preferred-width + 14px;
                         border-radius: 10px;
                         background: root.tint.with-alpha(0.18);
-                        badgeT := Text { text: root.badge; font-size: 10.5px; font-weight: 700; color: root.tint; }
+                        badgeT := Text { text: root.badge; font-size: 10.5px; font-weight: 700; color: Theme.dark ? root.tint : root.tint.darker(0.5); }
                     }
                 }
             }
@@ -1131,6 +1171,7 @@ component PlatformSelector inherits Rectangle {
                     PlatformCard {
                         horizontal-stretch: 1;
                         icon: "\u{E8EA}";
+                        glyph: Glyphs.apple;
                         tint: #5ac8fa;
                         title: "iPhone / iPad";
                         desc: root.apple-desc;
@@ -1143,6 +1184,7 @@ component PlatformSelector inherits Rectangle {
                     PlatformCard {
                         horizontal-stretch: 1;
                         icon: "\u{E70A}";
+                        glyph: Glyphs.android;
                         tint: #3ddc84;
                         title: root.android-title;
                         desc: root.android-desc;
@@ -1157,6 +1199,7 @@ component PlatformSelector inherits Rectangle {
                     spacing: 10px;
                     PlatformCard {
                         icon: "\u{E8EA}";
+                        glyph: Glyphs.apple;
                         tint: #5ac8fa;
                         title: "iPhone / iPad";
                         desc: root.apple-desc;
@@ -1168,6 +1211,7 @@ component PlatformSelector inherits Rectangle {
                     }
                     PlatformCard {
                         icon: "\u{E70A}";
+                        glyph: Glyphs.android;
                         tint: #3ddc84;
                         title: root.android-title;
                         desc: root.android-desc;
@@ -1368,7 +1412,15 @@ component AndroidVideoCard inherits Card {
 
 // Android over Wi-Fi without a cable (QR, pairing code, IP:port): on the
 // Android page and on "Connect a device".
-component AndroidWifiCard inherits Card {
+// A plain box, not a Card: Card's folding clip measured this wrapped text
+// too short and cut off "Option 2" (no title here, so folding is unused).
+component AndroidWifiCard inherits Rectangle {
+    background: Theme.card;
+    border-radius: 18px;
+    border-width: 1px;
+    border-color: Theme.line;
+    // Wrapped text can be taller than the layout's estimate: keep room (as PlatformCard).
+    min-height: wcol.preferred-height + 16px;
     in property <bool> wifi-busy;
     in property <image> qr-image;
     in property <bool> qr-on;
@@ -1378,7 +1430,8 @@ component AndroidWifiCard inherits Card {
     callback wifi-qr();
     callback wifi-qr-cancel();
     property <bool> code-open: false;
-    VerticalLayout {
+    wcol := VerticalLayout {
+        padding: 14px;
         spacing: 10px;
         Text {
             text: I18n.t("Sudah pakai kabel? Tekan tombol Wi-Fi di samping nama HP, selesai. Tanpa kabel (Android 11+):", "Already on the cable? Press the Wi-Fi button next to the phone's name, done. Without a cable (Android 11+):");
@@ -1726,8 +1779,66 @@ component AndroidHome inherits Rectangle {
 
 // "Connect a device" (v2.6): how to add a phone, inside the stage. A phone
 // that connects shows up in the device menu on its own.
+// Device and link marks as 24x24 SVG paths (Material Design Icons, Apache-2.0):
+// the real shapes read better than generic font glyphs.
+global Glyphs {
+    out property <string> android: "M17.6 9.48l1.84-3.18c.16-.31.04-.69-.26-.85a.637.637 0 0 0-.83.22l-1.88 3.24a11.463 11.463 0 0 0-8.94 0L5.65 5.67a.643.643 0 0 0-.87-.2c-.28.18-.37.54-.22.83L6.4 9.48A10.78 10.78 0 0 0 1 18h22a10.78 10.78 0 0 0-5.4-8.52zM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5z";
+    out property <string> apple: "M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.34-1.04 3.19-.69.85-1.83 1.52-2.95 1.43-.15-1.15.41-2.35 1.05-3.12z";
+    out property <string> usb: "M15 7v4h1v2h-3V5h2l-3-4-3 4h2v8H8v-2.07c.7-.37 1.2-1.08 1.2-1.93 0-1.22-.99-2.2-2.2-2.2-1.22 0-2.2.98-2.2 2.2 0 .85.5 1.56 1.2 1.93V13a2 2 0 0 0 2 2h3v3.05c-.71.36-1.2 1.1-1.2 1.95a2.2 2.2 0 0 0 2.2 2.2 2.2 2.2 0 0 0 2.2-2.2c0-.85-.49-1.59-1.2-1.95V15h3a2 2 0 0 0 2-2v-2h1V7h-4z";
+    out property <string> wifi: "M12 21l3.6-4.8c-1-.75-2.25-1.2-3.6-1.2s-2.6.45-3.6 1.2L12 21m0-18C7.95 3 4.21 4.34 1.2 6.6L3 9c2.5-1.88 5.62-3 9-3s6.5 1.12 9 3l1.8-2.4C19.79 4.34 16.05 3 12 3m0 6c-2.7 0-5.19.89-7.2 2.4l1.8 2.4c1.5-1.13 3.37-1.8 5.4-1.8s3.9.67 5.4 1.8l1.8-2.4C17.19 9.89 14.7 9 12 9z";
+}
+
+// A small selectable tile: gradient icon, title and one line (add-device page).
+component ChoiceTile inherits Rectangle {
+    in property <string> icon;
+    in property <string> glyph; // SVG path (24x24) drawn instead of the font icon
+
+    in property <string> title;
+    in property <string> sub;
+    in property <color> tint;
+    in property <bool> selected;
+    callback pick();
+    accessible-role: button;
+    accessible-label: root.title;
+    accessible-action-default => { root.pick(); }
+    min-height: tcol.preferred-height;
+    border-radius: 14px;
+    background: selected ? tint.with-alpha(Theme.dark ? 0.16 : 0.12) : ta.has-hover ? Theme.hover.with-alpha(Theme.dark ? 0.10 : 0.5) : (Theme.dark ? #ffffff08 : #ffffff80);
+    border-width: selected ? 1.5px : 1px;
+    border-color: selected ? tint : Theme.line;
+    animate background, border-color { duration: 200ms; easing: ease-out; }
+    transform-scale-x: ta.pressed ? 98% : 100%;
+    transform-scale-y: ta.pressed ? 98% : 100%;
+    animate transform-scale-x, transform-scale-y { duration: ta.pressed ? 120ms : 300ms; easing: cubic-bezier(0.34, 1.45, 0.64, 1); }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.pick(); } }
+    tcol := HorizontalLayout {
+        padding: 10px;
+        spacing: 10px;
+        Rectangle {
+            width: 34px;
+            height: 34px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 10px;
+            background: @linear-gradient(135deg, root.tint 0%, root.tint.darker(0.35) 100%);
+            opacity: root.selected ? 1 : 0.75;
+            if root.glyph == "": Icon { text: root.icon; color: white; font-size: 16px; }
+            if root.glyph != "": Path { width: 19px; height: 19px; viewbox-width: 24; viewbox-height: 24; commands: root.glyph; fill: white; }
+        }
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text { text: root.title; font-size: 13px; font-weight: 700; color: Theme.text; overflow: elide; }
+            Text { text: root.sub; font-size: 10.5px; color: Theme.text-2; overflow: elide; }
+        }
+    }
+}
+
 component AddDevice inherits Rectangle {
     in-out property <string> kind: "android";
+    // Android: "usb" | "wifi"
+    in-out property <string> way: "usb";
+    in-out property <Prefs> prefs;
+    callback prefs-changed(Prefs);
     in property <bool> adb-missing;
     in property <bool> wifi-busy;
     in property <string> wifi-status;
@@ -1742,13 +1853,18 @@ component AddDevice inherits Rectangle {
     callback close();
     TouchArea { }
     Glass {
+        // Solid enough to read over any background (the plain glass looked washed out).
+        strong: true;
+        background: Theme.dark ? #1c1c1ef2 : #f6f6f9f2;
         width: min(parent.width - 32px, 480px);
         height: min(parent.height - 32px, col.preferred-height + 2px);
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2;
         border-radius: 20px;
-        ScrollView {
+        sv := ScrollView {
             col := VerticalLayout {
+                // A known width lets wrapped text report its real height (else the card ends short).
+                width: sv.visible-width;
                 padding: 18px;
                 spacing: 12px;
                 HorizontalLayout {
@@ -1768,11 +1884,39 @@ component AddDevice inherits Rectangle {
                     }
                     VerticalLayout { alignment: start; GlassButton { icon: "\u{E711}"; tip: I18n.t("Tutup", "Close"); clicked => { root.close(); } } }
                 }
-                Seg {
-                    options: ["android", "apple"];
-                    labels: ["Android", "iPhone / iPad"];
-                    value: root.kind;
-                    changed(v) => { root.kind = v; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; horizontal-stretch: 1; }
+                    Seg {
+                        width: 190px;
+                        options: ["id", "en"];
+                        labels: ["Indonesia", "English"];
+                        value: root.prefs.lang;
+                        changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    ChoiceTile {
+                        horizontal-stretch: 1;
+                        icon: "\u{E70A}";
+                        glyph: Glyphs.android;
+                        tint: #3ddc84;
+                        title: "Android";
+                        sub: I18n.t("HP & tablet, semua merek", "Phones & tablets, any brand");
+                        selected: root.kind == "android";
+                        pick => { root.kind = "android"; }
+                    }
+                    ChoiceTile {
+                        horizontal-stretch: 1;
+                        icon: "\u{E8EA}";
+                        glyph: Glyphs.apple;
+                        tint: #5ac8fa;
+                        title: "iPhone / iPad";
+                        sub: I18n.t("Kabel, lalu Wi-Fi", "Cable, then Wi-Fi");
+                        selected: root.kind == "apple";
+                        pick => { root.kind = "apple"; }
+                    }
                 }
                 if root.kind == "android": VerticalLayout {
                     spacing: 10px;
@@ -1781,25 +1925,47 @@ component AddDevice inherits Rectangle {
                         Text { text: I18n.t("Android butuh adb (sekitar 8 MB, sekali saja).", "Android needs adb (about 8 MB, once)."); font-size: 12px; color: Theme.text; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
                         GlassButton { primary: true; icon: "\u{E896}"; label: I18n.t("Pasang adb", "Install adb"); clicked => { root.install-adb(); } }
                     }
-                    Text { text: I18n.t("Lewat kabel USB", "Over a USB cable"); font-size: 12.5px; font-weight: 650; color: Theme.text; }
-                    FlowStep {
+                    // One way at a time keeps the card short at normal window size.
+                    HorizontalLayout {
+                        spacing: 8px;
+                        ChoiceTile {
+                            horizontal-stretch: 1;
+                            icon: "\u{E88E}";
+                            glyph: Glyphs.usb;
+                            tint: #f472b6;
+                            title: I18n.t("Kabel USB", "USB cable");
+                            sub: I18n.t("Paling stabil", "Most stable");
+                            selected: root.way == "usb";
+                            pick => { root.way = "usb"; }
+                        }
+                        ChoiceTile {
+                            horizontal-stretch: 1;
+                            icon: "\u{E701}";
+                            glyph: Glyphs.wifi;
+                            tint: #a78bfa;
+                            title: "Wi-Fi";
+                            sub: I18n.t("Tanpa kabel · Android 11+", "No cable · Android 11+");
+                            selected: root.way == "wifi";
+                            pick => { root.way = "wifi"; }
+                        }
+                    }
+                    if root.way == "usb": FlowStep {
                         title: I18n.t("Aktifkan Debugging USB", "Turn on USB debugging");
                         sub: I18n.t("Pengaturan › Tentang ponsel › ketuk Nomor bentukan 7×, lalu Opsi pengembang › Debugging USB.", "Settings › About phone › tap Build number 7×, then Developer options › USB debugging.");
                         state: "todo";
                     }
-                    FlowStep {
+                    if root.way == "usb": FlowStep {
                         title: I18n.t("Colok kabel data", "Plug in a data cable");
                         sub: I18n.t("Lalu ketuk Izinkan di HP. HP langsung muncul di menu.", "Then tap Allow on the phone. It shows up in the menu right away.");
                         state: "todo";
                         last: true;
                     }
-                    Text { text: I18n.t("Lewat Wi-Fi", "Over Wi-Fi"); font-size: 12.5px; font-weight: 650; color: Theme.text; }
-                    if root.wifi-busy: VerticalLayout {
+                    if root.way == "wifi" && root.wifi-busy: VerticalLayout {
                         spacing: 6px;
                         BusyBar { }
                         Text { text: root.wifi-status != "" ? root.wifi-status : I18n.t("Memproses…", "Working…"); font-size: 11.5px; color: Theme.accent; wrap: word-wrap; }
                     }
-                    AndroidWifiCard {
+                    if root.way == "wifi": AndroidWifiCard {
                         wifi-busy: root.wifi-busy;
                         qr-image: root.qr-image;
                         qr-on: root.qr-on;
@@ -2257,12 +2423,25 @@ component SettingsPanel inherits Glass {
                 }
 
                 Card {
+                    title: I18n.t("Startup & penutupan", "Startup & closing");
+                    icon: "\u{E7E8}";
+                    tint-a: #60a5fa;
+                    tint-b: #2563eb;
+                    if !AppInfo.store: Row { label: I18n.t("Mulai bersama Windows", "Start with Windows"); Toggle { checked: prefs.start-with-windows; toggled(v) => { root.prefs.start-with-windows = v; root.changed(root.prefs); } } }
+                    Text { text: I18n.t("Saat menutup jendela", "When closing the window"); font-size: 12px; color: Theme.text; }
+                    Seg {
+                        options: ["ask", "tray", "quit"];
+                        labels: [I18n.t("Selalu tanya", "Ask every time"), I18n.t("Kecilkan ke tray", "Minimize to tray"), I18n.t("Keluar", "Quit")];
+                        value: prefs.close-action;
+                        changed(v) => { root.prefs.close-action = v; root.changed(root.prefs); }
+                    }
+                }
+
+                Card {
                     title: I18n.t("Lanjutan", "Advanced");
                     icon: "\u{E713}";
                     tint-a: #a1a1aa;
                     tint-b: #52525b;
-                    if !AppInfo.store: Row { label: I18n.t("Mulai bersama Windows", "Start with Windows"); Toggle { checked: prefs.start-with-windows; toggled(v) => { root.prefs.start-with-windows = v; root.changed(root.prefs); } } }
-                    Row { label: I18n.t("Tutup ke tray", "Close to the tray"); Toggle { checked: prefs.close-to-tray; toggled(v) => { root.prefs.close-to-tray = v; root.changed(root.prefs); } } }
                     Row { label: I18n.t("Selalu di atas", "Always on top"); Toggle { checked: prefs.on-top; toggled(v) => { root.prefs.on-top = v; root.changed(root.prefs); } } }
                     Row { label: I18n.t("Statistik di header", "Stats in the header"); Toggle { checked: prefs.stats; toggled(v) => { root.prefs.stats = v; root.changed(root.prefs); } } }
                 }
@@ -2557,6 +2736,9 @@ export component AppWindow inherits Window {
     in-out property <bool> menu-open: true;
     // "Connect a device" page in the stage.
     in-out property <bool> adding;
+    // Close dialog (close action "ask"); Rust acts on close-choice.
+    in-out property <bool> close-ask;
+    callback close-choice(string, bool);
     callback adding-opened();
     // Menu slide, 0 = closed, 1 = open (driven from Rust like `sp`).
     in property <float> mp: 1;
@@ -2840,7 +3022,8 @@ export component AppWindow inherits Window {
                         border-color: Theme.edge;
                         clip: true;
                         stage-ta := TouchArea { }
-                        if !root.picture && root.prefs.dots: Image {
+                        // Not behind the add-device card: dots through its glass read as noise.
+                        if !root.picture && root.prefs.dots && !root.adding: Image {
                             source: root.dots-image;
                             width: parent.width;
                             height: parent.height;
@@ -2876,6 +3059,8 @@ export component AppWindow inherits Window {
                             width: parent.width;
                             height: parent.height;
                             kind: root.screen == "apple" ? "apple" : "android";
+                            prefs: root.prefs;
+                            prefs-changed(p) => { root.prefs = p; root.prefs-changed(p); }
                             adb-missing: root.adb-missing;
                             wifi-busy: root.android-wifi-busy;
                             wifi-status: root.android-wifi-status;
@@ -3017,6 +3202,12 @@ export component AppWindow inherits Window {
             ok: root.sheet-ok;
             cancel: root.sheet-cancel;
             answer(yes) => { root.sheet-answer(yes); }
+        }
+        if root.close-ask: CloseDialog {
+            width: parent.width;
+            height: parent.height;
+            border-radius: root.edge ? 0px : 12px;
+            choose(act, remember) => { root.close-choice(act, remember); }
         }
         // Hover tooltip: below the control, or above it near the bottom.
         tip := Rectangle {

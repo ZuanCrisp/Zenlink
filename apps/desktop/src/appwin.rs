@@ -157,14 +157,15 @@ thread_local! {
 fn picture_rect(ui: &AppWin) -> (f32, f32, f32, f32) {
     let sf = ui.window().scale_factor();
     let size = ui.window().size();
-    // Inside the glass stage: below the bar, inset on every side.
+    // Inside the glass stage: between header and dock, inset on every side.
     let side = (ui.get_pad() + ui.get_inset()) * sf;
     let top = (ui.get_pad() + ui.get_bar_h() + ui.get_gap() + ui.get_inset()) * sf;
+    let bottom = (ui.get_inset() + ui.get_gap() + ui.get_dock_h() + ui.get_pad()) * sf;
     (
         side,
         top,
         (size.width as f32 - 2.0 * side).max(1.0),
-        (size.height as f32 - top - side).max(1.0),
+        (size.height as f32 - top - bottom).max(1.0),
     )
 }
 
@@ -388,6 +389,16 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
     slint::BackendSelector::new()
         .backend_name("winit".into())
         .renderer_name("femtovg".into())
+        // Frameless glass like the main window.
+        .with_winit_window_attributes_hook(|attrs| {
+            use slint::winit_030::winit::platform::windows::{
+                BackdropType, WindowAttributesExtWindows,
+            };
+            attrs
+                .with_transparent(true)
+                .with_decorations(false)
+                .with_system_backdrop(BackdropType::None)
+        })
         .select()?;
     let ui = AppWin::new()?;
     let p = prefs::load();
@@ -397,7 +408,11 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
         _ => true,
     };
     ui.global::<Theme>().set_dark(dark);
-    ui.global::<Theme>().set_glass(0.0);
+    // Same glass as the main window (Settings › Liquid Glass and thickness).
+    let (level_on, thick) = crate::prefs::glass_level(p.glass);
+    let glass_on = p.glass_on && level_on;
+    ui.global::<Theme>()
+        .set_glass(if glass_on { 1.0 - 0.75 * thick } else { 0.0 });
     ui.global::<Theme>().set_icons(crate::icon_font().into());
     ui.global::<I18n>().set_id(p.lang.as_str() != "en");
     ui.set_app_name(a.name.clone().into());
@@ -447,6 +462,76 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
             }
         });
     }
+    {
+        // Header buttons, drag and edge resize (no system frame).
+        let weak = ui.as_weak();
+        let last_drag = std::cell::Cell::new(None::<Instant>);
+        let full_restore =
+            std::cell::Cell::new(None::<(slint::PhysicalPosition, slint::PhysicalSize, bool)>);
+        ui.on_window_action(move |act| {
+            use slint::winit_030::winit::window::ResizeDirection as R;
+            use slint::winit_030::WinitWindowAccessor;
+            let Some(ui) = weak.upgrade() else { return };
+            let w = ui.window();
+            match act.as_str() {
+                "close" => {
+                    stop_session();
+                    let _ = slint::quit_event_loop();
+                }
+                "min" => w.set_minimized(true),
+                "max" if !ui.get_is_fullscreen() => w.set_maximized(!w.is_maximized()),
+                // Own full screen, as the main window: winit's exact-monitor
+                // size makes the GL driver go opaque and stay so (no glass after).
+                "fullscreen" => {
+                    if let Some((pos, size, was_max)) = full_restore.take() {
+                        w.set_position(pos);
+                        w.set_size(size);
+                        if was_max {
+                            w.set_maximized(true);
+                        }
+                    } else if let Some((x, y, mw, mh)) = crate::monitor_rect(w) {
+                        let was_max = w.is_maximized();
+                        if was_max {
+                            w.set_maximized(false);
+                        }
+                        full_restore.set(Some((w.position(), w.size(), was_max)));
+                        w.set_position(slint::PhysicalPosition::new(x, y));
+                        w.set_size(slint::PhysicalSize::new(mw, mh + 1));
+                    }
+                    ui.set_is_fullscreen(full_restore.get().is_some());
+                }
+                "drag" | "max" if ui.get_is_fullscreen() => {}
+                "drag" => {
+                    // Second press within 400 ms = double-click: maximise / restore.
+                    let now = Instant::now();
+                    if last_drag
+                        .get()
+                        .is_some_and(|t| now - t < Duration::from_millis(400))
+                    {
+                        last_drag.set(None);
+                        w.set_maximized(!w.is_maximized());
+                    } else {
+                        last_drag.set(Some(now));
+                        w.with_winit_window(|ww| ww.drag_window());
+                    }
+                }
+                r if r.starts_with("resize-") => {
+                    let dir = match &r[7..] {
+                        "n" => R::North,
+                        "s" => R::South,
+                        "w" => R::West,
+                        "e" => R::East,
+                        "nw" => R::NorthWest,
+                        "ne" => R::NorthEast,
+                        "sw" => R::SouthWest,
+                        _ => R::SouthEast,
+                    };
+                    w.with_winit_window(|ww| ww.drag_resize_window(dir));
+                }
+                _ => {}
+            }
+        });
+    }
     ui.window().on_close_requested(|| {
         stop_session();
         let _ = slint::quit_event_loop();
@@ -456,16 +541,39 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
     let timer = slint::Timer::default();
     {
         let weak = ui.as_weak();
-        let mut dark_bar = false;
+        // Glass blur and rounded corners, applied again when maximised or full
+        // screen changes. Full screen turns the blur off like the main window:
+        // a blur kept through it came back black afterwards.
+        let mut applied: Option<(bool, bool)> = None;
+        let mut changed: Option<Instant> = None;
         timer.start(
             slint::TimerMode::Repeated,
             Duration::from_millis(16),
             move || {
                 let Some(ui) = weak.upgrade() else { return };
-                if !dark_bar {
+                let full = ui.get_is_fullscreen();
+                // Square corners in full screen too.
+                let max = ui.window().is_maximized() || full;
+                if ui.get_is_maximized() != ui.window().is_maximized() {
+                    ui.set_is_maximized(ui.window().is_maximized());
+                }
+                // Once more after the change settles (as the main window does).
+                if changed.is_some_and(|t: Instant| t.elapsed() >= Duration::from_millis(350)) {
+                    changed = None;
+                    applied = None;
+                }
+                if applied != Some((max, full)) {
+                    if applied.is_some() {
+                        changed = Some(Instant::now());
+                    }
                     if let Some(h) = crate::hwnd_of(ui.window()) {
-                        crate::backdrop::dark_title_bar(h, dark);
-                        dark_bar = true;
+                        let mode = if glass_on && !full {
+                            crate::backdrop::Backdrop::Accent
+                        } else {
+                            crate::backdrop::Backdrop::None
+                        };
+                        crate::backdrop::apply(h, mode, dark, thick, !max);
+                        applied = Some((max, full));
                     }
                 }
                 tick(&ui, &a);

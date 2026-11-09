@@ -81,11 +81,43 @@ fn windows_languages() -> Vec<String> {
     out
 }
 
+/// Glass thickness slider (0..100) to (glass on, thickness 0..1 for the
+/// backdrop and theme). The old linear scale put every visible change in
+/// 0..5%: now 0 = clear (no blur), 1..75 = blur up to the default frosted
+/// look (old 5%), 75..100 = thicker, 100 = solid, no glass at all.
+pub fn glass_level(slider: f32) -> (bool, f32) {
+    let s = slider.clamp(0.0, 100.0);
+    if s >= 99.5 {
+        (false, 1.0)
+    } else if s <= 0.0 {
+        (true, 0.0)
+    } else if s <= 75.0 {
+        // 0.03 is where the backdrop turns its blur on.
+        (true, 0.03 + 0.02 * s / 75.0)
+    } else {
+        (true, 0.05 + 0.95 * (s - 75.0) / 25.0)
+    }
+}
+
+/// The slider position for an old linear thickness (0..1).
+fn slider_for(thick: f32) -> f32 {
+    let t = thick.clamp(0.0, 1.0);
+    let s = if t <= 0.0 {
+        0.0
+    } else if t <= 0.05 {
+        (75.0 * (t - 0.03) / 0.02).max(1.0)
+    } else {
+        75.0 + 25.0 * (t - 0.05) / 0.95
+    };
+    // shortcut: old 100% (thickest glass) lands on 99, not on the new "no glass" 100.
+    s.round().min(99.0)
+}
+
 pub fn defaults() -> Prefs {
     Prefs {
         theme: "dark".into(),
         glass_on: true,
-        glass: 30.0,
+        glass: 75.0,
         lens: true,
         lang: system_lang().into(),
         fit: "contain".into(),
@@ -103,7 +135,7 @@ pub fn defaults() -> Prefs {
         keyboard: true,
         gestures: true,
         start_with_windows: false,
-        close_to_tray: false,
+        close_action: "ask".into(),
         auto_unlock: false,
         unlock_on_lock: false,
         on_top: false,
@@ -163,8 +195,15 @@ pub fn from_value(v: &Value) -> Prefs {
     s("theme", &mut p.theme, &["light", "dark", "system"]);
     b("glassOn", &mut p.glass_on);
     // Version 2 made 30% the default thickness; older files saved 0%.
-    if v.get("version").and_then(Value::as_u64).unwrap_or(1) >= 2 {
-        f("glassThick", &mut p.glass, 0.0, 100.0);
+    // Version 3 spread the slider (see glass_level): a version 2 value keeps its look.
+    match v.get("version").and_then(Value::as_u64).unwrap_or(1) {
+        0 | 1 => {}
+        2 => {
+            let mut old = 30.0;
+            f("glassThick", &mut old, 0.0, 100.0);
+            p.glass = slider_for(old / 100.0);
+        }
+        _ => f("glassThick", &mut p.glass, 0.0, 100.0),
     }
     b("lens", &mut p.lens);
     s("lang", &mut p.lang, &["id", "en"]);
@@ -192,7 +231,12 @@ pub fn from_value(v: &Value) -> Prefs {
     b("gestures", &mut p.gestures);
     // "autoStart" (start when plugged in) was never implemented; not read.
     b("startWithWindows", &mut p.start_with_windows);
-    b("closeToTray", &mut p.close_to_tray);
+    // "ask" | "tray" | "quit". Files from before it only had closeToTray:
+    // true keeps going to the tray, false or missing asks.
+    if v.get("closeToTray").and_then(Value::as_bool) == Some(true) {
+        p.close_action = "tray".into();
+    }
+    s("closeAction", &mut p.close_action, &["ask", "tray", "quit"]);
     b("autoUnlock", &mut p.auto_unlock);
     b("unlockOnLock", &mut p.unlock_on_lock);
     b("onTop", &mut p.on_top);
@@ -263,12 +307,12 @@ pub fn save(p: &Prefs) {
 
 pub fn to_value(p: &Prefs) -> Value {
     json!({
-        "version": 2, "theme": p.theme.as_str(), "glassOn": p.glass_on, "glassThick": p.glass, "lens": p.lens, "lang": p.lang.as_str(), "fit": p.fit.as_str(),
+        "version": 3, "theme": p.theme.as_str(), "glassOn": p.glass_on, "glassThick": p.glass, "lens": p.lens, "lang": p.lang.as_str(), "fit": p.fit.as_str(),
         "fitWindow": p.fit_window, "rotation": p.rotation.as_str(),
         "cropL": p.crop_l, "cropT": p.crop_t, "cropR": p.crop_r, "cropB": p.crop_b,
         "audioOut": p.audio_out.as_str(), "volume": p.volume, "lipSync": p.lip_sync,
         "audioBuffer": p.audio_buffer.as_str(), "touch": p.touch, "keyboard": p.keyboard,
-        "gestures": p.gestures, "startWithWindows": p.start_with_windows, "closeToTray": p.close_to_tray, "autoUnlock": p.auto_unlock, "unlockOnLock": p.unlock_on_lock,
+        "gestures": p.gestures, "startWithWindows": p.start_with_windows, "closeAction": p.close_action.as_str(), "closeToTray": p.close_action == "tray", "autoUnlock": p.auto_unlock, "unlockOnLock": p.unlock_on_lock,
         "onTop": p.on_top, "stats": p.stats, "dots": p.dots,
         "platform": p.platform.as_str(), "rememberPlatform": p.remember_platform,
         "androidMaxSize": p.android_max_size.as_str(), "androidFps": p.android_fps.as_str(),
@@ -319,7 +363,7 @@ mod tests {
 
     #[test]
     fn old_file_keeps_language_and_theme_and_has_no_platform() {
-        let old = json!({"version": 2, "theme": "light", "lang": "en", "glassThick": 55.0});
+        let old = json!({"version": 3, "theme": "light", "lang": "en", "glassThick": 55.0});
         let p = from_value(&old);
         assert_eq!(
             (p.theme.as_str(), p.lang.as_str(), p.glass),
@@ -339,5 +383,56 @@ mod tests {
         assert!(back.remember_platform);
         let bad = from_value(&json!({"platform": "windows-phone"}));
         assert_eq!(bad.platform.as_str(), "");
+    }
+
+    #[test]
+    fn glass_slider_spreads_the_look() {
+        assert_eq!(glass_level(0.0), (true, 0.0), "0 = clear");
+        assert!(glass_level(1.0).1 >= 0.03, "1 already blurs");
+        assert!(
+            (glass_level(75.0).1 - 0.05).abs() < 1e-6,
+            "75 = old 5% look"
+        );
+        assert!(!glass_level(100.0).0, "100 = no glass");
+        let mut last = -1.0;
+        for s in 0..100 {
+            let t = glass_level(s as f32).1;
+            assert!(t > last, "thicker at every step ({s})");
+            last = t;
+        }
+        // Old files keep their look.
+        let at = |o: f64| from_value(&json!({"version": 2, "glassThick": o})).glass;
+        assert_eq!(at(5.0), 75.0);
+        assert_eq!(at(0.0), 0.0);
+        assert_eq!(at(100.0), 99.0);
+        assert_eq!(
+            from_value(&json!({"version": 3, "glassThick": 40.0})).glass,
+            40.0
+        );
+        assert_eq!(defaults().glass, 75.0);
+    }
+
+    #[test]
+    fn close_action_migrates_and_round_trips() {
+        let act = |v: Value| from_value(&v).close_action.to_string();
+        assert_eq!(act(json!({})), "ask", "fresh install asks");
+        assert_eq!(act(json!({"closeToTray": true})), "tray");
+        assert_eq!(act(json!({"closeToTray": false})), "ask");
+        assert_eq!(
+            act(json!({"closeToTray": true, "closeAction": "quit"})),
+            "quit"
+        );
+        assert_eq!(act(json!({"closeAction": "explode"})), "ask");
+        for a in ["ask", "tray", "quit"] {
+            let mut p = defaults();
+            p.close_action = a.into();
+            let v = to_value(&p);
+            assert_eq!(
+                v["closeToTray"],
+                json!(a == "tray"),
+                "old readers still work"
+            );
+            assert_eq!(from_value(&v).close_action.as_str(), a);
+        }
     }
 }

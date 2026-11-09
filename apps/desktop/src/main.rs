@@ -323,11 +323,11 @@ fn slide_ease(x: f32) -> f32 {
     bez((lo + hi) / 2.0, y1, y2)
 }
 
-fn monitor_rect(ui: &AppWindow) -> Option<(i32, i32, u32, u32)> {
+pub(crate) fn monitor_rect(w: &slint::Window) -> Option<(i32, i32, u32, u32)> {
     use windows::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
-    let h = hwnd_of(ui.window())?;
+    let h = hwnd_of(w)?;
     unsafe {
         let m = MonitorFromWindow(h, MONITOR_DEFAULTTONEAREST);
         let mut mi = MONITORINFO {
@@ -389,12 +389,12 @@ fn apply_look(ui: &AppWindow) {
         _ => false,
     };
     ui.global::<Theme>().set_dark(dark);
-    // Thickness 0..100 -> clarity: 0% thick = 1.0 (clear), 100% = 0.25.
-    let thick = (p.glass / 100.0).clamp(0.0, 1.0);
+    // Slider -> thickness (prefs::glass_level); 100% = no glass. Clarity: 1.0 clear .. 0.25.
+    let (level_on, thick) = prefs::glass_level(p.glass);
+    let glass_on = p.glass_on && level_on;
     ui.global::<Theme>()
-        .set_glass(if p.glass_on { 1.0 - 0.75 * thick } else { 0.0 });
+        .set_glass(if glass_on { 1.0 - 0.75 * thick } else { 0.0 });
     ui.global::<I18n>().set_id(p.lang.as_str() != "en");
-    let glass_on = p.glass_on;
     let glass_k = thick;
     // Square corners in full screen / maximised (rounded ones show the desktop).
     let full = is_full();
@@ -1471,6 +1471,22 @@ static ANDROID_POLL: AtomicU8 = AtomicU8::new(0);
 static ADB_RETRY: AtomicBool = AtomicBool::new(false);
 /// An adb download runs (one at a time).
 static ADB_INSTALLING: AtomicBool = AtomicBool::new(false);
+/// ZenLink started the running ADB server: it stops it again on exit.
+static ADB_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// On exit: stop the ADB server only when ZenLink started it, so a server
+/// another tool (Android Studio, scrcpy) started keeps running.
+fn stop_own_adb_server() {
+    if ADB_STARTED.swap(false, Relaxed) {
+        let client = zenlink_android::adb::AdbClient {
+            timeout: Duration::from_millis(500),
+            ..zenlink_android::adb::AdbClient::default()
+        };
+        if let Err(e) = client.kill_server() {
+            log::info!("android: stop the ADB server: {e}");
+        }
+    }
+}
 
 enum AdbView {
     /// No ADB server, and no `adb` program to start one with.
@@ -1487,7 +1503,7 @@ enum AdbView {
 
 /// Polls the ADB server while the platform screen or the Android workspace
 /// shows. When none runs, it starts one with the `adb` it finds (once; it
-/// never kills or replaces a running server). Properties are read once per
+/// never kills or replaces a running server, only its own one on exit). Properties are read once per
 /// transport and cached.
 fn start_android_poll(ui: &AppWindow) {
     use zenlink_android::adb::{check_server, AdbClient, ServerStatus, BUNDLED_SERVER_VERSION};
@@ -1528,6 +1544,7 @@ fn start_android_poll(ui: &AppWindow) {
                             });
                             match zenlink_android::adb::start_server(&adb, port) {
                                 Ok(s) if s.success() => {
+                                    ADB_STARTED.store(true, Relaxed);
                                     // Next round lists the devices.
                                     continue;
                                 }
@@ -3321,6 +3338,10 @@ fn tray_labels(p: &Prefs) -> (&'static str, &'static str) {
 fn hide_to_tray(ui: &AppWindow) {
     use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
     if let Some(h) = hwnd_of(ui.window()) {
+        // A one-off "Minimize to tray" from the close dialog needs the icon too.
+        let p = ui.get_prefs();
+        let (open, quit) = tray_labels(&p);
+        tray::set_icon(true, open, quit);
         let _ = unsafe { ShowWindow(h, SW_HIDE) };
         tray::HIDDEN.store(true, Relaxed);
     }
@@ -3344,6 +3365,9 @@ fn show_window(ui: &AppWindow) {
             let _ = SetForegroundWindow(h);
         }
         tray::HIDDEN.store(false, Relaxed);
+        let p = ui.get_prefs();
+        let (open, quit) = tray_labels(&p);
+        tray::set_icon(p.close_action == "tray", open, quit);
     }
 }
 
@@ -3353,12 +3377,27 @@ fn quit_app(ui: &AppWindow) {
     let _ = slint::quit_event_loop();
 }
 
-/// The window's close button and Alt+F4.
+/// "Start with Windows" follows the registry (Task Manager's Startup tab can
+/// change it). Reads only; Store builds use their StartupTask instead.
+fn sync_start_with_windows(ui: &AppWindow) {
+    if updater::is_store() {
+        return;
+    }
+    let on = tray::start_with_windows_on();
+    let mut p = ui.get_prefs();
+    if p.start_with_windows != on {
+        p.start_with_windows = on;
+        prefs::save(&p);
+        ui.set_prefs(p);
+    }
+}
+
+/// The window's close button and Alt+F4 (the tray's Quit never asks).
 fn close_requested(ui: &AppWindow) {
-    if ui.get_prefs().close_to_tray {
-        hide_to_tray(ui);
-    } else {
-        quit_app(ui);
+    match ui.get_prefs().close_action.as_str() {
+        "tray" => hide_to_tray(ui),
+        "quit" => quit_app(ui),
+        _ => ui.set_close_ask(true),
     }
 }
 
@@ -3623,15 +3662,38 @@ fn main() -> Result<(), slint::PlatformError> {
         });
         let p = ui.get_prefs();
         let (open, quit) = tray_labels(&p);
-        tray::set_icon(p.close_to_tray, open, quit);
+        tray::set_icon(p.close_action == "tray", open, quit);
         if !test_mode && !updater::is_store() {
             // Keeps the Run entry pointing at this exe (a moved Portable.exe).
             // The Store edition starts with Windows through its StartupTask
             // (Windows Settings > Apps > Startup), not the Run key.
-            tray::set_start_with_windows(p.start_with_windows, false);
+            // The toggle shows the real state (Task Manager can turn it off);
+            // off never writes anything, so a first launch leaves no Run entry.
+            sync_start_with_windows(&ui);
+            if ui.get_prefs().start_with_windows {
+                tray::set_start_with_windows(true, false);
+            }
         }
         filedrop::install(&ui);
         filewin::install(&ui);
+        {
+            // Close dialog: act, and with "Remember" keep it as the close action.
+            let weak = ui.as_weak();
+            ui.on_close_choice(move |act, remember| {
+                let Some(ui) = weak.upgrade() else { return };
+                ui.set_close_ask(false);
+                if remember {
+                    let mut p = ui.get_prefs();
+                    p.close_action = act.clone();
+                    ui.invoke_prefs_changed(p);
+                }
+                match act.as_str() {
+                    "tray" => hide_to_tray(&ui),
+                    "quit" => quit_app(&ui),
+                    _ => {}
+                }
+            });
+        }
         let weak = ui.as_weak();
         ui.window().on_close_requested(move || {
             if let Some(ui) = weak.upgrade() {
@@ -3855,7 +3917,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 tray::set_start_with_windows(p.start_with_windows, true);
             }
             let (open, quit) = tray_labels(&p);
-            tray::set_icon(p.close_to_tray, open, quit);
+            tray::set_icon(
+                p.close_action == "tray" || tray::HIDDEN.load(Relaxed),
+                open,
+                quit,
+            );
             let android_changed = devprofiles::picture_of(&p)
                 != devprofiles::picture_of(&last.borrow())
                 || p.android_profile != last.borrow().android_profile;
@@ -3914,6 +3980,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let weak = ui.as_weak();
         ui.on_settings_toggled(move |open| {
             let Some(ui) = weak.upgrade() else { return };
+            if open && !test_mode {
+                sync_start_with_windows(&ui);
+            }
             // The window grows/shrinks frame by frame with the panel slide
             // (see the frame timer), keeping the picture size steady.
             let sf = ui.window().scale_factor();
@@ -4586,7 +4655,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         if was_max {
                             w.set_maximized(false);
                         }
-                        if let Some((x, y, mw, mh)) = monitor_rect(&ui) {
+                        if let Some((x, y, mw, mh)) = monitor_rect(w) {
                             let (pos, size) = (w.position(), w.size());
                             APP.with_borrow_mut(|a| a.full_restore = Some((pos, size, was_max)));
                             w.set_position(slint::PhysicalPosition::new(x, y));
@@ -4941,8 +5010,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 android_tick(&ui);
             }
             APP.with_borrow_mut(|a| {
-                // The "Connect a device" page covers the stage: hide the picture meanwhile.
-                let streaming = ((a.streaming && on_apple) || (a.android_live && on_android)) && !ui.get_adding();
+                // The "Connect a device" page and the close dialog cover the stage: hide the picture meanwhile.
+                let streaming = ((a.streaming && on_apple) || (a.android_live && on_android))
+                    && !ui.get_adding()
+                    && !ui.get_close_ask();
                 // scrcpy sends the picture already turned; Apple reports the angle separately.
                 let device_rotation = if on_android { 0 } else { a.device_rotation };
                 let Some(v) = a.view.as_ref() else { return };
@@ -5141,7 +5212,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if hwnd_of(ui.window()).is_none() && tries.get() < 200 {
                     return;
                 }
-                if ui.get_prefs().close_to_tray {
+                if ui.get_prefs().close_action == "tray" {
                     hide_to_tray(&ui);
                 } else {
                     ui.window().set_minimized(true);
@@ -5159,6 +5230,7 @@ fn main() -> Result<(), slint::PlatformError> {
     if let Some(m) = SIDECAR.get() {
         m.lock().unwrap().take();
     }
+    stop_own_adb_server();
     r
 }
 

@@ -14,7 +14,8 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Registry::{
-    RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
+    RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, REG_SZ,
+    RRF_RT_REG_BINARY, RRF_RT_REG_SZ,
 };
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
@@ -31,6 +32,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 const CLASS: PCWSTR = w!("ZenLinkTrayV25");
 const RUN_KEY: PCWSTR = w!("Software\\Microsoft\\Windows\\CurrentVersion\\Run");
 const RUN_VALUE: PCWSTR = w!("ZenLink");
+/// Task Manager's Startup tab: enable/disable flags per Run entry.
+const APPROVED_KEY: PCWSTR =
+    w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run");
 /// Command-line flag of the "Start with Windows" entry.
 pub const BACKGROUND_ARG: &str = "--background";
 const WM_TRAY: u32 = WM_APP + 0x51;
@@ -268,6 +272,10 @@ pub fn set_start_with_windows(on: bool, user_action: bool) {
     let want = run_command(&exe);
     let have = run_value();
     if on {
+        // Clear a Task Manager "disabled" flag, else it silently overrides the toggle.
+        if user_action {
+            let _ = unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, APPROVED_KEY, RUN_VALUE) };
+        }
         if have.as_deref() != Some(want.as_str()) {
             let data = wide(&want);
             let r = unsafe {
@@ -289,8 +297,49 @@ pub fn set_start_with_windows(on: bool, user_action: bool) {
     }
 }
 
+/// The real state: a Run entry that Task Manager has not disabled.
+pub fn start_with_windows_on() -> bool {
+    if run_value().is_none() {
+        return false;
+    }
+    let mut buf = [0u8; 64];
+    let mut len = buf.len() as u32;
+    let r = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            APPROVED_KEY,
+            RUN_VALUE,
+            RRF_RT_REG_BINARY,
+            None,
+            Some(buf.as_mut_ptr().cast()),
+            Some(&mut len),
+        )
+    };
+    r.is_err() || !approved_disabled(&buf[..(len as usize).min(buf.len())])
+}
+
+/// StartupApproved data: first byte even (02, 06) = enabled, odd (03, 07) = disabled.
+fn approved_disabled(data: &[u8]) -> bool {
+    data.first().is_some_and(|b| b & 1 == 1)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn task_manager_flag_is_read_from_the_first_byte() {
+        let mut d = [0u8; 12];
+        d[0] = 0x03;
+        assert!(
+            super::approved_disabled(&d),
+            "03 = disabled in Task Manager"
+        );
+        d[0] = 0x02;
+        assert!(!super::approved_disabled(&d), "02 = enabled");
+        assert!(!super::approved_disabled(&[0x06]));
+        assert!(super::approved_disabled(&[0x07]));
+        assert!(!super::approved_disabled(&[]), "no data: not disabled");
+    }
+
     #[test]
     fn run_command_quotes_the_path_and_starts_in_the_background() {
         let p = std::path::Path::new(r"C:\Program Files\ZenLink\ZenLink.exe");
