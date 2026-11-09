@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import hashlib
 import plistlib
+import socket
 import struct
 import sys
 import time
@@ -92,6 +93,20 @@ def header(size: int, kind: int, w: float = 0, h: float = 0) -> bytes:
     return bytes(hd)
 
 
+def load_sound(key: bytes, iv: bytes) -> list[bytes]:
+    """AAC-ELD units of the fixture, each AES-CBC encrypted over its whole blocks like iOS."""
+    data = (Path(__file__).parent / "fixtures" / "eld_44100.zlau").read_bytes()
+    pos = 9 + data[4]  # ZLAU, length, ASC, u32 rate
+    out = []
+    while pos + 2 <= len(data):
+        size = int.from_bytes(data[pos:pos + 2], "little")
+        au = data[pos + 2:pos + 2 + size]
+        n = len(au) // 16 * 16
+        out.append(AES.new(key, AES.MODE_CBC, iv).encrypt(au[:n]) + au[n:])
+        pos += 2 + size
+    return out
+
+
 async def main(args) -> None:
     w, h = (int(x) for x in args.size.split("x"))
     reader, writer = await asyncio.open_connection(args.host, args.port)
@@ -121,6 +136,15 @@ async def main(args) -> None:
     _, data = await rtsp.call("SETUP", "rtsp://sim/1", plistlib.dumps(
         {"streams": [{"type": 110, "streamConnectionID": wire_id}]}, fmt=plistlib.FMT_BINARY))
     port = plistlib.loads(data)["streams"][0]["dataPort"]
+    sound, audio_sock = [], None
+    if args.audio:
+        _, data = await rtsp.call("SETUP", "rtsp://sim/1", plistlib.dumps(
+            {"streams": [{"type": 96, "ct": 8, "spf": 480}]}, fmt=plistlib.FMT_BINARY))
+        audio_port = plistlib.loads(data)["streams"][0]["dataPort"]
+        sound = load_sound(aeskey, eiv)
+        audio_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        audio_sock.connect((args.host, audio_port))
+    audio_sent = 0
     cipher = AES.new(sha16(f"AirPlayStreamKey{sid}".encode(), aeskey), AES.MODE_CTR, nonce=b"",
                      initial_value=sha16(f"AirPlayStreamIV{sid}".encode(), aeskey))
 
@@ -172,10 +196,18 @@ async def main(args) -> None:
         if now - last_feedback > 2:
             await rtsp.call("POST", "/feedback")
             last_feedback = now
+        while sound and audio_sent * 480 / 44100 <= now - t0:
+            # every 10th pair goes out swapped: the receiver must reorder
+            order = [audio_sent + 1, audio_sent] if audio_sent % 20 == 10 else [audio_sent]
+            for k in order:
+                payload = sound[k % len(sound)]
+                rtp = bytes([0x80, 0x60]) + (k & 0xFFFF).to_bytes(2, "big") + (k * 480 & 0xFFFFFFFF).to_bytes(4, "big")
+                audio_sock.send(rtp + bytes(4) + payload)
+            audio_sent += len(order)
         due = t0 + (i + 1) / args.fps
         if due > now:
             await asyncio.sleep(due - now)
-    print(f"sent {sent} frames in {time.perf_counter() - t0:.1f} s")
+    print(f"sent {sent} frames, {audio_sent} sound packets in {time.perf_counter() - t0:.1f} s")
     await rtsp.call("TEARDOWN", "rtsp://sim/1", plistlib.dumps({}, fmt=plistlib.FMT_BINARY))
     mw.close()
     writer.close()
@@ -190,5 +222,6 @@ if __name__ == "__main__":
     ap.add_argument("--fps", type=int, default=60)
     ap.add_argument("--mbps", type=int, default=8)
     ap.add_argument("--encoder", default="libx264")
+    ap.add_argument("--audio", action="store_true", help="also send AAC-ELD sound (fixtures/eld_44100.zlau)")
     ap.add_argument("--sid", type=lambda v: int(v, 0), default=0xF1E2D3C4B5A69788)
     asyncio.run(main(ap.parse_args()))

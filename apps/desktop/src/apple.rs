@@ -147,14 +147,14 @@ fn volume_button(down: bool, ipad: bool, rotation: u32) -> &'static str {
     }
 }
 
-/// Plays the device's sound (AAC-ELD access units) on the PC, on a thread of its own like
-/// Android's; ends when the session drops the sender.
-fn play_sound(rx: Receiver<Vec<u8>>, wifi: bool) {
+/// Plays the device's sound (AAC-ELD access units of `asc` at `rate`) on the PC, on a thread
+/// of its own like Android's; ends when the session drops the sender. AirPlay uses it too.
+pub fn play_sound(rx: Receiver<Vec<u8>>, wifi: bool, asc: &'static [u8], rate: i32) {
     let _ = std::thread::Builder::new()
         .name("apple-audio".into())
         .spawn(move || {
             let Ok(first) = rx.recv() else { return };
-            let mut dec = match crate::aac::Aac::new(&mirror::AUDIO_ASC, 48000) {
+            let mut dec = match crate::aac::Aac::new(asc, rate) {
                 Ok(d) => d,
                 Err(e) => return log::warn!("apple: no sound ({e}); picture only"),
             };
@@ -816,7 +816,7 @@ impl Engine {
             .is_some_and(|i| i.device_class == "iPad");
         let mut hid = hid::Hid::new(l.adapter.clone(), l.rsd.clone(), ipad);
         let (atx, arx) = sync_channel::<Vec<u8>>(64);
-        play_sound(arx, l.wifi);
+        play_sound(arx, l.wifi, &mirror::AUDIO_ASC, 48000);
         // ZenLink turned the device volume down ("PC only").
         let quiet = std::cell::Cell::new(false);
         let input = async {

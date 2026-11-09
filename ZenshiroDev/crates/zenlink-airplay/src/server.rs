@@ -28,7 +28,7 @@ pub struct Config {
     pub advertise: bool,
 }
 
-/// Session keys from SETUP, for the audio stream (step 4).
+/// Session keys from SETUP, for the audio stream.
 #[derive(Clone, Copy)]
 pub struct AudioKeys {
     pub key: [u8; 16],
@@ -320,17 +320,16 @@ impl Inner {
                     }
                 }
                 96 => {
-                    // Audio arrives in step 4; until then the ports exist and packets are dropped.
                     let (Ok(data), Ok(control)) = (UdpSocket::bind("0.0.0.0:0").await, UdpSocket::bind("0.0.0.0:0").await) else {
                         continue;
                     };
                     let ports = (data.local_addr().map(|a| a.port()).unwrap_or(0), control.local_addr().map(|a| a.port()).unwrap_or(0));
                     let ct = unsigned(d.get("ct"));
+                    log::info!("airplay: audio stream ct={ct} spf={:?}", d.get("spf").and_then(Value::as_unsigned_integer));
+                    let sink = self.sink.clone();
                     let task = tokio::spawn(async move {
-                        let _control = control;
-                        let _ = (keys, ct); // shortcut: step 4 decodes; until then packets are read and dropped
-                        let mut buf = [0u8; 2048];
-                        while data.recv(&mut buf).await.is_ok() {}
+                        let _control = control; // shortcut: no RTCP/retransmit requests, as receiver.py
+                        crate::audio::run(data, keys.key, keys.iv, ct, &*sink).await;
                     });
                     let mut s = self.streams.lock().unwrap();
                     for h in s.audio.drain(..) {

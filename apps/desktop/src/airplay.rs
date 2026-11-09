@@ -4,7 +4,7 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{channel, sync_channel, Receiver, RecvTimeoutError, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -42,6 +42,8 @@ struct Inner {
     gop: Vec<Vec<u8>>,
     key_in_gop: bool,
     tx: Option<SyncSender<Record>>,
+    /// The sound thread's input; dropping it ends the thread.
+    sound: Option<Sender<Vec<u8>>>,
 }
 
 impl Inner {
@@ -55,6 +57,7 @@ impl Inner {
             gop: Vec::new(),
             key_in_gop: false,
             tx: None,
+            sound: None,
         }
     }
 
@@ -83,6 +86,16 @@ impl Sink for Feed {
             }
             State::Streaming => g.phase = "streaming",
         }
+    }
+
+    fn audio(&self, au: Vec<u8>) {
+        let mut g = SHARED.lock().unwrap();
+        let sound = g.sound.get_or_insert_with(|| {
+            let (tx, rx) = channel();
+            crate::apple::play_sound(rx, true, &zenlink_airplay::audio::ASC, zenlink_airplay::audio::RATE);
+            tx
+        });
+        let _ = sound.send(au); // a thread that ended (no decoder / output) stays ended until Waiting
     }
 
     fn config(&self, description: Vec<u8>, hevc: bool, width: u32, height: u32) {

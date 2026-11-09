@@ -3,8 +3,9 @@
 //! Serves ZenLink Studio over Wi-Fi and the Hybrid picture (iOS 17-26).
 //!
 //! Done: identity, `GET /info`, pair-verify, FairPlay, keys (step 1); RTSP server, mDNS and the
-//! mirror stream (step 2). Audio follows (ROADMAP "M3 plan").
+//! mirror stream (step 2); audio (step 4). Hybrid follows (ROADMAP "M3 plan").
 
+pub mod audio;
 pub mod fairplay;
 pub mod identity;
 pub mod info;
@@ -32,6 +33,8 @@ pub trait Sink: Send + Sync + 'static {
     fn config(&self, description: Vec<u8>, hevc: bool, width: u32, height: u32);
     /// One access unit of 4-byte length-prefixed NAL units.
     fn frame(&self, au: Vec<u8>);
+    /// One AAC-ELD access unit (see [`audio::ASC`]).
+    fn audio(&self, _au: Vec<u8>) {}
 }
 
 use sha2::{Digest, Sha512};

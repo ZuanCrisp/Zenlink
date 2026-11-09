@@ -1,7 +1,7 @@
 //! Runs the receiver and counts what arrives; pair it with the backend's tests/airplay_sim.py:
 //!
 //!   cargo run -p zenlink-airplay --example airplay_rx -- 7101 25
-//!   .venv\Scripts\python apps\desktop\backend\tests\airplay_sim.py --port 7101 --seconds 10
+//!   .venv\Scripts\python apps\desktop\backend\tests\airplay_sim.py --port 7101 --seconds 10 --audio
 //!
 //! Args: port (default 7101), seconds to run (default 30), `adv` to advertise over mDNS.
 
@@ -15,6 +15,7 @@ struct Count {
     frames: AtomicUsize,
     bytes: AtomicUsize,
     keyframes: AtomicUsize,
+    audio: AtomicUsize,
     states: Mutex<Vec<State>>,
 }
 
@@ -32,6 +33,9 @@ impl Sink for Count {
         if au.get(4).is_some_and(|b| b & 0x1F == 5) {
             self.keyframes.fetch_add(1, Relaxed);
         }
+    }
+    fn audio(&self, _au: Vec<u8>) {
+        self.audio.fetch_add(1, Relaxed);
     }
 }
 
@@ -55,10 +59,11 @@ async fn main() {
     println!("listening on {}", s.port);
     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
     println!(
-        "frames {} ({} keyframes), {} bytes, states {:?}",
+        "frames {} ({} keyframes), {} bytes, {} sound units, states {:?}",
         sink.frames.load(Relaxed),
         sink.keyframes.load(Relaxed),
         sink.bytes.load(Relaxed),
+        sink.audio.load(Relaxed),
         sink.states.lock().unwrap()
     );
 }
