@@ -6,6 +6,13 @@ Full notes for each version are on the [Releases](https://github.com/zenvyzenshi
 
 ### Changed
 - **One program, no Python:** Apple Driver mode, ZenLink Studio (cable and Wi-Fi), AirPlay and the driver settings now run inside `ZenLink.exe` (Rust). The `ZenLinkService.exe` helper and its PyInstaller runtime are gone, so downloads are smaller and start faster. Running from source needs only Rust.
+- **Languages are files:** English is built in, Bahasa Indonesia is `lang/id.po`. A new language is one gettext `.po` file in a `lang` folder next to ZenLink.exe (or in `%LOCALAPPDATA%\ZenLink-Next\lang`); Settings lists it without a new build. See `ZenshiroDev/resources/lang/README.md`.
+- **Connect steps are numbered** (1, 2, 3) for iPhone / iPad and Android, so a first-time user can follow them.
+
+### Fixed
+- **AirPlay over Wi-Fi stuck on "connecting":** ZenLink now sees when Windows Firewall blocks it (for example after a dismissed Windows prompt on a Public network) and shows an "Allow ZenLink on the network" button.
+- The device menu highlights the iPad, not the iPhone, while the iPad is mirrored.
+- ZenLink Studio remembers the device model and shows short, plain error messages.
 
 ## 2.5.11
 
