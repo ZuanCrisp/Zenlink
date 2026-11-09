@@ -580,7 +580,17 @@ pub fn run(a: AppArgs) -> Result<(), slint::PlatformError> {
             },
         );
     }
-    ui.run()?;
+    ui.show()?;
+    // Centred on its monitor (winit would put it at the top-left corner).
+    if let Some((x, y, mw, mh)) = crate::monitor_rect(ui.window()) {
+        let s = ui.window().size();
+        ui.window().set_position(slint::PhysicalPosition::new(
+            x + (mw as i32 - s.width as i32) / 2,
+            y + (mh as i32 - s.height as i32) / 2,
+        ));
+    }
+    slint::run_event_loop()?;
+    let _ = ui.hide();
     stop_session();
     ST.with_borrow_mut(|s| s.view = None);
     if MERGE.load(std::sync::atomic::Ordering::Relaxed) {
