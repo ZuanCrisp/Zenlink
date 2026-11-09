@@ -514,6 +514,10 @@ fn tr_backend(ui: &AppWindow, en: &str) -> String {
         ("Wi-Fi is already set up.", "Wi-Fi sudah siap. Bisa tanpa kabel."),
         ("Wi-Fi needs Apple Driver mode.", "Wi-Fi butuh mode Apple Driver."),
         ("Stop casting first.", "Hentikan mirroring dulu."),
+        (
+            zenlink_apple::mirror::IN_CALL,
+            "iPhone/iPad sedang dalam panggilan (telepon atau video call). Akhiri panggilan dulu, lalu coba lagi.",
+        ),
         ("Choose a connection mode first.", "Pilih mode koneksi dulu."),
         ("Connect an iPhone or iPad with a USB cable.", "Colokkan iPhone atau iPad pakai kabel USB."),
         (

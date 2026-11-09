@@ -16,7 +16,9 @@
 param(
     [string]$Version = "",
     # Output folder. Default: $env:ZENLINK_OUT_DIR, else out\ in the repository root.
-    [string]$Out = ""
+    [string]$Out = "",
+    # Test build: Cargo profile "fast" (thin LTO, all cores). Larger exe; never for a public release.
+    [switch]$Fast
 )
 $ErrorActionPreference = "Stop"
 # This script lives in the repository root; all paths below are relative to it.
@@ -195,12 +197,13 @@ New-Item -ItemType Directory -Force $scrcpyDest | Out-Null
 Copy-Item "ZenshiroDev\resources\third_party\scrcpy\LICENSE" $scrcpyDest
 # Credits and licences of everything bundled (scrcpy, adb, FFmpeg, ...).
 Copy-Item "ZenshiroDev\docs\THIRD_PARTY.md" $app
-& cargo build --release --manifest-path Cargo.toml -p zenlink-app
+$cargoProfile = if ($Fast) { "fast" } else { "release" }
+& cargo build --profile $cargoProfile --manifest-path Cargo.toml -p zenlink-app
 if ($LASTEXITCODE) { throw "cargo failed" }
 # CARGO_TARGET_DIR lets the release build while a dev ZenLink.exe from
 # target\ is open (Windows locks a running exe).
 $rustTarget = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root "target" }
-$rustExe = Join-Path $rustTarget "release\ZenLink.exe"
+$rustExe = Join-Path $rustTarget "$cargoProfile\ZenLink.exe"
 Copy-Item $rustExe $app
 # The Rust Apple engine decodes the device's sound with the same zlaac.dll (src/aac.rs).
 Copy-Item "$root\apps\desktop\backend\zenlink\zlaac.dll" $app
@@ -229,10 +232,12 @@ Invoke-Sign @($service)
 # The Rust ZenLink.exe with that backend packed inside (unpacked to
 # %LOCALAPPDATA%\ZenLink-Next\service on start).
 $env:ZENLINK_BACKEND_EXE = $service
-& cargo build --release --manifest-path Cargo.toml -p zenlink-app --features embedded-backend --target-dir (Join-Path $build "rust-portable")
+# Kept outside outuild (emptied each run), so only the changed crates rebuild.
+$portableTarget = Join-Path $rustTarget "portable"
+& cargo build --profile $cargoProfile --manifest-path Cargo.toml -p zenlink-app --features embedded-backend --target-dir $portableTarget
 Remove-Item Env:ZENLINK_BACKEND_EXE
 if ($LASTEXITCODE) { throw "cargo (portable) failed" }
-Copy-Item (Join-Path $build "rust-portable\release\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
+Copy-Item (Join-Path $portableTarget "$cargoProfile\ZenLink.exe") (Join-Path $release "ZenLink-v$Version-Portable.exe")
 Invoke-Sign @(Join-Path $release "ZenLink-v$Version-Portable.exe")
 
 Write-Host "[4/4] Building the installer and the source zip..." -ForegroundColor Magenta

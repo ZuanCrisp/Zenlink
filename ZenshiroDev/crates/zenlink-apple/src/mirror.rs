@@ -115,6 +115,22 @@ fn extend_seq(highest: u32, seq: u16) -> u32 {
     }
 }
 
+/// The device refuses screen streaming during a call (CoreDevice 9022). The app translates it.
+pub const IN_CALL: &str = "The iPhone or iPad is in a phone or video call. End the call, then try again.";
+
+/// A short reason for a CoreDevice error, instead of its full dump (kilobytes of plist bytes).
+fn device_error(dump: &str) -> String {
+    if dump.contains("Integer(9022)") || dump.contains("call is currently in progress") {
+        return IN_CALL.into();
+    }
+    if let Some(i) = dump.find("NSLocalizedDescription") {
+        if let Some(text) = dump[i..].split("String(\\\"").nth(1).and_then(|t| t.split("\\\"").next()) {
+            return text.into();
+        }
+    }
+    dump.chars().take(200).collect()
+}
+
 fn new_id() -> String {
     uuid::Uuid::new_v4().to_string().to_uppercase()
 }
@@ -152,7 +168,9 @@ pub async fn stream(
     let session = uuid::Uuid::new_v4();
     let audio_offer = build_screen_audio_offer(&new_id(), &call_info)
         .map_err(|e| format!("audio offer: {e:?}"))?;
-    let audio_answer = client
+    // The device refuses the sound during a phone or VoIP call (CoreDevice 9022): mirror
+    // without sound instead of failing.
+    let rtcp = match client
         .start_media_stream(build_start_audio_parameters(
             &host,
             audio_udp.local_port(),
@@ -163,11 +181,19 @@ pub async fn stream(
             session,
         ))
         .await
-        .map_err(|e| format!("start audio: {e:?}"))?;
-    let rtcp = rtcp_of(&audio_answer);
-    if rtcp.is_none() {
-        log::warn!("sound: no RTCP target in the answer; the device may stop the sound after 20 s");
-    }
+    {
+        Ok(answer) => {
+            let rtcp = rtcp_of(&answer);
+            if rtcp.is_none() {
+                log::warn!("sound: no RTCP target in the answer; the device may stop the sound after 20 s");
+            }
+            rtcp
+        }
+        Err(e) => {
+            log::warn!("sound: not started, mirroring without sound: {}", device_error(&format!("{e:?}")));
+            None
+        }
+    };
     let video_offer =
         build_screen_video_offer(&new_id(), &call_info, uuid::Uuid::new_v4().as_u128() as u32)
             .map_err(|e| format!("video offer: {e:?}"))?;
@@ -183,7 +209,10 @@ pub async fn stream(
             session,
         ))
         .await
-        .map_err(|e| format!("start video: {e:?}"))?;
+        .map_err(|e| match device_error(&format!("{e:?}")) {
+            m if m == IN_CALL => m,
+            m => format!("start video: {m}"),
+        })?;
     let video_rtcp = rtcp_of(&video_answer);
     if video_rtcp.is_none() {
         log::warn!("screen: no RTCP target in the answer; keyframes cannot be requested");
@@ -301,6 +330,15 @@ pub async fn stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_errors_are_short() {
+        let call = r#"CoreDevice(DeviceError("Dictionary({\"code\": Integer(9022), \"userInfo\": Dictionary({\"NSLocalizedDescription\": String(\"A phone or VoIP call is currently in progress on the device.\")})})"))"#;
+        assert_eq!(device_error(call), IN_CALL);
+        let other = r#"Dictionary({\"code\": Integer(1), \"userInfo\": Dictionary({\"NSLocalizedDescription\": String(\"Busy.\")})})"#;
+        assert_eq!(device_error(other), "Busy.");
+        assert_eq!(device_error(&"x".repeat(500)).len(), 200);
+    }
 
     fn p(seq: u16) -> Held {
         (seq, 0, vec![], false)

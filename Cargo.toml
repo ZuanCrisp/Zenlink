@@ -32,6 +32,13 @@ panic = "abort"
 strip = true
 
 # Test builds run like the real app: unoptimized pixel and packet loops cost a whole core.
+# Test builds (build_portable_release.ps1 -Fast): all cores, thin LTO. Release stays strict.
+[profile.fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+incremental = true
+
 [profile.dev]
 opt-level = 1
 
