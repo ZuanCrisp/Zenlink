@@ -48,6 +48,7 @@ export struct Prefs {
     close-action: string,
     auto-unlock: bool,
     unlock-on-lock: bool, // unlock again when the device locks while mirroring
+    unlock-limit: bool, // at most 3 automatic unlocks in 30 s
     on-top: bool,
     stats: bool,
     dots: bool,             // animated dot background
@@ -2323,6 +2324,11 @@ component SettingsPanel inherits Glass {
                         label: I18n.t("Buka kunci lagi saat layar terkunci", "Unlock again when the screen locks");
                         hint: I18n.t("Mode Apple Driver, pakai kode sandi tersimpan", "Apple Driver mode, uses the saved passcode");
                         Toggle { checked: prefs.unlock-on-lock; toggled(v) => { root.prefs.unlock-on-lock = v; root.changed(root.prefs); } }
+                    }
+                    if prefs.unlock-on-lock: Row {
+                        label: I18n.t("Batasi buka kunci otomatis", "Limit automatic unlocks");
+                        hint: I18n.t("Paling banyak 3 kali dalam 30 detik, agar kode sandi salah tidak berulang", "At most 3 times in 30 seconds, so a wrong passcode cannot repeat");
+                        Toggle { checked: prefs.unlock-limit; toggled(v) => { root.prefs.unlock-limit = v; root.changed(root.prefs); } }
                     }
                 }
 

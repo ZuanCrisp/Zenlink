@@ -77,16 +77,39 @@ static WIRELESS: AtomicBool = AtomicBool::new(false);
 static HYBRID: AtomicBool = AtomicBool::new(false);
 /// Settings > unlock the device again when it locks while mirroring.
 static UNLOCK_ON_LOCK: AtomicBool = AtomicBool::new(false);
+/// Settings > limit automatic unlocks (3 in 30 s).
+static UNLOCK_LIMIT: AtomicBool = AtomicBool::new(true);
 
-pub fn set_unlock_on_lock(on: bool) {
+pub fn set_unlock_on_lock(on: bool, limit: bool) {
     UNLOCK_ON_LOCK.store(on, Relaxed);
+    UNLOCK_LIMIT.store(limit, Relaxed);
 }
 
 /// What the session's HID task runs, in order.
 enum Input {
     Hid(hid::Cmd),
-    /// SpringBoard reported a lock.
-    Locked,
+    /// SpringBoard reported a lock, at this time.
+    Locked(Instant),
+}
+
+/// Whether a lock reported `at` gets an automatic unlock. Locks that arrived while the last
+/// unlock ran, or within 1 s after it (SpringBoard reports the lock it just woke from late),
+/// are skipped; with `limit`, at most 3 unlocks in 30 s, so a wrong passcode cannot loop.
+fn relock_allowed(
+    at: Instant,
+    unlocked_at: Option<Instant>,
+    recent: &mut Vec<Instant>,
+    limit: bool,
+) -> bool {
+    if unlocked_at.is_some_and(|u| at < u + Duration::from_secs(1)) {
+        return false;
+    }
+    recent.retain(|t| at.duration_since(*t) < Duration::from_secs(30));
+    if limit && recent.len() >= 3 {
+        return false;
+    }
+    recent.push(at);
+    true
 }
 
 /// Apple Driver mode and the Rust engine (not Hybrid) serves it: input and video go here.
@@ -502,7 +525,7 @@ impl Engine {
         *self.input.lock().unwrap() = Some(itx.clone());
         let watch_lock = zenlink_apple::watch::lock(l.adapter.clone(), l.rsd.clone(), move || {
             log::info!("apple: device locked");
-            let _ = itx.send(Input::Locked);
+            let _ = itx.send(Input::Locked(Instant::now()));
         });
         let ipad = self
             .info
@@ -513,19 +536,22 @@ impl Engine {
         let mut hid = hid::Hid::new(l.adapter.clone(), l.rsd.clone(), ipad);
         let input = async {
             let mut unlocked_at: Option<Instant> = None;
+            let mut recent = Vec::new();
             while let Some(i) = irx.recv().await {
                 let cmd = match i {
                     Input::Hid(hid::Cmd::Action { name, .. }) if name == "wake" => {
                         hid::Cmd::Action { name, text: passcode() }
                     }
                     Input::Hid(c) => c,
-                    // Wake and type the saved passcode. Locks while an unlock runs, or within
-                    // 3 s after it, are ignored, so a wrong passcode cannot loop.
-                    Input::Locked => {
+                    // Wake and type the saved passcode.
+                    Input::Locked(at) => {
                         if !UNLOCK_ON_LOCK.load(Relaxed)
                             || self.state.lock().unwrap().phase != "streaming"
-                            || unlocked_at.is_some_and(|t| t.elapsed() < Duration::from_secs(3))
                         {
+                            continue;
+                        }
+                        if !relock_allowed(at, unlocked_at, &mut recent, UNLOCK_LIMIT.load(Relaxed)) {
+                            log::info!("apple: lock not unlocked (just unlocked, or 3 in 30 s)");
                             continue;
                         }
                         tokio::time::sleep(Duration::from_millis(800)).await; // let the lock finish
@@ -726,6 +752,28 @@ mod tests {
         assert!(!key);
         assert!(codec_info(&nal(1, &[1, 2])).is_none());
         assert!(frame(&nal(32, &[1, 2])).is_none());
+    }
+
+    #[test]
+    fn relock_skips_its_own_echo_and_stops_a_loop() {
+        let t0 = Instant::now();
+        let s = |n: u64| t0 + Duration::from_millis(n);
+        let mut recent = Vec::new();
+        assert!(relock_allowed(s(0), None, &mut recent, true));
+        // The user locks again 1.2 s after the unlock finished (the bug report): unlock.
+        assert!(relock_allowed(s(4_000), Some(s(2_800)), &mut recent, true));
+        // Reported during the unlock, or right after it: skip.
+        assert!(!relock_allowed(s(6_000), Some(s(6_500)), &mut recent, true));
+        assert!(!relock_allowed(s(6_508), Some(s(6_500)), &mut recent, true));
+        assert!(relock_allowed(s(9_000), Some(s(6_500)), &mut recent, true));
+        // A 4th within 30 s: stop.
+        assert!(!relock_allowed(s(12_000), Some(s(10_000)), &mut recent, true));
+        assert!(relock_allowed(s(40_000), Some(s(10_000)), &mut recent, true));
+        // Limit off: no cap.
+        let mut recent = Vec::new();
+        for n in 0..6 {
+            assert!(relock_allowed(s(n * 2_000), None, &mut recent, false));
+        }
     }
 
     #[test]

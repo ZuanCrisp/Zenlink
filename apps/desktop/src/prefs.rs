@@ -138,6 +138,7 @@ pub fn defaults() -> Prefs {
         close_action: "ask".into(),
         auto_unlock: false,
         unlock_on_lock: false,
+        unlock_limit: true,
         on_top: false,
         stats: false,
         dots: true,
@@ -239,6 +240,7 @@ pub fn from_value(v: &Value) -> Prefs {
     s("closeAction", &mut p.close_action, &["ask", "tray", "quit"]);
     b("autoUnlock", &mut p.auto_unlock);
     b("unlockOnLock", &mut p.unlock_on_lock);
+    b("unlockLimit", &mut p.unlock_limit);
     b("onTop", &mut p.on_top);
     b("stats", &mut p.stats);
     b("dots", &mut p.dots);
@@ -312,7 +314,7 @@ pub fn to_value(p: &Prefs) -> Value {
         "cropL": p.crop_l, "cropT": p.crop_t, "cropR": p.crop_r, "cropB": p.crop_b,
         "audioOut": p.audio_out.as_str(), "volume": p.volume, "lipSync": p.lip_sync,
         "audioBuffer": p.audio_buffer.as_str(), "touch": p.touch, "keyboard": p.keyboard,
-        "gestures": p.gestures, "startWithWindows": p.start_with_windows, "closeAction": p.close_action.as_str(), "closeToTray": p.close_action == "tray", "autoUnlock": p.auto_unlock, "unlockOnLock": p.unlock_on_lock,
+        "gestures": p.gestures, "startWithWindows": p.start_with_windows, "closeAction": p.close_action.as_str(), "closeToTray": p.close_action == "tray", "autoUnlock": p.auto_unlock, "unlockOnLock": p.unlock_on_lock, "unlockLimit": p.unlock_limit,
         "onTop": p.on_top, "stats": p.stats, "dots": p.dots,
         "platform": p.platform.as_str(), "rememberPlatform": p.remember_platform,
         "androidMaxSize": p.android_max_size.as_str(), "androidFps": p.android_fps.as_str(),

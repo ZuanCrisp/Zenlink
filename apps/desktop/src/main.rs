@@ -481,7 +481,7 @@ fn push_audio(api: &Api, p: &Prefs, muted: bool) {
     let to_pc = p.audio_out.as_str() != "device";
     let body = json!({ "enabled": to_pc, "route": p.audio_out.as_str(), "volume": p.volume / 100.0, "muted": muted });
     android::set_audio(to_pc, p.volume / 100.0, muted);
-    apple::set_unlock_on_lock(p.unlock_on_lock);
+    apple::set_unlock_on_lock(p.unlock_on_lock, p.unlock_limit);
     std::thread::spawn(move || api.audio(&body));
 }
 
