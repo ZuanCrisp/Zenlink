@@ -24,6 +24,8 @@ static SHARED: Mutex<Inner> = Mutex::new(Inner::new());
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Stop pressed: stay off until Start (castmanager `_airplay_paused`).
 static PAUSED: AtomicBool = AtomicBool::new(false);
+/// The receiver serves an Apple Driver Hybrid session, not Studio.
+static HYBRID: AtomicBool = AtomicBool::new(false);
 
 pub fn enabled() -> bool {
     std::env::var("ZL_AIRPLAY").is_ok_and(|v| v == "rust")
@@ -204,9 +206,38 @@ fn stop_server() {
     *SHARED.lock().unwrap() = Inner::new();
 }
 
+/// iOS 17-26 in Apple Driver mode: the picture and sound over AirPlay while the Apple session
+/// (apple.rs) holds the touch link. Dropping it stops the receiver.
+pub struct Hybrid;
+
+impl Hybrid {
+    /// Called from the session's own runtime: the server starts on a plain thread.
+    pub fn start() -> Result<Self, String> {
+        stop_server();
+        std::thread::spawn(start_server).join().map_err(|_| "AirPlay start panicked".to_string())??;
+        HYBRID.store(true, Relaxed);
+        Ok(Self)
+    }
+}
+
+impl Drop for Hybrid {
+    fn drop(&mut self) {
+        HYBRID.store(false, Relaxed);
+        stop_server();
+    }
+}
+
 /// Called with each backend state: runs the receiver while Studio Wi-Fi is the mode and lays
-/// its state over the backend's.
+/// its state over the backend's (or over the Apple session's, in Hybrid).
 pub fn overlay(st: &mut Value) {
+    if HYBRID.load(Relaxed) {
+        let g = SHARED.lock().unwrap();
+        if st.get("phase").and_then(Value::as_str) != Some("error") {
+            st["phase"] = g.phase.into();
+            st["detail"] = g.detail.clone().into();
+        }
+        return;
+    }
     let conn = |k: &str| st.pointer(&format!("/connection/{k}")).and_then(Value::as_str);
     let wanted = enabled() && conn("active") == Some("usbdirect") && conn("link") == Some("wireless");
     if !wanted && WANTED.load(Relaxed) {
@@ -258,8 +289,8 @@ pub fn start() -> bool {
 
 /// Stop button. `false`: the receiver is not running here.
 pub fn stop() -> bool {
-    if !running() {
-        return false;
+    if !running() || HYBRID.load(Relaxed) {
+        return false; // Hybrid: the Apple session's Stop ends the receiver too
     }
     PAUSED.store(true, Relaxed);
     stop_server();

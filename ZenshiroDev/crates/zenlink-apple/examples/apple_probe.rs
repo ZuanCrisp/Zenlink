@@ -108,6 +108,7 @@ async fn run(a: Args) -> Result<(), String> {
     mirror::stream(
         &mut l,
         &key,
+        false,
         |au| {
         first.get_or_insert_with(Instant::now);
         frames += 1;

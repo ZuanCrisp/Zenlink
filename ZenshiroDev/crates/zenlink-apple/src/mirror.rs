@@ -123,9 +123,12 @@ fn new_id() -> String {
 /// one access unit in Annex B (the first ones carry VPS/SPS/PPS); each call of `on_audio` one
 /// AAC-ELD access unit (see [`AUDIO_ASC`]). While `key` is set, a keyframe request (RTCP PLI +
 /// FIR) goes to the device every 200 ms; the caller clears it when a keyframe arrives.
+/// `gate_only`: iOS 17-26 accept the stream but send no picture; it is held open only so the
+/// HID services take input (Hybrid), so silence does not end it.
 pub async fn stream(
     link: &mut Link,
     key: &AtomicBool,
+    gate_only: bool,
     mut on_frame: impl FnMut(Vec<u8>) -> bool,
     mut on_audio: impl FnMut(&[u8]),
 ) -> Result<(), String> {
@@ -274,7 +277,7 @@ pub async fn stream(
                 }
             }
             _ = tick.tick() => {
-                if video_at.elapsed() > SILENCE {
+                if !gate_only && video_at.elapsed() > SILENCE {
                     break Err("the device stopped sending the screen".into());
                 }
                 if let Some(r) = rtcp {

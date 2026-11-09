@@ -50,6 +50,8 @@ struct State {
     device: Option<(String, bool)>,
     /// Clockwise degrees that show the picture upright (SpringBoard orientation).
     rotation: u32,
+    /// iOS 17-26: the picture comes over AirPlay (airplay.rs), this session only does input.
+    hybrid: bool,
 }
 
 /// One device's session. Several run at once; only the one on screen streams its picture,
@@ -650,9 +652,14 @@ impl Engine {
             "error": s.error,
             "devices": devices,
             "device": s.device.as_ref().map(|(n, w)| json!({ "name": n, "wifi": w })),
-            "capture": live.then(|| json!({ "backend": "apple", "codec": "HEVC",
-                                            "source": "CoreDevice DisplayService" })),
-            "rotation": s.rotation,
+            "capture": live.then(|| if s.hybrid {
+                json!({ "backend": "hybrid", "codec": "H.264",
+                        "source": "AirPlay (Wi-Fi) + touch over the Apple driver" })
+            } else {
+                json!({ "backend": "apple", "codec": "HEVC", "source": "CoreDevice DisplayService" })
+            }),
+            // Hybrid: AirPlay's picture is upright already.
+            "rotation": if s.hybrid { 0 } else { s.rotation },
         });
         if let (Some(_), Some(u)) = (&shown, self.view.lock().unwrap().as_ref()) {
             v["selected"] = u.as_str().into();
@@ -689,8 +696,9 @@ impl Engine {
             return true;
         };
         let version = self.info.lock().unwrap().get(&dev.udid).map(|i| i.version.clone());
-        if version.is_some_and(|v| hybrid_version(&v)) {
-            return false;
+        let hybrid = version.is_some_and(|v| hybrid_version(&v));
+        if hybrid && !crate::airplay::enabled() {
+            return false; // ZL_ENGINE=python: the backend runs Hybrid
         }
         let name = self
             .entry(&dev)
@@ -701,6 +709,7 @@ impl Engine {
         let sess = Arc::new(Sess {
             state: Mutex::new(State {
                 device: Some((name, dev.addr.is_some())),
+                hybrid,
                 ..State::default()
             }),
             stop: AtomicBool::new(false),
@@ -754,6 +763,21 @@ impl Engine {
     }
 
     async fn session(&self, sess: &Sess, dev: &Dev) -> Result<(), String> {
+        if !sess.state.lock().unwrap().hybrid {
+            return self.session_inner(sess, dev, false).await;
+        }
+        let _picture = crate::airplay::Hybrid::start()?;
+        if let Err(e) = self.session_inner(sess, dev, true).await {
+            // hybrid.py: the AirPlay picture keeps running without touch control.
+            log::warn!("hybrid: control path failed: {e}; picture only");
+            while !sess.stop.load(Relaxed) {
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        }
+        Ok(())
+    }
+
+    async fn session_inner(&self, sess: &Sess, dev: &Dev, hybrid: bool) -> Result<(), String> {
         let stop = &sess.stop;
         let version = self
             .info
@@ -827,6 +851,12 @@ impl Engine {
                     Input::Hid(hid::Cmd::Action { name, .. }) if name == "wake" => {
                         hid::Cmd::Action { name, text: passcode() }
                     }
+                    // AirPlay shows the screen already turned: map back to the portrait touch space.
+                    Input::Hid(hid::Cmd::Touch { contact, x, y }) if hybrid => {
+                        let rot = sess.state.lock().unwrap().rotation;
+                        let (x, y) = zenlink_core::api::device_point(x as f32 / 65535.0, y as f32 / 65535.0, rot);
+                        hid::Cmd::Touch { contact, x, y }
+                    }
                     Input::Hid(c) => c,
                     Input::Volume => {
                         let down = AUDIO_TO_PC.load(Relaxed);
@@ -884,6 +914,7 @@ impl Engine {
                 mirror::stream(
                     &mut l,
                     &sess.key,
+                    hybrid,
                     |au| {
                         if stop.load(Relaxed) || restart.get() {
                             return false;
