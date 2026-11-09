@@ -25,18 +25,20 @@ unsafe impl Send for Aac {}
 
 /// zlaac.dll next to ZenLink.exe (packaged), else in a source checkout's backend folder.
 fn find_dll() -> Option<PathBuf> {
+    find_native("", "zlaac.dll").or_else(unpack_embedded)
+}
+
+/// A native DLL next to ZenLink.exe, else in a source checkout's backend/zenlink/`sub`.
+pub fn find_native(sub: &str, name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let source = std::env::var_os("ZENLINK_SOURCE")
         .filter(|s| !s.is_empty())
         .map(PathBuf::from);
     let mut dirs: Vec<PathBuf> = exe.parent().map(Path::to_path_buf).into_iter().collect();
     dirs.extend(source.into_iter().chain(exe.ancestors().skip(1).map(Path::to_path_buf)).map(|d| {
-        d.join("apps").join("desktop").join("backend").join("zenlink")
+        d.join("apps").join("desktop").join("backend").join("zenlink").join(sub)
     }));
-    dirs.into_iter()
-        .map(|d| d.join("zlaac.dll"))
-        .find(|p| p.exists())
-        .or_else(unpack_embedded)
+    dirs.into_iter().map(|d| d.join(name)).find(|p| p.exists())
 }
 
 /// Portable.exe: zlaac.dll is packed in, unpacked to %LOCALAPPDATA%\ZenLink-Next\native once

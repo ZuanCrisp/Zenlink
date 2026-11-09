@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 import json
+import os
 import logging
 import threading
 import time
@@ -90,6 +91,11 @@ def _receiver_name() -> str:
     from zenlink.airplay.receiver import receiver_name
 
     return receiver_name()
+
+
+def _rust_airplay() -> bool:
+    """ZL_AIRPLAY=rust: the window's Rust receiver serves Studio Wi-Fi (ROADMAP M3)."""
+    return os.environ.get("ZL_AIRPLAY") == "rust"
 
 
 class CastManager:
@@ -238,7 +244,7 @@ class CastManager:
         the device can pick ZenLinkStudio in Screen Mirroring whenever it wants.
         Pressing Stop pauses this until Start is pressed again."""
         if (self.connection.active == "usbdirect" and self.connection.link == "wireless"
-                and self._session is None and not self._airplay_paused
+                and not _rust_airplay() and self._session is None and not self._airplay_paused
                 and self.state.get("phase") == "idle"):  # after an error, wait for Start
             self.start({})
 
@@ -378,6 +384,8 @@ class CastManager:
                                 "family": target.get("family")}
         self.state["rotation"] = None
 
+        if mode == "usbdirect" and target.get("airplay") and _rust_airplay():
+            return self.snapshot()  # the window runs the receiver (airplay.rs)
         if mode == "usbdirect" and target.get("airplay"):
             from zenlink.airplay.session import AirPlaySession
             from zenlink.usbdirect.hub import MediaHub

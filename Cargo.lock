@@ -6563,6 +6563,7 @@ dependencies = [
  "slint-build",
  "tokio",
  "windows",
+ "zenlink-airplay",
  "zenlink-android",
  "zenlink-apple",
  "zenlink-audio",

@@ -4,6 +4,7 @@
 mod android;
 mod apple;
 mod aac;
+mod airplay;
 mod appwin;
 mod backdrop;
 mod devprofiles;
@@ -660,12 +661,15 @@ fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
 
 /// Apple Driver mode runs in Rust (apple.rs); ZenLink Studio still in the backend.
 fn cast_start(api: &Api) {
-    if !apple::start() {
+    if !airplay::start() && !apple::start() {
         api.start_cast();
     }
 }
 
 fn cast_stop(api: &Api) {
+    if airplay::stop() {
+        return;
+    }
     if apple::in_use() {
         apple::engine().stop();
     } else {
@@ -674,7 +678,9 @@ fn cast_stop(api: &Api) {
 }
 
 fn start_apple_video(v: &mut VideoView, api: &Api) {
-    if apple::in_use() {
+    if airplay::running() {
+        v.start_source(Box::new(airplay::AirSource));
+    } else if apple::in_use() {
         v.start_source(apple::engine().source());
     } else {
         v.start(api.clone());
@@ -3821,6 +3827,7 @@ fn main() -> Result<(), slint::PlatformError> {
             loop {
                 if let Some(mut st) = api.state() {
                     apple::overlay(&mut st);
+                    airplay::overlay(&mut st);
                     let w = weak.clone();
                     let a = api.clone();
                     if slint::invoke_from_event_loop(move || {
