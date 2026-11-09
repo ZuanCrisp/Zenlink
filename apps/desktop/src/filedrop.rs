@@ -255,15 +255,13 @@ fn install_ios(ui: &AppWindow) {
 }
 
 /// iPhone/iPad (Apple Driver mode): the files go into the Documents folder of an app with
-/// File Sharing (zenlink_apple::files; `ZL_ENGINE=python`: the backend's files.py).
+/// File Sharing (zenlink_apple::files).
 mod ios {
     use std::cell::RefCell;
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use serde_json::{json, Value};
     use slint::ComponentHandle;
-    use zenlink_core::api::Api;
 
     use super::pill;
     use crate::{app_letters, app_tint, show_toast, tr_ui, AppRow, AppWindow};
@@ -275,80 +273,29 @@ mod ios {
         static APPS: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
     }
 
-    fn msg(v: &Value) -> String {
-        v.get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string()
-    }
-
     /// The File Sharing apps: (bundle id, name). `Err(None)`: no message to show.
     fn list_apps() -> Result<Vec<(String, String)>, Option<String>> {
-        if !crate::apple::python_engine() {
-            let udid = crate::apple::file_device().ok_or(None)?;
-            return crate::apple::block_on(zenlink_apple::files::sharing_apps(&udid)).map_err(|e| {
-                log::warn!("files: app list failed: {e}");
-                None
-            });
-        }
-        let r = Api::new().get_slow("/api/files/apps", 30);
-        if r.as_ref().and_then(|v| v.get("ok")).and_then(Value::as_bool) != Some(true) {
-            return Err(r.as_ref().map(msg).filter(|m| !m.is_empty()));
-        }
-        Ok(r.as_ref()
-            .and_then(|v| v.get("apps"))
-            .and_then(Value::as_array)
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| {
-                        Some((
-                            x.get("bundle")?.as_str()?.to_string(),
-                            x.get("name")?.as_str()?.to_string(),
-                        ))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default())
+        let udid = crate::apple::file_device().ok_or(None)?;
+        crate::apple::block_on(zenlink_apple::files::sharing_apps(&udid)).map_err(|e| {
+            log::warn!("files: app list failed: {e}");
+            None
+        })
     }
 
     /// Sends one file; `progress` gets 0..1.
-    fn send(path: &std::path::Path, bundle: &str, app: &str, progress: impl Fn(f32)) -> Result<(), String> {
-        if !crate::apple::python_engine() {
-            let udid = crate::apple::file_device().ok_or("no device")?;
-            let t = std::time::Instant::now();
-            let mut last = t;
-            let saved = crate::apple::block_on(zenlink_apple::files::send(&udid, bundle, path, |sent, total| {
-                if last.elapsed() >= Duration::from_millis(200) || sent == total {
-                    last = std::time::Instant::now();
-                    progress(if total > 0 { sent as f32 / total as f32 } else { 0.0 });
-                }
-            }))
-            .inspect_err(|e| log::warn!("files: sending {} to {bundle} failed: {e}", path.display()))?;
-            log::info!("files: {} to {bundle}/Documents/{saved} in {:.1} s", path.display(), t.elapsed().as_secs_f32());
-            return Ok(());
-        }
-        let api = Api::new();
-        let r = api.post_slow(
-            "/api/files/send",
-            &json!({"path": path.to_string_lossy(), "bundle": bundle, "app": app}),
-            15,
-        );
-        if r.as_ref().and_then(|v| v.get("ok")).and_then(Value::as_bool) != Some(true) {
-            return Err(r.as_ref().map(msg).unwrap_or_else(|| "backend".into()));
-        }
-        loop {
-            std::thread::sleep(Duration::from_millis(200));
-            let Some(j) = api.get("/api/files/job") else {
-                continue;
-            };
-            let done = j.get("sent").and_then(Value::as_u64).unwrap_or(0);
-            let size = j.get("total").and_then(Value::as_u64).unwrap_or(0);
-            match j.get("state").and_then(Value::as_str).unwrap_or("") {
-                "running" => progress(if size > 0 { done as f32 / size as f32 } else { 0.0 }),
-                "done" => return Ok(()),
-                _ => return Err(msg(&j)),
+    fn send(path: &std::path::Path, bundle: &str, progress: impl Fn(f32)) -> Result<(), String> {
+        let udid = crate::apple::file_device().ok_or("no device")?;
+        let t = std::time::Instant::now();
+        let mut last = t;
+        let saved = crate::apple::block_on(zenlink_apple::files::send(&udid, bundle, path, |sent, total| {
+            if last.elapsed() >= Duration::from_millis(200) || sent == total {
+                last = std::time::Instant::now();
+                progress(if total > 0 { sent as f32 / total as f32 } else { 0.0 });
             }
-        }
+        }))
+        .inspect_err(|e| log::warn!("files: sending {} to {bundle} failed: {e}", path.display()))?;
+        log::info!("files: {} to {bundle}/Documents/{saved} in {:.1} s", path.display(), t.elapsed().as_secs_f32());
+        Ok(())
     }
 
     fn set_title(ui: &AppWindow) {
@@ -484,7 +431,7 @@ mod ios {
                     "Mengirim {name} ke {app} ({k}/{total})…|Sending {name} to {app} ({k}/{total})…"
                 );
                 pill(&weak, &label, 0.0);
-                match send(path, &bundle, &app, |p| pill(&weak, &label, p)) {
+                match send(path, &bundle, |p| pill(&weak, &label, p)) {
                     Ok(()) => sent += 1,
                     Err(e) => last_error = e,
                 }

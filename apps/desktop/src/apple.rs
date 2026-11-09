@@ -102,6 +102,8 @@ pub struct Engine {
     watching: AtomicBool,
     /// Wi-Fi devices whose names were asked for this run (one tunnel each, once).
     asked: Mutex<HashSet<String>>,
+    /// Automatic Wi-Fi setup: when each cable device was last tried.
+    wifi_tried: Mutex<HashMap<String, Instant>>,
 }
 
 static ENGINE: OnceLock<Arc<Engine>> = OnceLock::new();
@@ -111,8 +113,6 @@ static IN_USE: AtomicBool = AtomicBool::new(false);
 /// From the backend's state: the device picked in the list, and Wi-Fi (wireless) vs USB.
 static PICKED: Mutex<Option<String>> = Mutex::new(None);
 static WIRELESS: AtomicBool = AtomicBool::new(false);
-/// The last Start went to the backend's Hybrid session (iOS 17-26).
-static HYBRID: AtomicBool = AtomicBool::new(false);
 /// Settings > unlock the device again when it locks while mirroring.
 static UNLOCK_ON_LOCK: AtomicBool = AtomicBool::new(false);
 /// Settings > limit automatic unlocks (3 in 30 s).
@@ -208,15 +208,11 @@ fn relock_allowed(
     true
 }
 
-/// Apple Driver mode and the Rust engine (not Hybrid) serves it: input and video go here.
+/// Apple Driver mode: input and video go to this engine.
 pub fn in_use() -> bool {
-    IN_USE.load(Relaxed) && !HYBRID.load(Relaxed)
+    IN_USE.load(Relaxed)
 }
 
-/// `ZL_ENGINE=python`: the parts already ported to Rust go back to the backend (until M5).
-pub fn python_engine() -> bool {
-    std::env::var("ZL_ENGINE").is_ok_and(|v| v == "python")
-}
 
 /// The device to send files to: the one on screen, else the picked one, else the first trusted.
 pub fn file_device() -> Option<String> {
@@ -297,7 +293,7 @@ pub fn overlay(st: &mut Value) {
     if apple && changed && picked.is_some() {
         engine().show(picked); // a pick in the list switches the screen to that device
     }
-    if !apple || HYBRID.load(Relaxed) {
+    if !apple {
         return;
     }
     if let (Some(dst), Value::Object(src)) = (st.as_object_mut(), engine().snapshot()) {
@@ -305,20 +301,17 @@ pub fn overlay(st: &mut Value) {
     }
 }
 
-/// Start in the Apple workspace (the window's Start button). `false`: the backend starts it
-/// (not Apple Driver mode, or an iOS 17-26 device for Hybrid).
+/// Start in the Apple workspace (the window's Start button). `false`: not Apple Driver mode.
 pub fn start() -> bool {
-    HYBRID.store(false, Relaxed);
     if !IN_USE.load(Relaxed) {
         return false;
     }
     let picked = PICKED.lock().unwrap().clone();
-    let handled = engine().start(picked, WIRELESS.load(Relaxed));
-    HYBRID.store(!handled, Relaxed);
-    handled
+    engine().start(picked, WIRELESS.load(Relaxed));
+    true
 }
 
-/// iOS major version 17-26: no screen service, Hybrid runs in the backend.
+/// iOS major version 17-26: no screen service, so Hybrid (picture over AirPlay).
 fn hybrid_version(version: &str) -> bool {
     version
         .split('.')
@@ -344,6 +337,7 @@ pub fn engine() -> &'static Arc<Engine> {
             frames: Mutex::new(None),
             watching: AtomicBool::new(false),
             asked: Mutex::new(HashSet::new()),
+            wifi_tried: Mutex::new(HashMap::new()),
         })
     })
 }
@@ -537,9 +531,36 @@ impl Engine {
                 seen: Instant::now(),
             });
         }
+        self.auto_wifi(&usb);
         let mut devs = self.devices.lock().unwrap();
         devs.retain(|d| d.addr.is_some());
         devs.extend(usb);
+    }
+
+    /// Like PhoneLink V1: a trusted device on the cable gets Wi-Fi set up once (at most one try
+    /// a minute, never while casting), so it can later cast without the cable.
+    fn auto_wifi(&self, usb: &[Dev]) {
+        if self.sessions.lock().unwrap().values().any(|s| s.live()) {
+            return;
+        }
+        let Some(dir) = wifi::record_dir() else {
+            return;
+        };
+        let mut tried = self.wifi_tried.lock().unwrap();
+        for d in usb.iter().filter(|d| d.paired) {
+            let due = tried.get(&d.udid).is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
+            if !due || dir.join(format!("remote_{}.plist", d.udid)).is_file() {
+                continue;
+            }
+            tried.insert(d.udid.clone(), Instant::now());
+            let udid = d.udid.clone();
+            tokio::spawn(async move {
+                match wifi::prepare(&udid).await {
+                    Ok(paired) => log::info!("wifi: auto setup of {udid} done (RemotePairing record: {paired})"),
+                    Err(e) => log::warn!("wifi: auto setup of {udid} failed: {e}"),
+                }
+            });
+        }
     }
 
     async fn refresh_wifi(self: &Arc<Self>) {
@@ -669,7 +690,7 @@ impl Engine {
 
     /// Starts the picked device (when listed), else the first ready one; USB before Wi-Fi
     /// unless `wireless`. `false`: the device runs iOS 17-26, left to the backend's Hybrid.
-    pub fn start(self: &Arc<Self>, picked: Option<String>, wireless: bool) -> bool {
+    pub fn start(self: &Arc<Self>, picked: Option<String>, wireless: bool) {
         *self.fail.lock().unwrap() = None;
         let devs = self.devices.lock().unwrap().clone();
         let ready = |d: &&Dev| d.paired;
@@ -693,13 +714,10 @@ impl Engine {
             };
             *self.fail.lock().unwrap() = Some(msg.into());
             self.show(None);
-            return true;
+            return;
         };
         let version = self.info.lock().unwrap().get(&dev.udid).map(|i| i.version.clone());
         let hybrid = version.is_some_and(|v| hybrid_version(&v));
-        if hybrid && !crate::airplay::enabled() {
-            return false; // ZL_ENGINE=python: the backend runs Hybrid
-        }
         let name = self
             .entry(&dev)
             .get("deviceName")
@@ -759,7 +777,6 @@ impl Engine {
         if let Err(e) = spawned {
             *self.fail.lock().unwrap() = Some(format!("thread: {e}"));
         }
-        true
     }
 
     async fn session(&self, sess: &Sess, dev: &Dev) -> Result<(), String> {

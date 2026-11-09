@@ -41,10 +41,9 @@ class ZlaacTests(unittest.TestCase):
 
     def test_fixture_configs_match_apple(self):
         from zenlink.aac import read_zlau
-        from zenlink.airplay.receiver import AAC_ELD_44K
 
         asc, rate, aus = read_zlau((FIX / "eld_44100.zlau").read_bytes())
-        self.assertEqual((asc, rate), (AAC_ELD_44K, 44100))
+        self.assertEqual((asc, rate), (bytes([0xF8, 0xE8, 0x50, 0x00]), 44100))
         self.assertGreater(len(aus), 150)
 
     def test_output_is_pinned(self):
@@ -124,9 +123,6 @@ class ZlaacTests(unittest.TestCase):
         d.close()
         d.close()
 
-    def test_wrappers_use_zlaac(self):
-        from zenlink.airplay.receiver import _AudioDecoder
-        self.assertTrue(_AudioDecoder(bytes(16), bytes(16), 8)._ok)
 
 
 if __name__ == "__main__":

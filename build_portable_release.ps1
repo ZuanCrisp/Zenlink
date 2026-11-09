@@ -70,26 +70,12 @@ $pyiArgs = @(
     "--add-data", "$root\ZenshiroDev\resources\assets${sep}assets",
     "--add-data", "$root\ZenshiroDev\tooling\windows\tools${sep}tools",
     "--add-data", "$root\ZenshiroDev\resources\windows\drivers${sep}drivers",
-    # Not --collect-all: that also copies every .py source next to the
-    # bytecode already in the PYZ (529 files, 6.3 MB).
-    "--collect-submodules", "pymobiledevice3", "--collect-data", "pymobiledevice3", "--collect-binaries", "pymobiledevice3",
-    # Package metadata (dist-info) of pymobiledevice3 and everything it
-    # depends on: some read their own version at import (pyimg4 does), and
-    # without it the developer image / tunnel import fails in the exe.
-    "--recursive-copy-metadata", "pymobiledevice3",
-    "--collect-submodules", "pmd_pytcp", "--collect-data", "pmd_pytcp", "--collect-binaries", "pmd_pytcp",
-    "--collect-submodules", "pmd_net_addr", "--collect-data", "pmd_net_addr", "--collect-binaries", "pmd_net_addr",
-    "--collect-submodules", "pytun_pmd3", "--collect-data", "pytun_pmd3", "--collect-binaries", "pytun_pmd3",  # wintun.dll, loaded when the tunnel module is imported
     # Only the x64 PortAudio (ZenshiroDev\tooling\windows\packaging\pyi-hooks\hook-sounddevice.py).
     "--additional-hooks-dir", "$root\ZenshiroDev\tooling\windows\packaging\pyi-hooks",
     "--hidden-import", "_sounddevice_data",
-    "--collect-submodules", "zeroconf", "--collect-data", "zeroconf", "--collect-binaries", "zeroconf",
-    "--add-binary", "$root\apps\desktop\backend\zenlink\airplay\playfair.dll${sep}zenlink\airplay",
-    # Sound: minimal FFmpeg AAC decoder (ZenshiroDev\resources\windows\native\zlaac). PyAV (full FFmpeg,
-    # ~65 MB) is only pulled in by pymobiledevice3's unused VNC transcoder.
+    # Sound: minimal FFmpeg AAC decoder (ZenshiroDev\resources\windows\native\zlaac), never PyAV (full FFmpeg, ~65 MB).
     "--add-binary", "$root\apps\desktop\backend\zenlink\zlaac.dll${sep}zenlink",
     "--exclude-module", "av",
-    "--hidden-import", "Crypto.Cipher.AES",
     "--collect-submodules", "zenlink",
     "--exclude-module", "tkinter",
     "--exclude-module", "matplotlib",
@@ -108,8 +94,7 @@ $pyiArgs = @(
     "--exclude-module", "chardet",
     "--exclude-module", "pydoc",
     # Never imported by the headless backend (trace + lazy-import scan in
-    # ZenshiroDev/docs/SIZE_AUDIT.md, B1/B4/B5): pydantic comes with pymobiledevice3's
-    # remote server, setuptools/PyInstaller/pefile are build tools, sqlite3
+    # ZenshiroDev/docs/SIZE_AUDIT.md, B1/B4/B5): pydantic, setuptools/PyInstaller/pefile are build tools, sqlite3
     # has no user. The frozen self-test checks every device-path module.
     "--exclude-module", "pydantic",
     "--exclude-module", "pydantic_core",
@@ -120,12 +105,7 @@ $pyiArgs = @(
     "--exclude-module", "pefile",
     "--exclude-module", "sqlite3",
     "--exclude-module", "_sqlite3",
-    "--exclude-module", "lib2to3",
-    # pyimg4 imports these but the developer image mount never calls them;
-    # zenlink\_lzss.py stands in. Their unsigned .pyd files were blocked by
-    # Smart App Control (GitHub issue #2).
-    "--exclude-module", "lzss",
-    "--exclude-module", "lzfse"
+    "--exclude-module", "lib2to3"
 )
 # Version resource (Author: Zenvy Zenshiro)
 # Numeric part only ("2.5.0-beta.1" -> "2.5.0"): Windows version fields are n.n.n.n.

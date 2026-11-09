@@ -8,14 +8,12 @@ authors = [{ name = "Zenvy Zenshiro" }]
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "aiohttp>=3.10",
-    "pymobiledevice3>=11.49",
-    "av>=14",
-    "zeroconf>=0.132",
-    "pycryptodome>=3.20",
-    "cryptography>=42",
     "pyusb>=1.2.1",
     "sounddevice>=0.4.6",
 ]
+
+[project.optional-dependencies]
+dev = ["av>=14", "pycryptodome>=3.20", "cryptography>=42"]
 
 [project.urls]
 Homepage = "https://github.com/zenvyzenshiro/zenlink"

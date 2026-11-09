@@ -28,7 +28,16 @@ from cryptography.hazmat.primitives import serialization as ser  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey  # noqa: E402
 
-from zenlink.airplay.fairplay import FairPlay  # noqa: E402
+
+
+def playfair_key(keymsg: bytes, ekey: bytes) -> bytes:
+    """The receiver's playfair.dll, called the way it does (64-bit Python only)."""
+    import ctypes
+
+    dll = ctypes.CDLL(str(Path(__file__).resolve().parents[1] / "zenlink" / "airplay" / "playfair.dll"))
+    out = ctypes.create_string_buffer(16)
+    dll.zl_playfair_decrypt(keymsg, ekey, out)
+    return out.raw
 
 
 def raw(key) -> bytes:
@@ -126,9 +135,7 @@ async def main(args) -> None:
     await rtsp.call("POST", "/fp-setup", msg3)
 
     ekey, eiv = bytes(range(72)), bytes(range(16))
-    fp = FairPlay()
-    fp.keymsg = msg3
-    aeskey = hashlib.sha512(fp.decrypt(ekey) + secret).digest()[:16]
+    aeskey = hashlib.sha512(playfair_key(msg3, ekey) + secret).digest()[:16]
     setup = {"ekey": ekey, "eiv": eiv, "name": "Simulated iPad", "model": "iPad15,7", "deviceID": "AA:BB", "timingPort": 0}
     await rtsp.call("SETUP", "rtsp://sim/1", plistlib.dumps(setup, fmt=plistlib.FMT_BINARY))
     sid = args.sid

@@ -436,23 +436,14 @@ fn apply_look(ui: &AppWindow) {
     });
 }
 
-/// Asks the backend whether a passcode is saved, or saves one (`Some`;
-/// an empty string removes it). Off the UI thread.
-fn passcode_query(ui: &AppWindow, api: &Api, save: Option<String>) {
-    let api = api.clone();
+/// Whether a passcode is saved, or saves one (`Some`; an empty string removes it). Off the
+/// UI thread.
+fn passcode_query(ui: &AppWindow, save: Option<String>) {
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        let set = if !apple::python_engine() {
-            match &save {
-                Some(code) => apple::save_passcode(code),
-                None => Some(apple::has_passcode()),
-            }
-        } else {
-            let r = match &save {
-                Some(code) => api.post("/api/passcode", &json!({ "passcode": code })),
-                None => api.get("/api/passcode"),
-            };
-            r.as_ref().and_then(|v| v.get("set")).and_then(Value::as_bool)
+        let set = match &save {
+            Some(code) => apple::save_passcode(code),
+            None => Some(apple::has_passcode()),
         };
         let _ = slint::invoke_from_event_loop(move || {
             let Some(ui) = weak.upgrade() else { return };
@@ -748,7 +739,7 @@ fn on_state(ui: &AppWindow, api: &Api, st: &Value) {
         APP.with_borrow_mut(|a| a.unlock_at = Some(Instant::now() + Duration::from_millis(1500)));
     }
     if !APP.with_borrow_mut(|a| std::mem::replace(&mut a.passcode_asked, true)) {
-        passcode_query(ui, api, None);
+        passcode_query(ui, None);
     }
     ui.set_phase(phase.clone().into());
     ui.set_device(device.into());
@@ -2021,21 +2012,13 @@ fn copy_screen_text(ui: &AppWindow) {
     );
     let weak = ui.as_weak();
     std::thread::spawn(move || {
-        let r = if !apple::python_engine() {
-            Some(match ocr::add_capture(shot.width, shot.height, &shot.bgra) {
-                Ok((text, added, total)) => json!({ "ok": true, "text": text, "added": added, "total": total }),
-                Err(e) => {
-                    log::warn!("ocr: {e}");
-                    json!({ "ok": false })
-                }
-            })
-        } else {
-            let image = format!(
-                "data:image/bmp;base64,{}",
-                shortcuts::base64(&shortcuts::bmp(shot.width, shot.height, &shot.bgra))
-            );
-            Api::new().post_slow("/api/ocr", &json!({ "image": image }), 40)
-        };
+        let r = Some(match ocr::add_capture(shot.width, shot.height, &shot.bgra) {
+            Ok((text, added, total)) => json!({ "ok": true, "text": text, "added": added, "total": total }),
+            Err(e) => {
+                log::warn!("ocr: {e}");
+                json!({ "ok": false })
+            }
+        });
         let _ = slint::invoke_from_event_loop(move || {
             BUSY.store(false, Relaxed);
             let Some(ui) = weak.upgrade() else { return };
@@ -3320,11 +3303,7 @@ fn run_shortcut(
         Shortcut::Lock => ui.invoke_action("lock".into()),
         Shortcut::CopyText => copy_screen_text(ui),
         Shortcut::ClearText => {
-            if apple::python_engine() {
-                std::thread::spawn(|| Api::new().post("/api/ocr/clear", &json!({})));
-            } else {
-                ocr::clear();
-            }
+            ocr::clear();
             show_toast(
                 ui,
                 tr_ui(
@@ -3696,7 +3675,6 @@ fn update_install(ui: &AppWindow) {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
-    airplay::choose_engine();
     // v2.5.1: `ZenLink.exe --android-app …` is one Android app in its own
     // window (no backend, no tray, no single-instance check).
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -4595,11 +4573,10 @@ fn main() -> Result<(), slint::PlatformError> {
         });
     }
     {
-        let api = api.clone();
         let weak = ui.as_weak();
         ui.on_save_passcode(move |code| {
             if let Some(ui) = weak.upgrade() {
-                passcode_query(&ui, &api, Some(code.to_string()));
+                passcode_query(&ui, Some(code.to_string()));
             }
         });
     }
@@ -4686,10 +4663,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let (api, w) = (api.clone(), weak.clone());
             let a = a.to_string();
             std::thread::spawn(move || {
-                let r = if a == "wifi" && !apple::python_engine() {
+                let r = if a == "wifi" {
                     Some(apple::prepare_wifi())
-                } else if a == "wifi" {
-                    api.post_slow("/api/wifi/prepare", &json!({}), 120)
                 } else {
                     api.get("/api/drivers")
                 };

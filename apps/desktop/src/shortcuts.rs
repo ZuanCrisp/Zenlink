@@ -153,54 +153,6 @@ pub fn hid_usage(c: char) -> Option<(u8, bool)> {
 /// Left Shift HID usage.
 pub const HID_SHIFT: u8 = 0xe1;
 
-/// A 32-bit top-down BMP (BGRA rows) for Windows OCR, which reads any
-/// image Windows can decode; BMP needs no encoder in ZenLink.
-pub fn bmp(width: u32, height: u32, bgra: &[u8]) -> Vec<u8> {
-    let size = 54 + bgra.len() as u32;
-    let mut b = Vec::with_capacity(size as usize);
-    b.extend_from_slice(b"BM");
-    b.extend_from_slice(&size.to_le_bytes());
-    b.extend_from_slice(&0u32.to_le_bytes());
-    b.extend_from_slice(&54u32.to_le_bytes());
-    b.extend_from_slice(&40u32.to_le_bytes());
-    b.extend_from_slice(&(width as i32).to_le_bytes());
-    b.extend_from_slice(&(-(height as i32)).to_le_bytes());
-    b.extend_from_slice(&1u16.to_le_bytes());
-    b.extend_from_slice(&32u16.to_le_bytes());
-    b.extend_from_slice(&0u32.to_le_bytes()); // BI_RGB
-    b.extend_from_slice(&(bgra.len() as u32).to_le_bytes());
-    b.extend_from_slice(&2835u32.to_le_bytes());
-    b.extend_from_slice(&2835u32.to_le_bytes());
-    b.extend_from_slice(&0u32.to_le_bytes());
-    b.extend_from_slice(&0u32.to_le_bytes());
-    b.extend_from_slice(bgra);
-    b
-}
-
-/// Standard base64 (RFC 4648), for the OCR request body.
-pub fn base64(data: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut s = String::with_capacity(data.len().div_ceil(3) * 4);
-    for c in data.chunks(3) {
-        let n = (c[0] as u32) << 16
-            | (*c.get(1).unwrap_or(&0) as u32) << 8
-            | *c.get(2).unwrap_or(&0) as u32;
-        s.push(T[(n >> 18) as usize & 63] as char);
-        s.push(T[(n >> 12) as usize & 63] as char);
-        s.push(if c.len() > 1 {
-            T[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        s.push(if c.len() > 2 {
-            T[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    s
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,30 +261,6 @@ mod tests {
             route(true, "q", false, false, true, true),
             Some(Shortcut::Android("quick-settings"))
         );
-    }
-
-    #[test]
-    fn bmp_has_the_right_header_and_size() {
-        let px = vec![1u8, 2, 3, 255, 4, 5, 6, 255];
-        let b = bmp(2, 1, &px);
-        assert_eq!(&b[..2], b"BM");
-        assert_eq!(
-            u32::from_le_bytes(b[2..6].try_into().unwrap()) as usize,
-            b.len()
-        );
-        assert_eq!(b.len(), 54 + 8);
-        // Top-down rows: negative height.
-        assert_eq!(i32::from_le_bytes(b[22..26].try_into().unwrap()), -1);
-        assert_eq!(&b[54..], &px[..]);
-    }
-
-    #[test]
-    fn base64_matches_rfc4648() {
-        assert_eq!(base64(b""), "");
-        assert_eq!(base64(b"f"), "Zg==");
-        assert_eq!(base64(b"fo"), "Zm8=");
-        assert_eq!(base64(b"foo"), "Zm9v");
-        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
     }
 
     #[test]

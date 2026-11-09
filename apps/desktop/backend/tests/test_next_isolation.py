@@ -29,14 +29,6 @@ class NextIsolationTests(unittest.TestCase):
         finally:
             importlib.reload(server)
 
-    def test_stream_and_airplay_ports(self):
-        from zenlink.airplay import receiver
-        from zenlink.apple import session
-
-        self.assertEqual(session.STREAM_PORT, 47422)
-        self.assertEqual(receiver.AIRPLAY_PORT, 7100)
-        self.assertEqual(receiver.receiver_name(), "ZenLinkStudio")
-
     def test_data_dir_name(self):
         from zenlink import paths
 

@@ -1,6 +1,5 @@
 //! ZenLink Studio over Wi-Fi in the window: the Rust AirPlay receiver (zenlink-airplay) feeds
-//! the decoder directly. Default; `ZL_ENGINE=python` (or `ZL_AIRPLAY=python`) keeps the backend's
-//! receiver (castmanager.py skips its own when `ZL_AIRPLAY=rust`).
+//! the decoder directly (the backend's Python receiver was removed in v2.5.12).
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
@@ -26,18 +25,6 @@ static WANTED: AtomicBool = AtomicBool::new(false);
 static PAUSED: AtomicBool = AtomicBool::new(false);
 /// The receiver serves an Apple Driver Hybrid session, not Studio.
 static HYBRID: AtomicBool = AtomicBool::new(false);
-
-pub fn enabled() -> bool {
-    std::env::var("ZL_AIRPLAY").is_ok_and(|v| v == "rust")
-}
-
-/// The default since M3 step 5: Rust serves Studio Wi-Fi unless `ZL_ENGINE=python`. Set before
-/// any thread starts; the backend inherits it and skips its own receiver.
-pub fn choose_engine() {
-    if std::env::var_os("ZL_AIRPLAY").is_none() && !crate::apple::python_engine() {
-        std::env::set_var("ZL_AIRPLAY", "rust");
-    }
-}
 
 pub fn running() -> bool {
     SERVER.lock().unwrap().is_some()
@@ -239,7 +226,7 @@ pub fn overlay(st: &mut Value) {
         return;
     }
     let conn = |k: &str| st.pointer(&format!("/connection/{k}")).and_then(Value::as_str);
-    let wanted = enabled() && conn("active") == Some("usbdirect") && conn("link") == Some("wireless");
+    let wanted = conn("active") == Some("usbdirect") && conn("link") == Some("wireless");
     if !wanted && WANTED.load(Relaxed) {
         PAUSED.store(false, Relaxed); // a mode change clears Stop, as set_link does
     }
