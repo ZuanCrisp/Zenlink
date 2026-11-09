@@ -15,7 +15,7 @@ use windows::Win32::Media::MediaFoundation::*;
 use windows::Win32::System::Com::{CoInitializeEx, CoTaskMemFree, COINIT_MULTITHREADED};
 
 use zenlink_core::api::{Codec, CodecInfo};
-use zenlink_core::nal::{parse_config, to_annexb, ParamSets};
+use zenlink_core::nal::{hevc_visible, parse_config, to_annexb, ParamSets};
 use zenlink_core::source::{RecordStream, VideoSource};
 use zenlink_core::stream::Record;
 
@@ -33,6 +33,10 @@ pub struct Mft {
     width: u32,
     height: u32,
     src: RECT,
+    /// The SPS's visible picture, used when the decoder reports no display aperture.
+    visible: Option<[u32; 4]>,
+    /// The source's picture size, when neither the decoder nor the SPS give one.
+    display: Option<(u32, u32)>,
 }
 
 fn subtype(c: &Codec) -> GUID {
@@ -103,6 +107,8 @@ impl Mft {
                 width: 0,
                 height: 0,
                 src: RECT::default(),
+                visible: None,
+                display: None,
             };
             // Some decoders (Microsoft's HEVC MFT) list no complete output
             // type until they have parsed the first frame; they then signal
@@ -161,6 +167,15 @@ impl Mft {
                         bottom: y + area.Area.cy,
                     };
                 }
+                self.crop_to_visible();
+                log::info!(
+                    "decoder output {}x{}, aperture {}, sps window {:?}, shown {:?}",
+                    self.width,
+                    self.height,
+                    if got > 0 { format!("{}x{}+{}+{}", area.Area.cx, area.Area.cy, area.OffsetX.value, area.OffsetY.value) } else { "none".into() },
+                    self.visible,
+                    (self.src.left, self.src.top, self.src.right, self.src.bottom)
+                );
                 let info = self.t.GetOutputStreamInfo(0)?;
                 self.provides_samples =
                     info.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32) != 0;
@@ -168,6 +183,38 @@ impl Mft {
                 return Ok(());
             }
         }
+    }
+
+    /// Without a display aperture from the decoder, cut the encoder's padding off
+    /// (the SPS conformance window).
+    fn crop_to_visible(&mut self) {
+        let full = self.src.left == 0
+            && self.src.top == 0
+            && self.src.right == self.width as i32
+            && self.src.bottom == self.height as i32;
+        if !full {
+            return;
+        }
+        if let Some([l, t, r, b]) = self.visible {
+            if r <= self.width && b <= self.height {
+                self.src = RECT { left: l as i32, top: t as i32, right: r as i32, bottom: b as i32 };
+            }
+        } else if let Some((w, h)) = self.display {
+            // Either way round (the picture turns with the device); only a small pad is cut.
+            let fits = |w: u32, h: u32| {
+                w <= self.width && h <= self.height && self.width - w < 64 && self.height - h < 64
+            };
+            let (w, h) = if fits(w, h) { (w, h) } else { (h, w) };
+            if fits(w, h) {
+                self.src = RECT { left: 0, top: 0, right: w as i32, bottom: h as i32 };
+            }
+        }
+    }
+
+    fn set_visible(&mut self, ps: &ParamSets, display: Option<(u32, u32)>) {
+        self.visible = hevc_visible(&ps.annexb);
+        self.display = display;
+        self.crop_to_visible();
     }
 
     pub fn flush(&self) {
@@ -439,6 +486,7 @@ fn session(
 ) -> Result<()> {
     let mut ps: ParamSets = parse_config(&info.codec, &info.description).unwrap_or_default();
     let mut mft = Mft::new(gpu, &info.codec)?;
+    mft.set_visible(&ps, info.display);
     stats.hardware.store(mft.hardware, Relaxed);
     log::info!(
         "decoder {:?} hardware={} provides_samples={} {}x{}",
@@ -461,6 +509,7 @@ fn session(
                 info = c;
                 ps = parse_config(&info.codec, &info.description).unwrap_or_default();
                 mft = Mft::new(gpu, &info.codec)?;
+                mft.set_visible(&ps, info.display);
                 stats.hardware.store(mft.hardware, Relaxed);
                 got_key = false;
             }

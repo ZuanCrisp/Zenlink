@@ -9,9 +9,9 @@
 //! device list stay as they are: `main.rs` lays this state over the backend's while the
 //! connection mode is Apple Driver.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -52,18 +52,54 @@ struct State {
     rotation: u32,
 }
 
+/// One device's session. Several run at once; only the one on screen streams its picture,
+/// the others keep their tunnel, input and lock watch until Stop.
+struct Sess {
+    state: Mutex<State>,
+    /// Set to end the session.
+    stop: AtomicBool,
+    /// Touches, keys and buttons into the session.
+    input: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Input>>>,
+    /// Ask the device for a keyframe (cleared when one arrives).
+    key: AtomicBool,
+    /// The screen's size (portrait): the stream pads it and does not say so.
+    screen: Mutex<Option<(u32, u32)>>,
+}
+
+impl Sess {
+    fn set(&self, phase: &'static str, detail: &str, error: Option<String>) {
+        let mut s = self.state.lock().unwrap();
+        s.phase = phase;
+        s.detail = detail.to_string();
+        s.error = error;
+    }
+
+    fn live(&self) -> bool {
+        matches!(self.state.lock().unwrap().phase, "connecting" | "activating" | "streaming")
+    }
+
+    fn send(&self, i: Input) {
+        if let Some(tx) = self.input.lock().unwrap().as_ref() {
+            let _ = tx.send(i);
+        }
+    }
+}
+
 pub struct Engine {
     rt: tokio::runtime::Runtime,
     devices: Mutex<Vec<Dev>>,
     info: Mutex<HashMap<String, link::Info>>,
-    state: Mutex<State>,
-    /// Set to end the running session.
-    stop: Mutex<Option<Arc<AtomicBool>>>,
-    /// Access units of the running session, taken by the decoder's source.
-    frames: Mutex<Option<Receiver<Vec<u8>>>>,
-    /// Touches, keys and buttons into the running session.
-    input: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Input>>>,
+    /// Sessions by UDID.
+    sessions: Mutex<HashMap<String, Arc<Sess>>>,
+    /// The device on screen (the list's pick, or the one Start fell back to).
+    view: Mutex<Option<String>>,
+    /// Why the last Start found no device (shown while no session is on screen).
+    fail: Mutex<Option<String>>,
+    /// Access units of the session on screen (its UDID), taken by the decoder's source.
+    frames: Mutex<Option<(String, Receiver<Vec<u8>>)>>,
     watching: AtomicBool,
+    /// Wi-Fi devices whose names were asked for this run (one tunnel each, once).
+    asked: Mutex<HashSet<String>>,
 }
 
 static ENGINE: OnceLock<Arc<Engine>> = OnceLock::new();
@@ -80,6 +116,62 @@ static UNLOCK_ON_LOCK: AtomicBool = AtomicBool::new(false);
 /// Settings > limit automatic unlocks (3 in 30 s).
 static UNLOCK_LIMIT: AtomicBool = AtomicBool::new(true);
 
+/// Settings > Audio: sound on the PC (not "device only"), its volume (f32 bits) and mute.
+static AUDIO_TO_PC: AtomicBool = AtomicBool::new(true);
+static AUDIO_VOLUME: AtomicU32 = AtomicU32::new(0x3f80_0000);
+static AUDIO_MUTED: AtomicBool = AtomicBool::new(false);
+/// Presses that take the device from full volume to 0 (ZenLink 2.5.x VOLUME_STEPS).
+const VOLUME_STEPS: usize = 20;
+
+/// Called whenever the window pushes its sound settings. A route change while mirroring
+/// moves the device volume (down to 0 for "PC only", back to half when leaving it).
+pub fn set_audio(to_pc: bool, volume: f32, muted: bool) {
+    AUDIO_VOLUME.store(volume.clamp(0.0, 1.0).to_bits(), Relaxed);
+    AUDIO_MUTED.store(muted, Relaxed);
+    if AUDIO_TO_PC.swap(to_pc, Relaxed) != to_pc {
+        if let Some(e) = ENGINE.get() {
+            for s in e.sessions.lock().unwrap().values() {
+                s.send(Input::Volume);
+            }
+        }
+    }
+}
+
+/// The button that turns the volume `down` (or up). iPadOS swaps the two at rotation 270
+/// (verified in ZenLink 2.5.x).
+fn volume_button(down: bool, ipad: bool, rotation: u32) -> &'static str {
+    if down != (ipad && rotation == 270) {
+        "volume-down"
+    } else {
+        "volume-up"
+    }
+}
+
+/// Plays the device's sound (AAC-ELD access units) on the PC, on a thread of its own like
+/// Android's; ends when the session drops the sender.
+fn play_sound(rx: Receiver<Vec<u8>>, wifi: bool) {
+    let _ = std::thread::Builder::new()
+        .name("apple-audio".into())
+        .spawn(move || {
+            let Ok(first) = rx.recv() else { return };
+            let mut dec = match crate::aac::Aac::new(&mirror::AUDIO_ASC, 48000) {
+                Ok(d) => d,
+                Err(e) => return log::warn!("apple: no sound ({e}); picture only"),
+            };
+            let mut player = match zenlink_audio::Player::start() {
+                Ok(p) => p,
+                Err(e) => return log::warn!("apple: no sound output ({e}); picture only"),
+            };
+            player.set_smooth(true);
+            player.set_jitter_ms(if wifi { 60.0 } else { 40.0 });
+            for au in std::iter::once(first).chain(rx.iter()) {
+                player.set_muted(AUDIO_MUTED.load(Relaxed));
+                player.set_volume(f32::from_bits(AUDIO_VOLUME.load(Relaxed)));
+                player.feed(dec.decode(&au));
+            }
+        });
+}
+
 pub fn set_unlock_on_lock(on: bool, limit: bool) {
     UNLOCK_ON_LOCK.store(on, Relaxed);
     UNLOCK_LIMIT.store(limit, Relaxed);
@@ -90,6 +182,8 @@ enum Input {
     Hid(hid::Cmd),
     /// SpringBoard reported a lock, at this time.
     Locked(Instant),
+    /// The sound route changed, or the stream now takes buttons: match the device volume.
+    Volume,
 }
 
 /// Whether a lock reported `at` gets an automatic unlock. Locks that arrived while the last
@@ -126,12 +220,18 @@ pub fn overlay(st: &mut Value) {
     };
     let apple = conn("active") == Some("apple");
     WIRELESS.store(conn("link") == Some("wireless"), Relaxed);
-    *PICKED.lock().unwrap() = st
-        .get("selected")
-        .and_then(Value::as_str)
-        .map(str::to_string);
+    let picked = st.get("selected").and_then(Value::as_str).map(str::to_string);
+    let changed = {
+        let mut p = PICKED.lock().unwrap();
+        let changed = *p != picked;
+        *p = picked.clone();
+        changed
+    };
     if IN_USE.swap(apple, Relaxed) && !apple {
-        engine().stop(); // the mode changed away from Apple Driver
+        engine().stop_all(); // the mode changed away from Apple Driver
+    }
+    if apple && changed && picked.is_some() {
+        engine().show(picked); // a pick in the list switches the screen to that device
     }
     if !apple || HYBRID.load(Relaxed) {
         return;
@@ -174,14 +274,12 @@ pub fn engine() -> &'static Arc<Engine> {
                 .expect("tokio runtime"),
             devices: Mutex::new(Vec::new()),
             info: Mutex::new(load_info()),
-            state: Mutex::new(State {
-                phase: "idle",
-                ..State::default()
-            }),
-            stop: Mutex::new(None),
+            sessions: Mutex::new(HashMap::new()),
+            view: Mutex::new(None),
+            fail: Mutex::new(None),
             frames: Mutex::new(None),
-            input: Mutex::new(None),
             watching: AtomicBool::new(false),
+            asked: Mutex::new(HashSet::new()),
         })
     })
 }
@@ -280,18 +378,26 @@ fn passcode() -> String {
 }
 
 impl Engine {
-    /// A touch, key or button for the running session (dropped when none runs).
+    /// A touch, key or button for the session on screen (dropped when none runs).
     pub fn send(&self, c: hid::Cmd) {
-        if let Some(tx) = self.input.lock().unwrap().as_ref() {
-            let _ = tx.send(Input::Hid(c));
+        if let Some(s) = self.shown() {
+            s.send(Input::Hid(c));
         }
     }
 
-    fn set(&self, phase: &'static str, detail: &str, error: Option<String>) {
-        let mut s = self.state.lock().unwrap();
-        s.phase = phase;
-        s.detail = detail.to_string();
-        s.error = error;
+    fn shown(&self) -> Option<Arc<Sess>> {
+        let v = self.view.lock().unwrap().clone()?;
+        self.sessions.lock().unwrap().get(&v).cloned()
+    }
+
+    fn is_shown(&self, udid: &str) -> bool {
+        self.view.lock().unwrap().as_deref() == Some(udid)
+    }
+
+    /// Puts `udid` on screen (`None`: no Apple device, e.g. an Android phone is shown).
+    /// Sessions off screen keep streaming but are neither drawn nor heard.
+    pub fn show(&self, udid: Option<String>) {
+        *self.view.lock().unwrap() = udid;
     }
 
     fn watch(self: &Arc<Self>) {
@@ -336,7 +442,7 @@ impl Engine {
         devs.extend(usb);
     }
 
-    async fn refresh_wifi(&self) {
+    async fn refresh_wifi(self: &Arc<Self>) {
         let Some(dir) = wifi::record_dir() else {
             return;
         };
@@ -345,6 +451,12 @@ impl Engine {
             return;
         }
         let found = wifi::browse(&records, WIFI_WAIT).await.unwrap_or_default();
+        for f in &found {
+            let known = self.info.lock().unwrap().contains_key(&f.udid);
+            if !known && self.asked.lock().unwrap().insert(f.udid.clone()) {
+                self.learn_info(f.udid.clone(), f.addr);
+            }
+        }
         let mut devs = self.devices.lock().unwrap();
         for f in found {
             devs.retain(|d| !(d.addr.is_some() && d.udid == f.udid));
@@ -356,6 +468,38 @@ impl Engine {
             });
         }
         devs.retain(|d| d.addr.is_none() || d.seen.elapsed() < WIFI_FORGET);
+    }
+
+    /// A device first seen on Wi-Fi gets its name and model over a short tunnel of its own,
+    /// so the list shows it before it is ever started.
+    fn learn_info(self: &Arc<Self>, udid: String, addr: SocketAddr) {
+        let me = self.clone();
+        let _ = std::thread::Builder::new()
+            .name("zenlink-apple-info".into())
+            .spawn(move || {
+                let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+                    return;
+                };
+                let ask = async {
+                    let dir = wifi::record_dir().ok_or("no user folder")?;
+                    let r = wifi::records(&dir)
+                        .into_iter()
+                        .find(|r| r.udid == udid)
+                        .ok_or("no Wi-Fi pairing record")?;
+                    link::Link::wifi(addr, &r).await?.info().await
+                };
+                match rt.block_on(tokio::time::timeout(Duration::from_secs(20), ask)) {
+                    Ok(Ok(i)) if !i.product_type.is_empty() => {
+                        log::info!("apple: learned {} ({}) over Wi-Fi", i.name, i.product_type);
+                        let mut all = me.info.lock().unwrap();
+                        all.insert(udid, i);
+                        save_info(&all);
+                    }
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => log::info!("apple: device info over Wi-Fi: {e}"),
+                    Err(_) => log::info!("apple: device info over Wi-Fi: timed out"),
+                }
+            });
     }
 
     fn entry(&self, d: &Dev) -> Value {
@@ -381,6 +525,7 @@ impl Engine {
             "ready": d.paired,
             "wifi": d.addr.is_some(),
             "need": if d.paired { Value::Null } else { "trust".into() },
+            "live": self.sessions.lock().unwrap().get(&d.udid).is_some_and(|s| s.live()),
         })
     }
 
@@ -389,11 +534,19 @@ impl Engine {
     pub fn snapshot(self: &Arc<Self>) -> Value {
         self.watch();
         let mut devs = self.devices.lock().unwrap().clone();
-        devs.sort_by_key(|d| d.addr.is_some());
+        // Stable order: each Wi-Fi scan re-adds devices in mDNS answer order.
+        devs.sort_by(|a, b| (a.addr.is_some(), &a.udid).cmp(&(b.addr.is_some(), &b.udid)));
         let devices: Vec<Value> = devs.iter().map(|d| self.entry(d)).collect();
-        let s = self.state.lock().unwrap();
+        let shown = self.shown();
+        let idle = State {
+            phase: if self.fail.lock().unwrap().is_some() { "error" } else { "idle" },
+            error: self.fail.lock().unwrap().clone(),
+            ..State::default()
+        };
+        let guard = shown.as_ref().map(|x| x.state.lock().unwrap());
+        let s = guard.as_deref().unwrap_or(&idle);
         let live = matches!(s.phase, "connecting" | "activating" | "streaming");
-        json!({
+        let mut v = json!({
             "phase": s.phase,
             "detail": s.detail,
             "error": s.error,
@@ -402,13 +555,17 @@ impl Engine {
             "capture": live.then(|| json!({ "backend": "apple", "codec": "HEVC",
                                             "source": "CoreDevice DisplayService" })),
             "rotation": s.rotation,
-        })
+        });
+        if let (Some(_), Some(u)) = (&shown, self.view.lock().unwrap().as_ref()) {
+            v["selected"] = u.as_str().into();
+        }
+        v
     }
 
     /// Starts the picked device (when listed), else the first ready one; USB before Wi-Fi
     /// unless `wireless`. `false`: the device runs iOS 17-26, left to the backend's Hybrid.
     pub fn start(self: &Arc<Self>, picked: Option<String>, wireless: bool) -> bool {
-        self.stop();
+        *self.fail.lock().unwrap() = None;
         let devs = self.devices.lock().unwrap().clone();
         let ready = |d: &&Dev| d.paired;
         let on_link = |d: &&Dev| d.addr.is_some() == wireless;
@@ -429,7 +586,8 @@ impl Engine {
             } else {
                 "Unlock the device and tap Trust, then press Start again."
             };
-            self.set("error", "", Some(msg.into()));
+            *self.fail.lock().unwrap() = Some(msg.into());
+            self.show(None);
             return true;
         };
         let version = self.info.lock().unwrap().get(&dev.udid).map(|i| i.version.clone());
@@ -442,12 +600,22 @@ impl Engine {
             .and_then(Value::as_str)
             .map(str::to_string)
             .unwrap_or_else(|| "iPhone/iPad".into());
-        let stop = Arc::new(AtomicBool::new(false));
-        *self.stop.lock().unwrap() = Some(stop.clone());
-        let (tx, rx) = sync_channel(120);
-        *self.frames.lock().unwrap() = Some(rx);
-        self.state.lock().unwrap().device = Some((name, dev.addr.is_some()));
-        self.set(
+        let sess = Arc::new(Sess {
+            state: Mutex::new(State {
+                device: Some((name, dev.addr.is_some())),
+                ..State::default()
+            }),
+            stop: AtomicBool::new(false),
+            input: Mutex::new(None),
+            key: AtomicBool::new(false),
+            screen: Mutex::new(None),
+        });
+        // Start again on a running device: the old session ends first.
+        if let Some(old) = self.sessions.lock().unwrap().insert(dev.udid.clone(), sess.clone()) {
+            old.stop.store(true, Relaxed);
+        }
+        self.show(Some(dev.udid.clone()));
+        sess.set(
             "connecting",
             if dev.addr.is_some() {
                 "Opening a secure Wi-Fi tunnel to the device"
@@ -457,6 +625,7 @@ impl Engine {
             None,
         );
         let me = self.clone();
+        let sess = sess.clone();
         // A thread of its own: idevice's display-service futures are not `Send`.
         let spawned = std::thread::Builder::new()
             .name("zenlink-apple-session".into())
@@ -466,32 +635,28 @@ impl Engine {
                     .build()
                 {
                     Ok(rt) => rt,
-                    Err(e) => return me.set("error", "", Some(format!("runtime: {e}"))),
+                    Err(e) => return sess.set("error", "", Some(format!("runtime: {e}"))),
                 };
-                let r = rt.block_on(me.session(&dev, &stop, tx));
-                if stop.load(Relaxed) {
-                    return; // stopped by the user: stop() already set idle
+                let r = rt.block_on(me.session(&sess, &dev));
+                if sess.stop.load(Relaxed) {
+                    return; // stopped by the user: stop() already removed it
                 }
                 match r {
-                    Ok(()) => me.set("idle", "", None),
+                    Ok(()) => sess.set("idle", "", None),
                     Err(e) => {
                         log::warn!("apple: {e}");
-                        me.set("error", "", Some(e));
+                        sess.set("error", "", Some(e));
                     }
                 }
             });
         if let Err(e) = spawned {
-            self.set("error", "", Some(format!("thread: {e}")));
+            *self.fail.lock().unwrap() = Some(format!("thread: {e}"));
         }
         true
     }
 
-    async fn session(
-        &self,
-        dev: &Dev,
-        stop: &AtomicBool,
-        tx: SyncSender<Vec<u8>>,
-    ) -> Result<(), String> {
+    async fn session(&self, sess: &Sess, dev: &Dev) -> Result<(), String> {
+        let stop = &sess.stop;
         let version = self
             .info
             .lock()
@@ -510,8 +675,25 @@ impl Engine {
             }
             None => link::Link::usb(&dev.udid).await?,
         };
+        if l.wifi && !self.info.lock().unwrap().contains_key(&dev.udid) {
+            match l.info().await {
+                Ok(i) if !i.product_type.is_empty() => {
+                    if !i.name.is_empty() {
+                        sess.state.lock().unwrap().device = Some((i.name.clone(), true));
+                    }
+                    let mut all = self.info.lock().unwrap();
+                    all.insert(dev.udid.clone(), i);
+                    save_info(&all);
+                }
+                Ok(_) => {}
+                Err(e) => log::info!("apple: device info over Wi-Fi: {e}"),
+            }
+        }
+        let screen = l.screen().await;
+        log::info!("apple: screen {screen:?}");
+        *sess.screen.lock().unwrap() = screen;
         if !l.display_offered() {
-            self.set(
+            sess.set(
                 "activating",
                 "Preparing the device (first time downloads a small image)",
                 None,
@@ -519,10 +701,11 @@ impl Engine {
             l.ensure_ddi(&version, |_| {}).await?;
         }
         let watch_rot = zenlink_apple::watch::orientation(l.adapter.clone(), l.rsd.clone(), |r| {
-            self.state.lock().unwrap().rotation = r;
+            sess.state.lock().unwrap().rotation = r;
         });
         let (itx, mut irx) = tokio::sync::mpsc::unbounded_channel();
-        *self.input.lock().unwrap() = Some(itx.clone());
+        *sess.input.lock().unwrap() = Some(itx.clone());
+        let vtx = itx.clone();
         let watch_lock = zenlink_apple::watch::lock(l.adapter.clone(), l.rsd.clone(), move || {
             log::info!("apple: device locked");
             let _ = itx.send(Input::Locked(Instant::now()));
@@ -534,6 +717,10 @@ impl Engine {
             .get(&dev.udid)
             .is_some_and(|i| i.device_class == "iPad");
         let mut hid = hid::Hid::new(l.adapter.clone(), l.rsd.clone(), ipad);
+        let (atx, arx) = sync_channel::<Vec<u8>>(64);
+        play_sound(arx, l.wifi);
+        // ZenLink turned the device volume down ("PC only").
+        let quiet = std::cell::Cell::new(false);
         let input = async {
             let mut unlocked_at: Option<Instant> = None;
             let mut recent = Vec::new();
@@ -543,10 +730,26 @@ impl Engine {
                         hid::Cmd::Action { name, text: passcode() }
                     }
                     Input::Hid(c) => c,
+                    Input::Volume => {
+                        let down = AUDIO_TO_PC.load(Relaxed);
+                        if down == quiet.get() {
+                            continue;
+                        }
+                        let rot = sess.state.lock().unwrap().rotation;
+                        let times = if down { VOLUME_STEPS } else { VOLUME_STEPS / 2 };
+                        match press(&mut hid, volume_button(down, ipad, rot), times).await {
+                            Ok(()) => {
+                                quiet.set(down);
+                                log::info!("apple: device volume {}", if down { "down (PC only)" } else { "back to half" });
+                            }
+                            Err(e) => log::warn!("apple: device volume: {e}"),
+                        }
+                        continue;
+                    }
                     // Wake and type the saved passcode.
                     Input::Locked(at) => {
                         if !UNLOCK_ON_LOCK.load(Relaxed)
-                            || self.state.lock().unwrap().phase != "streaming"
+                            || sess.state.lock().unwrap().phase != "streaming"
                         {
                             continue;
                         }
@@ -569,40 +772,113 @@ impl Engine {
                 }
             }
         };
-        let mut first = true;
-        let stream = mirror::stream(&mut l, |au| {
-            if stop.load(Relaxed) {
-                return false;
+        // The stream runs for the whole session; off screen its frames are dropped. Coming
+        // back asks the device for a keyframe (iOS sends none on its own) and shows from it.
+        let pic = std::cell::RefCell::new(Pic::default());
+        let restart = std::cell::Cell::new(false);
+        let video = async {
+            let mut ever = false;
+            loop {
+                if stop.load(Relaxed) {
+                    return Ok(());
+                }
+                restart.set(false);
+                mirror::stream(
+                    &mut l,
+                    &sess.key,
+                    |au| {
+                        if stop.load(Relaxed) || restart.get() {
+                            return false;
+                        }
+                        if !ever {
+                            ever = true;
+                            sess.set("streaming", "", None);
+                            // Presses sent while the stream settles are dropped (ZenLink 2.5.x: 3 s).
+                            let vtx = vtx.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(Duration::from_secs(3));
+                                let _ = vtx.send(Input::Volume);
+                            });
+                        }
+                        if pic.borrow_mut().push(au) {
+                            sess.key.store(false, Relaxed);
+                        }
+                        true
+                    },
+                    |au| {
+                        if AUDIO_TO_PC.load(Relaxed) && pic.borrow().tx.is_some() {
+                            let _ = atx.try_send(au.to_vec());
+                        }
+                    },
+                )
+                .await?;
             }
-            if first {
-                first = false;
-                self.set("streaming", "", None);
+        };
+        // Hands the picture to the decoder while the device is on screen.
+        let screen = async {
+            loop {
+                let shown = self.is_shown(&dev.udid);
+                let mut p = pic.borrow_mut();
+                if shown && p.tx.is_none() {
+                    let (tx, rx) = sync_channel(120);
+                    p.tx = Some(tx);
+                    p.wait = Some(Instant::now());
+                    sess.key.store(true, Relaxed);
+                    *self.frames.lock().unwrap() = Some((dev.udid.clone(), rx));
+                } else if !shown && p.tx.is_some() {
+                    p.tx = None;
+                    p.wait = None;
+                    sess.key.store(false, Relaxed);
+                    log::info!("apple: {} off screen, picture paused", dev.udid);
+                } else if p.wait.is_some_and(|w| w.elapsed() > KEY_WAIT) && p.started {
+                    // The device ignored the requests: a new stream opens with a keyframe.
+                    log::info!("apple: no keyframe after {KEY_WAIT:?}; restarting the stream");
+                    p.started = false;
+                    p.wait = Some(Instant::now());
+                    restart.set(true);
+                }
+                drop(p);
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            // A full queue means the decoder stalls: drop the frame, the next keyframe heals it.
-            let _ = tx.try_send(au);
-            true
-        });
+        };
         // The watchers never end; the session ends with the stream.
-        tokio::select! {
-            r = stream => r,
+        let r: Result<(), String> = tokio::select! {
+            r = video => r,
             _ = watch_rot => Ok(()),
             _ = watch_lock => Ok(()),
             _ = input => Ok(()),
+            _ = screen => Ok(()),
+        };
+        if quiet.get() {
+            // Give the device its sound back (half: the old level cannot be read).
+            let rot = sess.state.lock().unwrap().rotation;
+            let up = press(&mut hid, volume_button(false, ipad, rot), VOLUME_STEPS / 2);
+            if !matches!(tokio::time::timeout(Duration::from_secs(5), up).await, Ok(Ok(()))) {
+                log::info!("apple: device volume not restored (link gone)");
+            }
         }
+        r
     }
 
+    /// Stop: ends the session on screen; the others keep running.
     pub fn stop(&self) {
-        if let Some(s) = self.stop.lock().unwrap().take() {
-            s.store(true, Relaxed);
+        *self.fail.lock().unwrap() = None;
+        let Some(v) = self.view.lock().unwrap().clone() else {
+            return;
+        };
+        if let Some(s) = self.sessions.lock().unwrap().remove(&v) {
+            s.stop.store(true, Relaxed);
         }
         *self.frames.lock().unwrap() = None;
-        *self.input.lock().unwrap() = None;
-        let mut st = self.state.lock().unwrap();
-        st.phase = "idle";
-        st.detail.clear();
-        st.error = None;
-        st.device = None;
-        st.rotation = 0;
+    }
+
+    /// Leaving Apple Driver mode: ends every session.
+    pub fn stop_all(&self) {
+        *self.fail.lock().unwrap() = None;
+        for (_, s) in self.sessions.lock().unwrap().drain() {
+            s.stop.store(true, Relaxed);
+        }
+        *self.frames.lock().unwrap() = None;
     }
 
     pub fn source(self: &Arc<Self>) -> Box<dyn VideoSource> {
@@ -619,7 +895,16 @@ struct AppleSource {
 
 impl VideoSource for AppleSource {
     fn open(&mut self) -> Option<(CodecInfo, Box<dyn RecordStream>)> {
-        let rx = self.engine.frames.lock().unwrap().take()?;
+        let (udid, rx) = self.engine.frames.lock().unwrap().take()?;
+        let screen = self
+            .engine
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&udid)
+            .and_then(|s| *s.screen.lock().unwrap());
+        // A reopen (after a decode error) needs a fresh keyframe too.
+        self.request_keyframe();
         // The stream opens with VPS/SPS/PPS; frames before them cannot be decoded.
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
@@ -627,32 +912,42 @@ impl VideoSource for AppleSource {
                 Ok(au) => au,
                 Err(_) => return None,
             };
-            if let Some(info) = codec_info(&au) {
+            if let Some(info) = codec_info(&au, screen) {
                 let pending = frame(&au);
                 return Some((
                     info.clone(),
                     Box::new(AppleRecords {
+                        udid,
                         rx: Some(rx),
                         engine: self.engine.clone(),
                         config: info.description,
                         pending,
+                        screen,
                     }),
                 ));
             }
         }
     }
 
+    fn request_keyframe(&self) {
+        if let Some(s) = self.engine.shown() {
+            s.key.store(true, Relaxed);
+        }
+    }
+
     fn finished(&self) -> bool {
-        self.engine.stop.lock().unwrap().is_none()
+        !self.engine.shown().is_some_and(|s| s.live())
     }
 }
 
 struct AppleRecords {
+    udid: String,
     /// Handed back to the engine on drop, so the decoder can reopen after a decode error.
     rx: Option<Receiver<Vec<u8>>>,
     engine: Arc<Engine>,
     config: Vec<u8>,
     pending: Option<Record>,
+    screen: Option<(u32, u32)>,
 }
 
 impl RecordStream for AppleRecords {
@@ -667,7 +962,7 @@ impl RecordStream for AppleRecords {
                 Err(RecvTimeoutError::Disconnected) => return None,
             };
             // New parameter sets (rotation, size change): reconfigure first.
-            if let Some(info) = codec_info(&au).filter(|i| i.description != self.config) {
+            if let Some(info) = codec_info(&au, self.screen).filter(|i| i.description != self.config) {
                 self.config = info.description.clone();
                 self.pending = frame(&au);
                 return Some(Record::Config(info));
@@ -682,9 +977,9 @@ impl RecordStream for AppleRecords {
 impl Drop for AppleRecords {
     fn drop(&mut self) {
         let mut slot = self.engine.frames.lock().unwrap();
-        // Only for the same session: stop() or a new start() already replaced it.
-        if slot.is_none() && self.engine.stop.lock().unwrap().is_some() {
-            *slot = self.rx.take();
+        // Only while this device is still on screen and nothing newer took the slot.
+        if slot.is_none() && self.engine.is_shown(&self.udid) {
+            *slot = self.rx.take().map(|rx| (self.udid.clone(), rx));
         }
     }
 }
@@ -693,12 +988,13 @@ fn nal_type(n: &[u8]) -> u8 {
     (n[0] >> 1) & 0x3f
 }
 
-fn codec_info(au: &[u8]) -> Option<CodecInfo> {
+fn codec_info(au: &[u8], screen: Option<(u32, u32)>) -> Option<CodecInfo> {
     Some(CodecInfo {
         codec: Codec::Hevc,
         description: hvcc_from_annexb(au)?,
-        // The display service has no keyframe request; it sends one when the picture changes size.
-        keyframes_on_request: false,
+        // RTCP PLI + FIR (see `Sess::key`).
+        keyframes_on_request: true,
+        display: screen,
     })
 }
 
@@ -722,9 +1018,126 @@ fn frame(au: &[u8]) -> Option<Record> {
     })
 }
 
+/// How long a return to the screen waits for the requested keyframe before restarting.
+const KEY_WAIT: Duration = Duration::from_millis(2500);
+
+/// The picture of one session: the decoder's channel while on screen, and the parameter sets
+/// that a keyframe without them is sent with.
+#[derive(Default)]
+struct Pic {
+    tx: Option<SyncSender<Vec<u8>>>,
+    ps: Vec<u8>,
+    /// Waiting for a keyframe since then: frames before it cannot be decoded.
+    wait: Option<Instant>,
+    /// The stream has sent frames (a restart waits for this).
+    started: bool,
+}
+
+impl Pic {
+    /// `true` for a keyframe.
+    fn push(&mut self, au: Vec<u8>) -> bool {
+        self.started = true;
+        let mut ps = Vec::new();
+        let mut key = false;
+        for n in split_annexb(&au).into_iter().filter(|n| n.len() > 2) {
+            match nal_type(n) {
+                32..=34 => {
+                    ps.extend_from_slice(&[0, 0, 0, 1]);
+                    ps.extend_from_slice(n);
+                }
+                16..=21 => key = true,
+                _ => {}
+            }
+        }
+        let bare = ps.is_empty();
+        if !bare {
+            self.ps = ps;
+        }
+        let Some(tx) = &self.tx else { return key };
+        if let Some(w) = self.wait {
+            if !key {
+                return false;
+            }
+            log::info!("apple: keyframe {} ms after the request", w.elapsed().as_millis());
+            self.wait = None;
+        }
+        let au = if key && bare && !self.ps.is_empty() {
+            [self.ps.as_slice(), &au].concat()
+        } else {
+            au
+        };
+        // A full queue means the decoder stalls: drop the frame, the next keyframe heals it.
+        let _ = tx.try_send(au);
+        key
+    }
+}
+
+/// `times` presses of one button, 80 ms apart (ZenLink 2.5.x).
+async fn press(hid: &mut hid::Hid, name: &'static str, times: usize) -> Result<(), String> {
+    for i in 0..times {
+        if i > 0 {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+        }
+        hid.run(hid::Cmd::Button(name)).await?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stop_ends_only_the_device_on_screen() {
+        let e = engine();
+        let sess = || {
+            Arc::new(Sess {
+                state: Mutex::new(State { phase: "streaming", ..State::default() }),
+                stop: AtomicBool::new(false),
+                input: Mutex::new(None),
+                key: AtomicBool::new(false),
+                screen: Mutex::new(None),
+            })
+        };
+        let (a, b) = (sess(), sess());
+        e.sessions.lock().unwrap().insert("A".into(), a.clone());
+        e.sessions.lock().unwrap().insert("B".into(), b.clone());
+        e.show(Some("A".into()));
+        assert!(e.snapshot()["selected"] == "A");
+        e.show(Some("B".into()));
+        e.stop();
+        assert!(b.stop.load(Relaxed) && !a.stop.load(Relaxed));
+        assert!(e.sessions.lock().unwrap().contains_key("A"));
+        e.stop_all();
+        assert!(a.stop.load(Relaxed));
+    }
+
+    #[test]
+    fn pic_shows_from_a_keyframe_with_its_parameter_sets() {
+        let mut p = Pic::default();
+        let mut key = nal(32, &[1, 2, 3]);
+        key.extend(nal(33, &[4; 16]));
+        key.extend(nal(34, &[5, 6]));
+        key.extend(nal(19, &[2]));
+        assert!(p.push(key)); // off screen: only the parameter sets are kept
+        let (tx, rx) = sync_channel(8);
+        p.tx = Some(tx);
+        p.wait = Some(Instant::now());
+        assert!(!p.push(nal(1, &[0]))); // waiting: a delta frame is dropped
+        assert!(p.push(nal(19, &[4]))); // a bare keyframe goes with the kept VPS/SPS/PPS
+        assert!(codec_info(&rx.try_recv().unwrap(), None).is_some());
+        p.push(nal(1, &[3]));
+        assert_eq!(rx.try_recv().unwrap(), nal(1, &[3]));
+        assert!(p.wait.is_none());
+    }
+
+    #[test]
+    fn ipad_at_270_swaps_the_volume_buttons() {
+        assert_eq!(volume_button(true, false, 270), "volume-down");
+        assert_eq!(volume_button(true, true, 0), "volume-down");
+        assert_eq!(volume_button(true, true, 270), "volume-up");
+        assert_eq!(volume_button(false, true, 270), "volume-down");
+    }
 
     /// NAL header bytes for type `t` (layer 0, temporal id 1).
     fn nal(t: u8, body: &[u8]) -> Vec<u8> {
@@ -744,13 +1157,13 @@ mod tests {
         };
         assert!(key);
         assert_eq!(data, [&[0, 0, 0, 5][..], &[19 << 1, 1, 7, 8, 9]].concat());
-        assert!(codec_info(&au).is_some());
+        assert!(codec_info(&au, None).is_some());
 
         let Some(Record::Frame { key, .. }) = frame(&nal(1, &[1, 2])) else {
             panic!("no frame")
         };
         assert!(!key);
-        assert!(codec_info(&nal(1, &[1, 2])).is_none());
+        assert!(codec_info(&nal(1, &[1, 2]), None).is_none());
         assert!(frame(&nal(32, &[1, 2])).is_none());
     }
 

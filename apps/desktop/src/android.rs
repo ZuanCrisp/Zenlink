@@ -95,6 +95,13 @@ pub struct Shared {
     panel: Mutex<Option<&'static str>>,
     /// The phone's encoder list (Smart Encoder Detection), once read.
     encoders: Mutex<Option<Vec<Encoder>>>,
+    /// Off screen (another device is shown): the session keeps running, its picture and
+    /// sound are read and dropped, so coming back needs no reconnect.
+    parked: AtomicBool,
+    /// The running stream while parked, handed back on return (see [`Shared::park`]).
+    held: Mutex<Option<(CodecInfo, Box<dyn RecordStream>)>>,
+    /// Set by a return from parking, for the next open.
+    resuming: AtomicBool,
 }
 
 /// The session the window's mouse and keyboard go to.
@@ -110,7 +117,7 @@ pub fn active() -> Option<Arc<Shared>> {
         .lock()
         .unwrap()
         .clone()
-        .filter(|s| s.control.lock().unwrap().is_some())
+        .filter(|s| !s.parked.load(Relaxed) && s.control.lock().unwrap().is_some())
 }
 
 /// Sound settings from the window (Settings › Audio, the mute button).
@@ -285,6 +292,20 @@ impl Shared {
         }]);
     }
 
+    /// Takes the session off screen (`true`) or back (`false`). The decoder ends while
+    /// parked; the stream it read waits in `held` for the next [`DeviceSource::open`].
+    pub fn park(&self, parked: bool) {
+        self.parked.store(parked, Relaxed);
+        if !parked {
+            *self.panel.lock().unwrap() = None;
+            self.resuming.store(true, Relaxed);
+        }
+    }
+
+    pub fn parked(&self) -> bool {
+        self.parked.load(Relaxed)
+    }
+
     /// Ends the session: the decoder's blocked read returns at once.
     pub fn stop(&self) {
         self.stop.store(true, Relaxed);
@@ -321,8 +342,9 @@ fn codec_info(codec: u32, config: &[u8]) -> Option<CodecInfo> {
     Some(CodecInfo {
         codec,
         description,
-        // scrcpy has no keyframe request in this phase; MediaCodec sends one every 10 s.
-        keyframes_on_request: false,
+        // RESET_VIDEO (scrcpy 3.0+); MediaCodec also sends one every 10 s.
+        keyframes_on_request: true,
+        display: None,
     })
 }
 
@@ -373,21 +395,24 @@ impl Pacer {
     }
 }
 
-struct Records<R> {
-    video: VideoReader<R>,
+struct Records<R: Read + Send + 'static> {
+    /// `None` only after a drop handed it to the parking thread.
+    video: Option<VideoReader<R>>,
     pacer: Option<Pacer>,
     shared: Arc<Shared>,
     /// Keeps the server (shell, sockets) alive while it streams.
     _session: Option<Session>,
+    /// The last config, for a return from parking.
+    info: Option<CodecInfo>,
 }
 
-impl<R: Read + Send> RecordStream for Records<R> {
+impl<R: Read + Send + 'static> RecordStream for Records<R> {
     fn next_record(&mut self) -> Option<Record> {
         loop {
-            if self.shared.stop.load(Relaxed) {
+            if self.shared.stop.load(Relaxed) || self.shared.parked.load(Relaxed) {
                 return None;
             }
-            let p = match self.video.next_packet() {
+            let p = match self.video.as_mut()?.next_packet() {
                 Ok(p) => p,
                 Err(e) => {
                     if !self.shared.stop.load(Relaxed) {
@@ -402,10 +427,77 @@ impl<R: Read + Send> RecordStream for Records<R> {
             if let Packet::Session { width, height, .. } = p {
                 self.shared.set_frame(width, height);
             }
-            if let Some(r) = to_record(self.video.codec, p) {
+            let codec = self.video.as_ref()?.codec;
+            if let Some(r) = to_record(codec, p) {
+                if let Record::Config(i) = &r {
+                    self.info = Some(i.clone());
+                }
                 return Some(r);
             }
         }
+    }
+}
+
+impl<R: Read + Send + 'static> Drop for Records<R> {
+    /// Parked: a thread keeps reading (and dropping) the stream so the phone never blocks,
+    /// until the session comes back on screen (the stream goes to `held`) or stops.
+    fn drop(&mut self) {
+        let s = self.shared.clone();
+        if !s.parked.load(Relaxed) || s.stop.load(Relaxed) {
+            return;
+        }
+        let (Some(mut video), Some(mut info)) = (self.video.take(), self.info.take()) else {
+            return;
+        };
+        let session = self._session.take();
+        let pacer = self.pacer.take();
+        log::info!("android: off screen; the session keeps running");
+        let _ = std::thread::Builder::new().name("android-parked".into()).spawn(move || {
+            while s.parked.load(Relaxed) && !s.stop.load(Relaxed) {
+                match video.next_packet() {
+                    Ok(Packet::Config(c)) => {
+                        if let Some(i) = codec_info(video.codec, &c) {
+                            info = i;
+                        }
+                    }
+                    Ok(Packet::Session { width, height, .. }) => s.set_frame(width, height),
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::info!("android: parked stream ended: {e}");
+                        return;
+                    }
+                }
+            }
+            if s.stop.load(Relaxed) {
+                return;
+            }
+            let back = Records {
+                video: Some(video),
+                pacer,
+                shared: s.clone(),
+                _session: session,
+                info: Some(info.clone()),
+            };
+            *s.held.lock().unwrap() = Some((info, Box::new(back)));
+        });
+    }
+}
+
+/// Keeps a source alive across decoder threads (a parked session comes back to the same
+/// [`DeviceSource`], with its encoder plan and failure count).
+pub struct Kept(pub Arc<Mutex<Box<dyn VideoSource>>>);
+
+impl VideoSource for Kept {
+    fn open(&mut self) -> Option<(CodecInfo, Box<dyn RecordStream>)> {
+        self.0.lock().unwrap().open()
+    }
+
+    fn request_keyframe(&self) {
+        self.0.lock().unwrap().request_keyframe()
+    }
+
+    fn finished(&self) -> bool {
+        self.0.lock().unwrap().finished()
     }
 }
 
@@ -552,6 +644,9 @@ impl VideoSource for DeviceSource {
         if self.finished() {
             return None;
         }
+        if let Some(back) = self.resume() {
+            return Some(back);
+        }
         self.shared.set(|s| s.phase = Phase::Connecting);
         let serial = self.serial.clone();
         let target = match self.transport_id {
@@ -617,18 +712,50 @@ impl VideoSource for DeviceSource {
             play_audio(a, self.shared.clone(), wifi);
         }
         Some((
-            info,
+            info.clone(),
             Box::new(Records {
-                video,
+                video: Some(video),
                 pacer: None,
                 shared: self.shared.clone(),
                 _session: Some(session),
+                info: Some(info),
             }),
         ))
     }
 
+    fn request_keyframe(&self) {
+        self.shared.send(&[Control::ResetVideo]);
+    }
+
     fn finished(&self) -> bool {
-        self.shared.stop.load(Relaxed) || self.failures >= self.max_failures()
+        let s = &self.shared;
+        s.stop.load(Relaxed) || s.parked.load(Relaxed) || self.failures >= self.max_failures()
+    }
+}
+
+impl DeviceSource {
+    /// Back from parking: the running stream, with a fresh keyframe asked for. `None` when
+    /// the session was never parked or its stream ended meanwhile (then it reconnects).
+    fn resume(&mut self) -> Option<(CodecInfo, Box<dyn RecordStream>)> {
+        if !self.shared.resuming.swap(false, Relaxed) {
+            return None;
+        }
+        let at = Instant::now();
+        // The parking thread hands the stream over at its next packet (the encoder repeats
+        // frames at least every 100 ms); the reset makes one come at once.
+        let mut asked = false;
+        while at.elapsed() < Duration::from_secs(2) && !self.shared.stop.load(Relaxed) {
+            if let Some(back) = self.shared.held.lock().unwrap().take() {
+                log::info!("android: back on screen after {} ms", at.elapsed().as_millis());
+                return Some(back);
+            }
+            if !asked {
+                asked = true;
+                self.shared.send(&[Control::ResetVideo]);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        None
     }
 }
 
@@ -726,6 +853,8 @@ fn play_audio(mut r: VideoReader<std::net::TcpStream>, shared: Arc<Shared>, wifi
             let mut stats_at = Instant::now();
             while !shared.stop.load(Relaxed) {
                 match r.next_packet() {
+                    // Off screen: the sound is read and dropped (only one device is heard).
+                    Ok(Packet::Media { .. }) if shared.parked.load(Relaxed) => {}
                     Ok(Packet::Media { data, .. }) => {
                         player.set_muted(AUDIO_MUTED.load(Relaxed));
                         player.set_volume(f32::from_bits(AUDIO_VOLUME.load(Relaxed)));
@@ -833,7 +962,8 @@ impl VideoSource for FixtureSource {
         Some((
             info,
             Box::new(Records {
-                video,
+                video: Some(video),
+                info: None,
                 pacer: Some(Pacer {
                     start: Instant::now(),
                     pts0: None,
@@ -1156,7 +1286,7 @@ mod tests {
             Some(Record::Config(c)) => {
                 assert_eq!(c.codec, Codec::H264);
                 assert_eq!(&c.description[..4], &[1, 0x42, 0xc0, 0x1f]);
-                assert!(!c.keyframes_on_request);
+                assert!(c.keyframes_on_request, "RESET_VIDEO");
             }
             r => panic!("{r:?}"),
         }

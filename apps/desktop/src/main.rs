@@ -3,10 +3,12 @@
 
 mod android;
 mod apple;
+mod aac;
 mod appwin;
 mod backdrop;
 mod devprofiles;
 mod dots;
+mod perf;
 mod filedrop;
 mod filewin;
 mod flow;
@@ -220,6 +222,8 @@ struct App {
     apple_needs: Option<bool>,
     /// Android session (phase A3); `None` when none runs.
     android: Option<Arc<android::Shared>>,
+    /// Its source, kept across decoder threads so a parked session comes back as it was.
+    android_src: Option<Arc<Mutex<Box<dyn zenlink_core::source::VideoSource>>>>,
     /// The Android picture is live (the window shows video, fits to it).
     android_live: bool,
     /// Android status last shown in the window.
@@ -481,6 +485,7 @@ fn push_audio(api: &Api, p: &Prefs, muted: bool) {
     let to_pc = p.audio_out.as_str() != "device";
     let body = json!({ "enabled": to_pc, "route": p.audio_out.as_str(), "volume": p.volume / 100.0, "muted": muted });
     android::set_audio(to_pc, p.volume / 100.0, muted);
+    apple::set_audio(to_pc, p.volume / 100.0, muted);
     apple::set_unlock_on_lock(p.unlock_on_lock, p.unlock_limit);
     std::thread::spawn(move || api.audio(&body));
 }
@@ -594,7 +599,9 @@ fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
             id: id.into(),
             title: title.into(),
             sub: sub.into(),
-            state: if ready && need.is_empty() {
+            state: if d.get("live").and_then(Value::as_bool) == Some(true) {
+                "live" // a session runs, also off screen
+            } else if ready && need.is_empty() {
                 "ready"
             } else {
                 "need"
@@ -2841,6 +2848,9 @@ fn android_start(ui: &AppWindow, index: i32) {
     APP.with_borrow_mut(|a| {
         android::set_active(Some(shared.clone()));
         a.android = Some(shared);
+        let src = Arc::new(Mutex::new(source));
+        let source: Box<dyn zenlink_core::source::VideoSource> = Box::new(android::Kept(src.clone()));
+        a.android_src = Some(src);
         a.android_index = index;
         a.android_good_saved = false;
         a.android_key = Some(android_key(&ui.get_prefs()));
@@ -2912,6 +2922,7 @@ fn rail_refresh(ui: &AppWindow) {
         }
         let state = match r.state.as_str() {
             "ready" if apple_live && r.selected => "live",
+            "live" => "live",
             "ready" => "ready",
             "need" => "need",
             _ => "off",
@@ -2980,19 +2991,26 @@ fn rail_pick(ui: &AppWindow, i: i32) {
         ui.set_drawer_screen(false);
         ui.invoke_panel_toggled(false);
         if ui.get_screen().as_str() != "apple" {
-            android_stop(ui);
+            if !android_park(true) {
+                android_stop(ui);
+            }
             ui.invoke_choose_platform("apple".into(), remember);
         }
+        // Straight to the device: its session (if any) shows at once.
+        apple::engine().show(Some(id.to_string()));
         ui.invoke_apple_pick(id.into());
     } else {
         if ui.get_screen().as_str() != "android" {
-            if matches!(
+            if apple::in_use() {
+                apple::engine().show(None); // Apple sessions keep running off screen
+            } else if matches!(
                 ui.get_phase().as_str(),
                 "connecting" | "activating" | "streaming"
             ) {
-                ui.invoke_stop_cast();
+                ui.invoke_stop_cast(); // Hybrid / ZenLink Studio run in the backend
             }
             ui.invoke_choose_platform("android".into(), remember);
+            android_park(false);
         }
         if ui.get_drawer_files() {
             files_show_selected(ui);
@@ -3099,17 +3117,51 @@ fn rail_pop(ui: &AppWindow, i: i32) {
     });
 }
 
+/// Another device goes on screen (`true`): a live Android session keeps running, neither
+/// drawn nor heard. `false` brings a parked one back. Returns whether a session moved.
+fn android_park(park: bool) -> bool {
+    APP.with_borrow_mut(|a| {
+        let (Some(s), Some(src)) = (a.android.clone(), a.android_src.clone()) else {
+            return false;
+        };
+        if park {
+            if s.parked() || s.status().phase != android::Phase::Streaming {
+                return false;
+            }
+            s.park(true);
+            if let Some(v) = a.view.as_mut() {
+                v.stop();
+            }
+        } else {
+            if !s.parked() {
+                return false;
+            }
+            // The Apple picture leaves first, so its state change does not stop this one.
+            a.streaming = false;
+            s.park(false);
+            if let Some(v) = a.view.as_mut() {
+                v.start_source(Box::new(android::Kept(src)));
+            }
+        }
+        // `android_live` stays: it only counts on the Android screen.
+        a.fitted = None;
+        true
+    })
+}
+
 /// Ends the Android session, if any.
 fn android_stop(ui: &AppWindow) {
     ui.set_android_apps_open(false);
     let had = APP.with_borrow_mut(|a| {
         a.android_pending = None;
+        a.android_src = None;
         let Some(s) = a.android.take() else {
             return false;
         };
         android::set_active(None);
+        let parked = s.parked(); // then the view shows another device
         s.stop();
-        if let Some(v) = a.view.as_mut() {
+        if let Some(v) = a.view.as_mut().filter(|_| !parked) {
             v.stop();
         }
         a.android_live = false;
@@ -4037,6 +4089,11 @@ fn main() -> Result<(), slint::PlatformError> {
             p.volume / 100.0,
             ui.get_muted(),
         );
+        apple::set_audio(
+            p.audio_out.as_str() != "device",
+            p.volume / 100.0,
+            ui.get_muted(),
+        );
         ui.set_hevc_ok(hevc_ok());
         check_media_foundation(&ui);
         let f = flow::Flow::launch(&p.platform, p.remember_platform, mode_remembered());
@@ -4814,7 +4871,11 @@ fn main() -> Result<(), slint::PlatformError> {
         // Startup: the window is re-centred while its size still settles
         // (fit to the picture), until the user moves it or 3 s pass.
         let centring = std::cell::Cell::new(None::<(Instant, slint::PhysicalPosition)>);
+        if std::env::var_os("ZL_PERF").is_some() {
+            perf::install(&ui);
+        }
         timer.start(slint::TimerMode::Repeated, Duration::from_millis(16), move || {
+            let _tick = perf::Tick::new();
             let Some(ui) = weak.upgrade() else { return };
             // The first tick sizes the window for the screen; the settings
             // slide below waits a tick, else it would resize with the old
@@ -5125,18 +5186,23 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
                 // Dot field: ~30 fps, only while there is no picture.
-                if !streaming && p.dots && !tray::HIDDEN.load(Relaxed) {
-                    let fresh = a.dots_at.map(|t| t.elapsed() >= Duration::from_millis(33)).unwrap_or(true);
+                let minimized = ui.window().is_minimized();
+                if !streaming && ui.get_dots_on() && !minimized && !tray::HIDDEN.load(Relaxed) {
+                    // 30 fps. Each change costs ~2 window draws (Slint's frame throttle redraws at
+                    // the monitor's rate while a redraw is pending), so every tick would double it.
+                    let fresh = a.dots_at.map(|t| t.elapsed() >= Duration::from_millis(30)).unwrap_or(true);
                     if fresh {
                         a.dots_at = Some(Instant::now());
                         let t = START.with(|s| s.elapsed().as_secs_f32());
                         let mouse = ui.get_stage_hover().then(|| (ui.get_stage_mouse_x(), ui.get_stage_mouse_y()));
                         let dark = a.dark;
-                        let img = a.dots.get_or_insert_with(dots::Dots::new).render(ui.get_stage_w(), ui.get_stage_h(), sf, t, mouse, dark);
-                        ui.set_dots_image(img);
+                        let dots = a.dots.get_or_insert_with(dots::Dots::new);
+                        if let Some(m) = dots.render(ui.get_stage_w(), ui.get_stage_h(), sf, t, mouse, dark) {
+                            ui.set_dots_tiles(m);
+                        }
                     }
                 } else if a.dots.take().is_some() {
-                    ui.set_dots_image(slint::Image::default());
+                    ui.set_dots_tiles(slint::ModelRc::default());
                 }
                 let due = a.meter_at.map(|t| t.elapsed() >= Duration::from_secs(1)).unwrap_or(true);
                 if due {

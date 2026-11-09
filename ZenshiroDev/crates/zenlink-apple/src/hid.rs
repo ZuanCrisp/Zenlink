@@ -41,6 +41,8 @@ fn button(name: &str) -> Option<(u64, u64, u64)> {
         "eject" => (0x0C, 0xB8, 50), // shows / hides the on-screen keyboard
         "brightness-down" => (0x0C, 0x70, 25),
         "brightness-up" => (0x0C, 0x6F, 25),
+        "volume-up" => (0x0C, 0xE9, 50),
+        "volume-down" => (0x0C, 0xEA, 50),
         _ => return None,
     })
 }

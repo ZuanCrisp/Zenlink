@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "2.5.11"
+version = "2.5.12"
 edition = "2021"
 license = "GPL-3.0-only"
 authors = ["Zenvy Zenshiro"]
@@ -29,3 +29,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Test builds run like the real app: unoptimized pixel and packet loops cost a whole core.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

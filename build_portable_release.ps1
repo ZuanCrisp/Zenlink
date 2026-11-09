@@ -224,6 +224,8 @@ if ($LASTEXITCODE) { throw "cargo failed" }
 $rustTarget = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root "target" }
 $rustExe = Join-Path $rustTarget "release\ZenLink.exe"
 Copy-Item $rustExe $app
+# The Rust Apple engine decodes the device's sound with the same zlaac.dll (src/aac.rs).
+Copy-Item "$root\apps\desktop\backend\zenlink\zlaac.dll" $app
 Invoke-Sign @(Join-Path $app "ZenLink.exe")
 
 Write-Host "[3/4] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta

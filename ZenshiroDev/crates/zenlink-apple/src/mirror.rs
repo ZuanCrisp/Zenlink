@@ -2,11 +2,13 @@
 //! as Annex B access units. The offer follows idevice's tools/src/coredevice_stream.rs
 //! (MIT, Jackson Coxson) and what Device Hub sends.
 
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::time::Duration;
 
 use idevice::core_device::{
-    build_screen_audio_offer, build_screen_video_offer, build_start_audio_parameters,
-    build_start_video_parameters, CallInfoBlob, DisplayServiceClient, HevcDepacketizer, RtpPacket,
+    build_keyframe_request, build_receiver_report, build_screen_audio_offer, build_screen_video_offer, build_sdes,
+    build_start_audio_parameters, build_start_video_parameters, is_rtcp, CallInfoBlob,
+    DisplayServiceClient, HevcDepacketizer, ReportBlock, RtpPacket,
 };
 use idevice::RsdService as _;
 
@@ -57,18 +59,75 @@ impl Picker {
     }
 }
 
+/// The sound's AudioSpecificConfig: AAC-ELD, 48 kHz stereo, 480-sample frames (pymobiledevice3's
+/// AAC_ELD_ASC_48K_STEREO_480 with frameLengthFlag set, as ZenLink 2.5.x decoded it).
+pub const AUDIO_ASC: [u8; 4] = [0xF8, 0xE6, 0x50, 0x00];
+
+/// Where receiver reports for the sound go: the device's RTCP port, our SSRC, the device's SSRC.
+/// Without them the device ends the sound session after ~20 s (RTCPTimeoutInterval).
+#[derive(Clone, Copy, Debug)]
+struct Rtcp {
+    port: u16,
+    ours: u32,
+    theirs: u32,
+}
+
+/// `streamConfig` of a startmediastream answer. Its SSRC names are the device's view:
+/// LocalSSRC is the device's, RemoteSSRC ours.
+fn rtcp_of(answer: &plist::Value) -> Option<Rtcp> {
+    fn find<'a>(v: &'a plist::Value, key: &str) -> Option<&'a plist::Value> {
+        match v {
+            plist::Value::Dictionary(d) => d
+                .get(key)
+                .or_else(|| d.values().find_map(|x| find(x, key))),
+            plist::Value::Array(a) => a.iter().find_map(|x| find(x, key)),
+            _ => None,
+        }
+    }
+    let cfg = find(answer, "streamConfig")?;
+    let num = |k: &str| {
+        let v = find(cfg, k)?;
+        v.as_unsigned_integer()
+            .or_else(|| v.as_signed_integer().map(|i| i as u64))
+    };
+    Some(Rtcp {
+        port: num("SourcePort")? as u16,
+        ours: num("RemoteSSRC")? as u32,
+        theirs: num("LocalSSRC")? as u32,
+    })
+}
+
+/// The extended highest sequence number (RFC 3550) after `seq`.
+fn extend_seq(highest: u32, seq: u16) -> u32 {
+    if highest == 0 {
+        return u32::from(seq);
+    }
+    let mut cycles = highest >> 16;
+    let last = (highest & 0xFFFF) as u16;
+    if seq < last && last - seq > 0x8000 {
+        cycles = cycles.wrapping_add(1);
+    }
+    let ext = (cycles << 16) | u32::from(seq);
+    if ext.wrapping_sub(highest) < 0x8000_0000 {
+        ext
+    } else {
+        highest
+    }
+}
+
 fn new_id() -> String {
     uuid::Uuid::new_v4().to_string().to_uppercase()
 }
 
 /// Streams until `on_frame` returns `false` or the stream ends. Each call of `on_frame` gets
-/// one access unit in Annex B (the first ones carry VPS/SPS/PPS).
-///
-/// shortcut: the audio stream is negotiated (the device needs it) but its packets are dropped;
-/// sound in Rust is a later step.
+/// one access unit in Annex B (the first ones carry VPS/SPS/PPS); each call of `on_audio` one
+/// AAC-ELD access unit (see [`AUDIO_ASC`]). While `key` is set, a keyframe request (RTCP PLI +
+/// FIR) goes to the device every 200 ms; the caller clears it when a keyframe arrives.
 pub async fn stream(
     link: &mut Link,
+    key: &AtomicBool,
     mut on_frame: impl FnMut(Vec<u8>) -> bool,
+    mut on_audio: impl FnMut(&[u8]),
 ) -> Result<(), String> {
     let mut client = DisplayServiceClient::connect_rsd(&mut link.adapter, &mut link.rsd)
         .await
@@ -90,7 +149,7 @@ pub async fn stream(
     let session = uuid::Uuid::new_v4();
     let audio_offer = build_screen_audio_offer(&new_id(), &call_info)
         .map_err(|e| format!("audio offer: {e:?}"))?;
-    client
+    let audio_answer = client
         .start_media_stream(build_start_audio_parameters(
             &host,
             audio_udp.local_port(),
@@ -102,10 +161,14 @@ pub async fn stream(
         ))
         .await
         .map_err(|e| format!("start audio: {e:?}"))?;
+    let rtcp = rtcp_of(&audio_answer);
+    if rtcp.is_none() {
+        log::warn!("sound: no RTCP target in the answer; the device may stop the sound after 20 s");
+    }
     let video_offer =
         build_screen_video_offer(&new_id(), &call_info, uuid::Uuid::new_v4().as_u128() as u32)
             .map_err(|e| format!("video offer: {e:?}"))?;
-    client
+    let video_answer = client
         .start_media_stream(build_start_video_parameters(
             &host,
             video_udp.local_port(),
@@ -118,53 +181,113 @@ pub async fn stream(
         ))
         .await
         .map_err(|e| format!("start video: {e:?}"))?;
+    let video_rtcp = rtcp_of(&video_answer);
+    if video_rtcp.is_none() {
+        log::warn!("screen: no RTCP target in the answer; keyframes cannot be requested");
+    }
 
     let mut depack = HevcDepacketizer::new();
     let mut au = Vec::new();
     let mut picker = Picker::default();
     let mut frame_at = std::time::Instant::now();
+    let mut video_at = std::time::Instant::now();
+    let mut audio_seq = 0u32;
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let mut ask = tokio::time::interval(Duration::from_millis(200));
+    let mut fir_seq = 0u8;
+    let mut video_seq = 0u32;
     let result = loop {
-        let dg = match tokio::time::timeout(SILENCE, video_udp.recv()).await {
-            Ok(Ok(dg)) => dg,
-            Ok(Err(e)) => break Err(format!("video: {e:?}")),
-            Err(_) => break Err("the device stopped sending the screen".into()),
-        };
-        let Some(pkt) = RtpPacket::parse(&dg.data) else {
-            continue;
-        };
-        let held = (pkt.sequence_number, pkt.timestamp, pkt.payload.to_vec(), pkt.marker);
-        let Some((fresh, packets)) = picker.push(pkt.ssrc, held) else {
-            continue;
-        };
-        if fresh {
-            log::info!("screen: RTP stream {:08x}", pkt.ssrc);
-            depack = HevcDepacketizer::new();
-            au.clear();
-        }
-        let mut done = false;
-        for (seq, ts, payload, marker) in packets {
-            depack.push(seq, ts, &payload);
-            au.extend_from_slice(&depack.take_output());
-            if marker && !au.is_empty() {
-                frame_at = std::time::Instant::now();
-                if !on_frame(std::mem::take(&mut au)) {
-                    done = true;
-                    break;
+        tokio::select! {
+            dg = video_udp.recv() => {
+                let dg = match dg {
+                    Ok(dg) => dg,
+                    Err(e) => break Err(format!("video: {e:?}")),
+                };
+                video_at = std::time::Instant::now();
+                if is_rtcp(&dg.data) {
+                    continue; // the device's sender reports
+                }
+                let Some(pkt) = RtpPacket::parse(&dg.data) else {
+                    continue;
+                };
+                if picker.main == Some(pkt.ssrc) {
+                    video_seq = extend_seq(video_seq, pkt.sequence_number);
+                }
+                let held = (pkt.sequence_number, pkt.timestamp, pkt.payload.to_vec(), pkt.marker);
+                let Some((fresh, packets)) = picker.push(pkt.ssrc, held) else {
+                    continue;
+                };
+                if fresh {
+                    log::info!("screen: RTP stream {:08x}", pkt.ssrc);
+                    depack = HevcDepacketizer::new();
+                    au.clear();
+                }
+                let mut done = false;
+                for (seq, ts, payload, marker) in packets {
+                    depack.push(seq, ts, &payload);
+                    au.extend_from_slice(&depack.take_output());
+                    if marker && !au.is_empty() {
+                        frame_at = std::time::Instant::now();
+                        if !on_frame(std::mem::take(&mut au)) {
+                            done = true;
+                            break;
+                        }
+                    }
+                }
+                if done {
+                    break Ok(());
+                }
+                if frame_at.elapsed() > Duration::from_secs(3) {
+                    // Packets but no picture: say what arrives, once per stall.
+                    frame_at = std::time::Instant::now();
+                    log::info!(
+                        "screen: packets but no frame for 3 s (ssrc {:08x}, seq {}, pt {})",
+                        pkt.ssrc,
+                        pkt.sequence_number,
+                        pkt.payload_type
+                    );
                 }
             }
-        }
-        if done {
-            break Ok(());
-        }
-        if frame_at.elapsed() > Duration::from_secs(3) {
-            // Packets but no picture: say what arrives, once per stall.
-            frame_at = std::time::Instant::now();
-            log::info!(
-                "screen: packets but no frame for 3 s (ssrc {:08x}, seq {}, pt {})",
-                pkt.ssrc,
-                pkt.sequence_number,
-                pkt.payload_type
-            );
+            dg = audio_udp.recv() => {
+                let Ok(dg) = dg else { continue };
+                if is_rtcp(&dg.data) {
+                    continue;
+                }
+                if let Some(pkt) = RtpPacket::parse(&dg.data) {
+                    audio_seq = extend_seq(audio_seq, pkt.sequence_number);
+                    if !pkt.payload.is_empty() {
+                        on_audio(pkt.payload);
+                    }
+                }
+            }
+            _ = ask.tick() => {
+                if let (true, Some(r)) = (key.load(Relaxed), video_rtcp) {
+                    let media = picker.main.unwrap_or(r.theirs);
+                    let block = ReportBlock {
+                        source_ssrc: media,
+                        highest_seq: video_seq,
+                        ..ReportBlock::default()
+                    };
+                    fir_seq = fir_seq.wrapping_add(1);
+                    let req = build_keyframe_request(r.ours, "zenlink", media, &[block], fir_seq);
+                    let _ = video_udp.send_to(r.port, req).await;
+                }
+            }
+            _ = tick.tick() => {
+                if video_at.elapsed() > SILENCE {
+                    break Err("the device stopped sending the screen".into());
+                }
+                if let Some(r) = rtcp {
+                    let block = ReportBlock {
+                        source_ssrc: r.theirs,
+                        highest_seq: audio_seq,
+                        ..ReportBlock::default()
+                    };
+                    let mut rr = build_receiver_report(r.ours, &[block]);
+                    rr.extend(build_sdes(r.ours, "zenlink"));
+                    let _ = audio_udp.send_to(r.port, rr).await;
+                }
+            }
         }
     };
     let _ = client.stop_media_stream().await;
@@ -178,6 +301,29 @@ mod tests {
 
     fn p(seq: u16) -> Held {
         (seq, 0, vec![], false)
+    }
+
+    #[test]
+    fn extended_sequence_numbers() {
+        assert_eq!(extend_seq(0, 5), 5);
+        assert_eq!(extend_seq(5, 6), 6);
+        assert_eq!(extend_seq(6, 4), 6); // late packet
+        assert_eq!(extend_seq(65535, 2), 65536 + 2); // wraps into the next cycle
+    }
+
+    #[test]
+    fn rtcp_target_from_the_answer() {
+        let mut cfg = plist::Dictionary::new();
+        cfg.insert("SourcePort".into(), 50000u64.into());
+        cfg.insert("LocalSSRC".into(), 7u64.into());
+        cfg.insert("RemoteSSRC".into(), 9u64.into());
+        let mut conn = plist::Dictionary::new();
+        conn.insert("streamConfig".into(), plist::Value::Dictionary(cfg));
+        let mut top = plist::Dictionary::new();
+        top.insert("connection".into(), plist::Value::Dictionary(conn));
+        let r = rtcp_of(&plist::Value::Dictionary(top)).unwrap();
+        assert_eq!((r.port, r.ours, r.theirs), (50000, 9, 7));
+        assert!(rtcp_of(&plist::Value::Boolean(true)).is_none());
     }
 
     #[test]

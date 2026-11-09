@@ -19,6 +19,8 @@ pub const TYPE_SET_CLIPBOARD: u8 = 9;
 pub const TYPE_SET_DISPLAY_POWER: u8 = 10;
 pub const TYPE_ROTATE_DEVICE: u8 = 11;
 pub const TYPE_START_APP: u8 = 16;
+/// A fresh config and keyframe from the encoder (scrcpy 3.0+).
+pub const TYPE_RESET_VIDEO: u8 = 17;
 pub const TYPE_RESIZE_DISPLAY: u8 = 21;
 
 /// `KeyEvent.ACTION_*` and `MotionEvent.ACTION_*`.
@@ -126,6 +128,8 @@ pub enum Control {
     /// Starts an app by package name on the mirrored display (the new
     /// virtual display when there is one). A `+` prefix force-stops it first.
     StartApp(String),
+    /// Restarts the encoder: a new config packet and a keyframe follow.
+    ResetVideo,
     /// New size for a flex virtual display (`flex_display=true`), in pixels.
     ResizeDisplay {
         width: u16,
@@ -238,6 +242,7 @@ impl Control {
                 w.push(u8::from(*on));
             }
             Control::RotateDevice => w.push(TYPE_ROTATE_DEVICE),
+            Control::ResetVideo => w.push(TYPE_RESET_VIDEO),
             Control::StartApp(name) => {
                 let name = cut(name, APP_NAME_MAX_BYTES);
                 w.push(TYPE_START_APP);

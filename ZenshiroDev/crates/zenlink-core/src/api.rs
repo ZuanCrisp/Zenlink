@@ -19,6 +19,9 @@ pub struct CodecInfo {
     pub description: Vec<u8>,
     /// Apple mode answers POST /cast/pli with a keyframe; AirPlay and Studio cannot.
     pub keyframes_on_request: bool,
+    /// The picture's real size (width, height) when the encoder pads it and the stream does
+    /// not say so (iOS: 1206x2622 coded as 1216x2656 with no SPS window).
+    pub display: Option<(u32, u32)>,
 }
 
 #[derive(Deserialize)]
@@ -49,6 +52,7 @@ impl CodecInfo {
             codec,
             description,
             keyframes_on_request: raw.keyframes_on_request.unwrap_or(true),
+            display: None,
         })
     }
 }

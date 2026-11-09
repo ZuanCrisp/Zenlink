@@ -209,8 +209,121 @@ pub fn hvcc_from_annexb(config: &[u8]) -> Option<Vec<u8>> {
     Some(r)
 }
 
+/// Exp-Golomb bit reader over an RBSP (emulation prevention bytes removed).
+struct Bits {
+    data: Vec<u8>,
+    pos: usize,
+}
+
+impl Bits {
+    fn new(nal: &[u8]) -> Self {
+        let mut data = Vec::with_capacity(nal.len());
+        let mut zeros = 0;
+        for &b in nal {
+            if zeros >= 2 && b == 3 {
+                zeros = 0;
+                continue;
+            }
+            zeros = if b == 0 { zeros + 1 } else { 0 };
+            data.push(b);
+        }
+        Self { data, pos: 0 }
+    }
+
+    fn bit(&mut self) -> Option<u32> {
+        let b = self.data.get(self.pos / 8)? >> (7 - self.pos % 8) & 1;
+        self.pos += 1;
+        Some(u32::from(b))
+    }
+
+    fn u(&mut self, n: usize) -> Option<u32> {
+        (0..n).try_fold(0, |v, _| Some(v << 1 | self.bit()?))
+    }
+
+    fn skip(&mut self, n: usize) {
+        self.pos += n;
+    }
+
+    fn ue(&mut self) -> Option<u32> {
+        let mut zeros = 0;
+        while self.bit()? == 0 {
+            zeros += 1;
+            if zeros > 31 {
+                return None;
+            }
+        }
+        Some((1u32 << zeros) - 1 + self.u(zeros)?)
+    }
+}
+
+/// The visible picture of an HEVC stream (left, top, right, bottom in luma pixels) from the
+/// SPS conformance window; `None` without one. Encoders pad the coded size to a multiple of
+/// 16 or 32 (an iPhone 17's 1206x2622 screen comes as 1216x2656).
+pub fn hevc_visible(annexb: &[u8]) -> Option<[u32; 4]> {
+    let sps = split_annexb(annexb)
+        .into_iter()
+        .find(|n| n.len() > 2 && (n[0] >> 1) & 0x3f == 33)?;
+    let mut b = Bits::new(&sps[2..]);
+    b.skip(4); // sps_video_parameter_set_id
+    let sub_layers = b.u(3)? as usize;
+    b.skip(1);
+    b.skip(96); // general profile_tier_level
+    let mut present = Vec::new();
+    for _ in 0..sub_layers {
+        present.push((b.bit()?, b.bit()?));
+    }
+    if sub_layers > 0 {
+        b.skip(2 * (8 - sub_layers));
+    }
+    for (profile, level) in present {
+        b.skip(88 * profile as usize + 8 * level as usize);
+    }
+    b.ue()?; // sps_seq_parameter_set_id
+    let chroma = b.ue()?;
+    if chroma == 3 {
+        b.skip(1);
+    }
+    let (w, h) = (b.ue()?, b.ue()?);
+    if b.bit()? == 0 {
+        return None;
+    }
+    let (sx, sy) = match chroma {
+        1 => (2, 2),
+        2 => (2, 1),
+        _ => (1, 1),
+    };
+    let (l, r, t, bo) = (b.ue()? * sx, b.ue()? * sx, b.ue()? * sy, b.ue()? * sy);
+    (l + r < w && t + bo < h).then_some([l, t, w - r, h - bo])
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hevc_visible_reads_the_conformance_window() {
+        // A hand-built Main-profile SPS: 1216x2656, window right 5, bottom 17 (chroma units).
+        let mut bits = String::new();
+        let ue = |v: u32| {
+            let n = 32 - (v + 1).leading_zeros() - 1;
+            format!("{}{:0width$b}", "0".repeat(n as usize), v + 1, width = n as usize + 1)
+        };
+        bits += "0000"; // vps id
+        bits += "000"; // max_sub_layers_minus1
+        bits += "1";
+        bits += &"0".repeat(96);
+        bits += &ue(0); // sps id
+        bits += &ue(1); // 4:2:0
+        bits += &ue(1216);
+        bits += &ue(2656);
+        bits += "1";
+        bits += &(ue(0) + &ue(5) + &ue(0) + &ue(17));
+        while bits.len() % 8 != 0 {
+            bits.push('1');
+        }
+        let mut au = vec![0, 0, 0, 1, 33 << 1, 1];
+        au.extend(bits.as_bytes().chunks(8).map(|c| u8::from_str_radix(std::str::from_utf8(c).unwrap(), 2).unwrap()));
+        assert_eq!(super::hevc_visible(&au), Some([0, 0, 1206, 2622]));
+    }
+
     use super::*;
 
     #[test]

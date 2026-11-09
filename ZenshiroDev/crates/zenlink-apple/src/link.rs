@@ -11,7 +11,7 @@ use idevice::{
     rsd::RsdHandshake,
     tcp::handle::AdapterHandle,
     usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
-    IdeviceService,
+    IdeviceService, RsdService as _,
 };
 use tokio::net::TcpStream;
 
@@ -79,6 +79,10 @@ pub async fn info(udid: &str) -> Result<Info, String> {
         .start_session(&pairing)
         .await
         .map_err(err("lockdown session"))?;
+    Ok(read_info(&mut lockdown).await)
+}
+
+async fn read_info(lockdown: &mut LockdownClient) -> Info {
     let mut get = async |k: &str| -> String {
         lockdown
             .get_value(Some(k), None)
@@ -87,12 +91,12 @@ pub async fn info(udid: &str) -> Result<Info, String> {
             .and_then(|v| v.as_string().map(str::to_owned))
             .unwrap_or_default()
     };
-    Ok(Info {
+    Info {
         name: get("DeviceName").await,
         product_type: get("ProductType").await,
         version: get("ProductVersion").await,
         device_class: get("DeviceClass").await,
-    })
+    }
 }
 
 async fn provider(udid: &str) -> Result<UsbmuxdProvider, String> {
@@ -148,6 +152,30 @@ impl Link {
             provider,
             _control: control,
         })
+    }
+
+    /// The device's names and iOS version over the link (trusted lockdown through RSD), so a
+    /// device first seen on Wi-Fi gets its name too.
+    pub async fn info(&mut self) -> Result<Info, String> {
+        let mut lockdown = LockdownClient::connect_rsd(&mut self.adapter, &mut self.rsd)
+            .await
+            .map_err(err("lockdown over RSD"))?;
+        Ok(read_info(&mut lockdown).await)
+    }
+
+    /// The screen's size in pixels, portrait (lockdown's iTunes domain).
+    pub async fn screen(&mut self) -> Option<(u32, u32)> {
+        let mut lockdown = LockdownClient::connect_rsd(&mut self.adapter, &mut self.rsd)
+            .await
+            .ok()?;
+        let domain = Some("com.apple.mobile.iTunes");
+        let num = |v: Result<plist::Value, _>| {
+            let v = v.ok()?;
+            v.as_unsigned_integer().or_else(|| v.as_signed_integer().map(|i| i as u64))
+        };
+        let w = num(lockdown.get_value(Some("ScreenWidth"), domain).await)?;
+        let h = num(lockdown.get_value(Some("ScreenHeight"), domain).await)?;
+        (w > 0 && h > 0).then_some((w as u32, h as u32))
     }
 
     pub fn display_offered(&self) -> bool {

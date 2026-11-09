@@ -289,6 +289,15 @@ component BottomBar inherits Rectangle {
 
 // One iPhone/iPad in the Apple device list: connected now, or trusted
 // before and not connected ("offline").
+/// One tile of the dot field (see dots.rs).
+export struct DotTile {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    img: image,
+}
+
 export struct AppleDev {
     id: string,
     title: string,
@@ -520,7 +529,7 @@ component Placeholder inherits Rectangle {
                                 width: 8px;
                                 height: 8px;
                                 border-radius: 4px;
-                                background: d.state == "ready" ? Theme.ok : d.state == "need" ? Theme.warn : Theme.text-3.with-alpha(0.6);
+                                background: d.state == "live" ? Theme.accent : d.state == "ready" ? Theme.ok : d.state == "need" ? Theme.warn : Theme.text-3.with-alpha(0.6);
                             }
                         }
                         VerticalLayout {
@@ -2804,7 +2813,9 @@ export component AppWindow inherits Window {
     callback choose-platform(string, bool);
     callback change-platform();
     // Animated dot field (rendered in Rust) and the cursor over the stage.
-    in property <image> dots-image;
+    in property <[DotTile]> dots-tiles;
+    // The dot field is on screen (the window draws it only then).
+    out property <bool> dots-on: !root.picture && root.prefs.dots && !root.adding;
     out property <bool> stage-hover: stage-ta.has-hover;
     out property <length> stage-mouse-x: stage-ta.mouse-x;
     out property <length> stage-mouse-y: stage-ta.mouse-y;
@@ -3029,11 +3040,15 @@ export component AppWindow inherits Window {
                         clip: true;
                         stage-ta := TouchArea { }
                         // Not behind the add-device card: dots through its glass read as noise.
-                        if !root.picture && root.prefs.dots && !root.adding: Image {
-                            source: root.dots-image;
-                            width: parent.width;
-                            height: parent.height;
-                            image-fit: fill;
+                        if root.dots-on: Rectangle {
+                            for t in root.dots-tiles: Image {
+                                x: t.x;
+                                y: t.y;
+                                width: t.w;
+                                height: t.h;
+                                source: t.img;
+                                image-fit: fill;
+                            }
                         }
                         if root.on-android && root.android-phase != "streaming" && !root.adding: AndroidHome {
                             status: root.android-status;
