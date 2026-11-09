@@ -5,6 +5,9 @@ Full notes for each version are on the [Releases](https://github.com/zenvyzenshi
 ## 2.5.11
 
 ### Added
+- **Closing ZenLink:** the close button asks whether to keep ZenLink in the tray or quit, with "Remember my choice". Settings › Startup & closing changes the choice later. Quit from the tray never asks.
+- **Start with Windows** is off by default. The Settings toggle shows the real state, including a change made in Task Manager › Startup apps.
+- **Popped-out phone windows** have the same title bar, the full Android dock (Back, Home, Recents, notifications, volume, power) and their own full screen. They open centred on the screen.
 - **Device menu:** a ☰ button next to Settings opens a menu on the left with Home and every Android phone and iPhone / iPad, each with a status dot. The selected device has **Screen** and **Files** panels that open beside the menu.
 - **Home without pop-ups:** pick Android or iPhone / iPad, the connection mode and the driver right in the main area.
 - **Phone file manager (Android):** browse the phone, copy to the PC, delete, new folder, drop files to upload into the open folder.
@@ -17,6 +20,10 @@ Full notes for each version are on the [Releases](https://github.com/zenvyzenshi
 - **Collapsible settings cards** and a 5-step beginner flow in the README.
 
 ### Fixed
+- Quitting ZenLink also stops the adb server when ZenLink started it. A server started by another tool (Android Studio, scrcpy) keeps running.
+- Phone file manager: files that run code (`.exe`, `.bat`, `.ps1` and similar) copied from the phone are shown in their folder, never started.
+- Sound route: changing the route no longer turns sound on or off by itself; turning sound on or off no longer changes the device volume.
+- **Smaller downloads:** the service no longer carries a second copy of its Python sources (Setup.exe about 1 MB smaller).
 - **Apple Driver mode with Windows Smart App Control** ([#2](https://github.com/zenvyzenshiro/zenlink/issues/2)): the connection stopped at "Secure connection" with "DLL load failed while importing lzss" because Smart App Control blocked an unsigned helper module. ZenLink no longer ships or loads that module (a built-in Python version replaces it). Other unsigned files may still be blocked until the releases are code-signed.
 - After switching the connection mode or driver, ZenLink asks to restart instead of switching silently.
 - A restart of the service no longer opens a console window.
