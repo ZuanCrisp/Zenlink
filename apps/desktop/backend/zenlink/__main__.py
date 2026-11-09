@@ -1,4 +1,4 @@
-"""ZenLink desktop entry point: local server + native window."""
+"""ZenLink backend entry point: the local server the Rust window (ZenLink.exe) talks to."""
 
 from __future__ import annotations
 
@@ -9,32 +9,8 @@ import sys
 import threading
 
 from zenlink.castmanager import CastManager
-from zenlink.paths import APP_ROOT, ASSETS_DIR, BACKEND_DIR, DATA_DIR, LOG_DIR
+from zenlink.paths import APP_ROOT, BACKEND_DIR, LOG_DIR
 from zenlink.server import HOST, PORT, serve_forever
-from zenlink.window import WindowApi
-
-# Hardware video decode and sound without a click first.
-os.environ.setdefault(
-    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    # No DirectComposition video overlay: an overlay plane looks smooth on screen
-    # but reaches DWM-based capture (OBS Window/Display Capture) unevenly.
-    "--enable-features=PlatformHEVCDecoderSupport --autoplay-policy=no-user-gesture-required"
-    " --disable-direct-composition-video-overlays",
-)
-
-
-def _dark_title_bar(window) -> None:
-    """Dark mode + rounded corners for the frameless window (Windows 11 DWM)."""
-    try:
-        hwnd = window.native.Handle.ToInt32()
-        corner = ctypes.c_int(2)  # DWMWCP_ROUND
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner), ctypes.sizeof(corner))
-        value = ctypes.c_int(1)
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
-    except Exception:
-        pass
-
-
 
 def _wait_for_parent() -> None:
     """Headless backend: run until the process given by --parent-pid exits
@@ -54,31 +30,6 @@ def _wait_for_parent() -> None:
         return
     ctypes.windll.kernel32.WaitForSingleObject(handle, infinite)
     ctypes.windll.kernel32.CloseHandle(handle)
-
-ICON = ASSETS_DIR / "zenlink.ico"
-
-
-def _app_id() -> None:
-    """Own taskbar group (and icon) instead of python's."""
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("ZenLink.Next")
-    except Exception:
-        pass
-
-
-def _set_icon(window) -> None:
-    """Window + taskbar icon from assets/zenlink.ico (WinForms has no icon option)."""
-    try:
-        hwnd = window.native.Handle.ToInt32()
-        user32 = ctypes.windll.user32
-        user32.LoadImageW.restype = ctypes.c_void_p
-        for kind, size in ((1, 256), (0, 32)):  # ICON_BIG, ICON_SMALL
-            hicon = user32.LoadImageW(None, str(ICON), 1, size, size, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
-            if hicon:
-                user32.SendMessageW(hwnd, 0x0080, kind, ctypes.c_void_p(hicon))  # WM_SETICON
-    except Exception:
-        pass
-
 
 def _already_running() -> bool:
     """A second launch brings the running ZenLink to the front and exits,
@@ -145,7 +96,7 @@ def main() -> None:
                                       sys.version.split()[0], sys.platform)
     import faulthandler
 
-    try:  # a native crash (WebView2, audio driver, decoder) leaves a trace instead of nothing
+    try:  # a native crash (audio driver, decoder) leaves a trace instead of nothing
         faulthandler.enable(open(LOG_DIR / "crash.log", "a", encoding="utf-8"))  # noqa: SIM115
     except OSError:
         pass
@@ -176,52 +127,10 @@ def main() -> None:
         manager.stop()
         return
 
-    try:
-        import webview
-    except ImportError:
-        # Packaged builds leave the classic window out: open the real one.
-        manager.stop()
-        _open_rust_window()
-        return
-
-    _app_id()
-
-    api = WindowApi()
-    window = webview.create_window(
-        "ZenLink",
-        f"http://{HOST}:{PORT}/",
-        js_api=api,
-        width=1180,
-        height=760,
-        min_size=(640, 420),
-        frameless=True,
-        easy_drag=False,
-        background_color="#f5f6fa",
-    )
-    api.bind(window)
-    restart_requested = threading.Event()
-
-    def restart_hook() -> None:
-        restart_requested.set()
-        window.destroy()  # closes WebView2 cleanly; webview.start() returns
-
-    manager.restart_hook = restart_hook
-    manager.show_hook = api.show_from_tray
-
-    from zenlink.tray import Tray
-
-    tray = Tray(api, manager)
-    api.tray_available = tray.start()
-    window.events.shown += lambda: (_dark_title_bar(window), _set_icon(window))
-    try:
-        webview.start(gui="edgechromium", private_mode=False, storage_path=str(DATA_DIR / ".webview"))
-    finally:
-        tray.stop()
-        manager.stop()
-        if restart_requested.is_set():
-            from zenlink import restart
-
-            restart.spawn_new_instance()
+    # A started ZenLinkService.exe (or `python -m zenlink`) opens the Rust window, which starts
+    # its own backend; the classic WebView2 window is gone (v2.5.12).
+    manager.stop()
+    _open_rust_window()
 
 
 if __name__ == "__main__":

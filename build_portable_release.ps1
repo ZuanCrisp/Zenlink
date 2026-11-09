@@ -94,10 +94,8 @@ $pyiArgs = @(
     "--exclude-module", "tkinter",
     "--exclude-module", "matplotlib",
     "--exclude-module", "IPython",
-    # The classic WebView2 window (pywebview, pythonnet, pystray, Pillow,
-    # ui\) is not packaged: ZenLink.exe is the window and the backend runs
-    # --headless (ZenshiroDev/docs/SIZE_AUDIT.md, set A). The source zip keeps it
-    # (ZENLINK_UI=classic with Start ZenLink.bat).
+    # ZenLink.exe is the window and the backend runs --headless; the classic WebView2
+    # window was removed in v2.5.12. Kept excluded in case a dependency pulls them in.
     "--exclude-module", "webview",
     "--exclude-module", "clr",
     "--exclude-module", "clr_loader",

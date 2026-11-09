@@ -25,11 +25,10 @@ class PrerequisiteTests(unittest.TestCase):
         self.assertNotIn("EdgeUpdate", iss)
         self.assertNotIn("WebView2 Runtime (included", iss)
 
-    def test_start_script_checks_webview2_only_for_classic_window(self):
-        bat = _bat()
-        self.assertNotIn("EdgeUpdate", _section(bat, ":check_env"), "default setup must not install WebView2")
-        self.assertIn("call :check_webview2", _section(bat, ":classic"))
-        self.assertNotIn("check_webview2", _section(bat, ":launch"))
+    def test_start_script_never_installs_webview2(self):
+        # v2.5.12: the classic WebView2 window is gone; only the Rust window starts.
+        self.assertNotIn("EdgeUpdate", _bat())
+        self.assertNotIn(":classic", _bat())
 
     def test_start_script_builds_latest_code_before_launch(self):
         # The user tests manually with Start ZenLink.bat: it must run the current code.

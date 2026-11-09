@@ -1,12 +1,9 @@
 # Sound is decoded by zenlink/zlaac.dll (ZenshiroDev/resources/windows/native/zlaac), not PyAV. PyAV still arrives as a
 # pymobiledevice3 dependency; ZenshiroDev/tooling/dev/fake_backend.py and tests/test_aac.py use it.
 aiohttp>=3.10
-pywebview>=5.3
 pymobiledevice3>=11.49
 zeroconf>=0.132
 pycryptodome>=3.20
 cryptography>=42
 pyusb>=1.2.1
 sounddevice>=0.4.6
-pystray>=0.19
-Pillow>=10

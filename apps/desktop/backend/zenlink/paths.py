@@ -1,14 +1,14 @@
 r"""Filesystem locations.
 
 APP_ROOT holds the app's read-only files. In the frozen build they all sit in
-one folder (ui/, assets/, tools/, drivers/). In a source checkout APP_ROOT is
+one folder (assets/, tools/, drivers/). In a source checkout APP_ROOT is
 the repository root and the files live in the monorepo folders:
-apps/desktop/backend/ui, ZenshiroDev/resources/assets,
+ZenshiroDev/resources/assets,
 ZenshiroDev/tooling/windows/tools, ZenshiroDev/resources/windows/drivers.
-Use BACKEND_DIR, UI_DIR, ASSETS_DIR, TOOLS_DIR and DRIVERS_DIR, not APP_ROOT.
+Use BACKEND_DIR, ASSETS_DIR, TOOLS_DIR and DRIVERS_DIR, not APP_ROOT.
 
-DATA_DIR holds what ZenLink writes (settings, logs, WebView2 profile, the
-encrypted passcode): `data/` in the repository when run from source, the exe
+DATA_DIR holds what ZenLink writes (settings, logs, the encrypted
+passcode): `data/` in the repository when run from source, the exe
 folder for the portable build (a `portable.txt` next to ZenLink.exe), and
 %LOCALAPPDATA%\ZenLink-Next for the installed build (Program Files is read-only).
 The stable v2.2.31 uses %LOCALAPPDATA%\ZenLink; the beta never touches it.
@@ -36,7 +36,6 @@ if FROZEN:
     else:
         DATA_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / DATA_DIR_NAME
     BACKEND_DIR = APP_ROOT
-    UI_DIR = APP_ROOT / "ui"
     TOOLS_DIR = APP_ROOT / "tools"
     DRIVERS_DIR = APP_ROOT / "drivers"
 else:
@@ -45,7 +44,6 @@ else:
     # ZENLINK_DATA_DIR keeps dev data outside the checkout (Start ZenLink.local.bat).
     DATA_DIR = Path(os.environ.get("ZENLINK_DATA_DIR") or APP_ROOT / "data").resolve()
     BACKEND_DIR = APP_ROOT / "apps" / "desktop" / "backend"
-    UI_DIR = BACKEND_DIR / "ui"
     TOOLS_DIR = APP_ROOT / "ZenshiroDev" / "tooling" / "windows" / "tools"
     DRIVERS_DIR = APP_ROOT / "ZenshiroDev" / "resources" / "windows" / "drivers"
 ASSETS_DIR = APP_ROOT / "assets" if FROZEN else APP_ROOT / "ZenshiroDev" / "resources" / "assets"

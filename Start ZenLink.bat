@@ -77,7 +77,7 @@ echo Setup complete. Run ZenshiroDev\tooling\windows\scripts\Create-Desktop-Shor
 
 :launch
 rem ZenLink window (Rust, native GPU video). It starts the Python backend
-rem from .venv by itself. Set ZENLINK_UI=classic for the old window.
+rem from .venv by itself.
 rem Android: ZenLink finds adb in the Android SDK (ANDROID_HOME,
 rem ANDROID_SDK_ROOT, %LOCALAPPDATA%\Android\Sdk) or on PATH. Machine-only
 rem settings such as ANDROID_HOME can go in "Start ZenLink.local.bat" next
@@ -90,7 +90,6 @@ if exist "%~dp0Start ZenLink.local.bat" (
 rem ZenLink.exe finds this checkout (Python backend, .venv) through ZENLINK_SOURCE,
 rem also when CARGO_TARGET_DIR builds it outside the checkout.
 set "ZENLINK_SOURCE=%~dp0."
-if /i "%ZENLINK_UI%"=="classic" goto :classic
 set "NEXT=%~dp0ZenLink.exe"
 if exist "%NEXT%" goto :start_next
 rem Source checkout: build the window from the current code first, so a
@@ -98,19 +97,14 @@ rem manual test always runs the latest changes. Unchanged code builds in seconds
 set "NEXT=%~dp0target\release\ZenLink.exe"
 if defined CARGO_TARGET_DIR set "NEXT=%CARGO_TARGET_DIR%\release\ZenLink.exe"
 call :build_next || exit /b 1
-if not exist "%NEXT%" goto :classic
+if not exist "%NEXT%" (
+    echo ZenLink.exe isn't built yet and Rust isn't installed. Install Rust from https://rustup.rs and run this again.
+    pause
+    exit /b 1
+)
 
 :start_next
 start "" "%NEXT%"
-exit /b 0
-
-:classic
-call :check_webview2
-if exist "%PYW%" (
-    start "" "%PYW%" -m zenlink
-) else (
-    start "" "%PY%" -m zenlink
-)
 exit /b 0
 
 :build_next
@@ -130,16 +124,6 @@ if not "!RC!"=="0" (
     echo The build failed. If ZenLink is still open, close it and run Start ZenLink.bat again.
     pause
     exit /b 1
-)
-exit /b 0
-
-:check_webview2
-rem Microsoft Edge WebView2: only the classic window (ZENLINK_UI=classic)
-rem uses it. The Rust window does not need it (B-6).
-reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv >nul 2>&1 || ^
-reg query "HKCU\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv >nul 2>&1 || (
-    echo  - Installing Microsoft Edge WebView2 for the classic window...
-    winget install -e --id Microsoft.EdgeWebView2Runtime --silent --accept-package-agreements --accept-source-agreements
 )
 exit /b 0
 

@@ -24,7 +24,6 @@ from zenlink.apple import session
 from zenlink.apple.models import set_custom_name
 from zenlink.castmanager import CastManager
 from zenlink.drivers import manager as driver_manager
-from zenlink.paths import ASSETS_DIR, UI_DIR
 
 SUPPORT_URL = "https://sociabuzz.com/zenvy/tribe"
 CLIENT_KEY: web.AppKey["aiohttp.ClientSession"] = web.AppKey("client")
@@ -38,29 +37,13 @@ _HOP = {"connection", "keep-alive", "transfer-encoding", "content-length", "cont
 
 
 @web.middleware
-async def _no_stale_ui(request: web.Request, handler):
-    """UI files must never come from an old cache after an update."""
-    resp = await handler(request)
-    if request.path.startswith("/ui/") or request.path == "/":
-        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
-    return resp
-
-
 def build_app(manager: CastManager) -> web.Application:
-    app = web.Application(client_max_size=4 * 1024 * 1024, middlewares=[_no_stale_ui])
+    app = web.Application(client_max_size=4 * 1024 * 1024)
     routes = web.RouteTableDef()
 
     @routes.get("/")
     async def index(_request: web.Request) -> web.Response:
-        # Version every UI file by its modification time so an updated app
-        # never runs a cached old script (WebView2 keeps its cache on disk).
-        if not (UI_DIR / "index.html").is_file():
-            # Packaged builds have no classic window: ZenLink.exe is the UI.
-            return web.Response(text="ZenLink backend. Open ZenLink.exe.", content_type="text/plain")
-        html = (UI_DIR / "index.html").read_text(encoding="utf-8")
-        version = int(max((f.stat().st_mtime for f in UI_DIR.iterdir() if f.is_file()), default=0))
-        html = re.sub(r'(/ui/[\w.-]+\.(?:js|css|png|svg))"', lambda m: f'{m.group(1)}?v={version}"', html)
-        return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-store"})
+        return web.Response(text="ZenLink backend. Open ZenLink.exe.", content_type="text/plain")
 
     @routes.get("/api/state")
     async def state(_request: web.Request) -> web.Response:
@@ -428,13 +411,6 @@ def build_app(manager: CastManager) -> web.Application:
     app[OCR_KEY] = OcrSession()
     app.cleanup_ctx.append(client_ctx)
     app.add_routes(routes)
-    if UI_DIR.is_dir():  # the classic window's files (source checkout only)
-        # The logo is shared with the Rust window (ZenshiroDev/resources/assets).
-        async def logo(_request: web.Request) -> web.FileResponse:
-            return web.FileResponse(ASSETS_DIR / "logo-256.png")
-
-        app.router.add_get("/ui/logo-256.png", logo)
-        app.router.add_static("/ui/", UI_DIR, show_index=False)
     return app
 
 
