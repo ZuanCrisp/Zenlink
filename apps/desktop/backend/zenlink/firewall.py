@@ -1,4 +1,5 @@
-"""Windows Firewall rule so AirPlay (ZenLink Studio over Wi-Fi) can be reached.
+"""Windows Firewall rule so AirPlay (ZenLink Studio over Wi-Fi) and Apple Driver over Wi-Fi
+(ZenLink.exe browses mDNS for the device) can be reached.
 
 The iPhone/iPad must reach ZenLink on the local network: mDNS queries (UDP
 5353), the AirPlay port (TCP 7000) and the stream ports. Windows blocks
@@ -22,7 +23,9 @@ _NO_WINDOW = 0x08000000
 def programs() -> list[str]:
     """Executables that actually own ZenLink's sockets."""
     if getattr(sys, "frozen", False):
-        return [str(Path(sys.executable).resolve())]
+        service = Path(sys.executable).resolve()
+        window = service.parent / "ZenLink.exe"  # Apple Driver (Rust) runs in the window's process
+        return [str(service)] + ([str(window)] if window.exists() else [])
     base = Path(getattr(sys, "_base_executable", sys.executable)).resolve().parent
     out = [str(base / name) for name in ("pythonw.exe", "python.exe") if (base / name).exists()]
     return out or [str(Path(sys.executable).resolve())]

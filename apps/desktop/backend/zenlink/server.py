@@ -181,12 +181,6 @@ def build_app(manager: CastManager) -> web.Application:
             ok, message = False, f"The device didn't take the shortcut ({error})."
         return web.json_response({"ok": ok, "message": message}, status=200 if ok else 502)
 
-    @routes.post("/api/unlock-on-lock")
-    async def unlock_on_lock(request: web.Request) -> web.Response:
-        body = await request.json()
-        manager.unlock_on_lock = bool(body.get("enabled"))
-        return web.json_response({"enabled": manager.unlock_on_lock})
-
     @routes.get("/api/audio")
     async def audio_get(_request: web.Request) -> web.Response:
         return web.json_response(manager.audio.stats())

@@ -126,13 +126,6 @@ class ZlaacTests(unittest.TestCase):
 
     def test_wrappers_use_zlaac(self):
         from zenlink.airplay.receiver import _AudioDecoder
-        from zenlink.apple.audio import AacEldDecoder
-
-        from zenlink.aac import read_zlau
-
-        asc, _, aus = read_zlau((FIX / "eld_48000.zlau").read_bytes())
-        d = AacEldDecoder(asc)  # sets frameLengthFlag itself
-        self.assertEqual(len(d.decode(aus[0]) + d.decode(aus[1])), 3840)
         self.assertTrue(_AudioDecoder(bytes(16), bytes(16), 8)._ok)
 
 

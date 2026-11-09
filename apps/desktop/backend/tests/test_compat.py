@@ -141,13 +141,12 @@ class CastManagerRoutingTests(unittest.TestCase):
                 self.assertFalse(m.state["control"]["control"], "control is not claimed before it opens")
                 self.assertEqual(m.capture_info()["source"], "AirPlay (Wi-Fi) + touch over the Apple driver")
 
-    def test_ios_27_keeps_native_apple_mode(self):
+    def test_ios_27_is_left_to_the_window(self):
+        # Apple Driver for iOS 27+ runs in ZenLink.exe (Rust); the service never starts it.
         m = self.make()
         self.start_with(m, "27.0")
-        self.assertEqual(m.state["backend"], "apple")
-        self.assertEqual(type(m._session).__name__, "AppleCastSession")
-        self.assertIsNone(m.hub)
-        self.assertEqual(m.state["control"]["level"], "native")
+        self.assertEqual(m.state["phase"], "error")
+        self.assertIsNone(m._session)
 
     def test_ios_16_is_refused_with_studio_advice(self):
         m = self.make()

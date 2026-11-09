@@ -2,6 +2,9 @@
 //! the tunnel, the Developer Disk Image and the screen, all in ZenLink.exe on `zenlink-apple`
 //! (idevice). It replaces the Python backend's Apple session; ZenLink Studio still runs there.
 //!
+//! iOS 17-26 has no screen service: the backend still runs Hybrid (AirPlay picture + touch)
+//! for those devices.
+//!
 //! The window reads the same state JSON the backend sent (`snapshot`), so `on_state` and the
 //! device list stay as they are: `main.rs` lays this state over the backend's while the
 //! connection mode is Apple Driver.
@@ -14,7 +17,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use zenlink_apple::{link, mirror, models, wifi};
+use zenlink_apple::{hid, link, mirror, models, wifi};
 use zenlink_core::api::{Codec, CodecInfo};
 use zenlink_core::nal::{hvcc_from_annexb, split_annexb};
 use zenlink_core::source::{RecordStream, VideoSource};
@@ -58,6 +61,8 @@ pub struct Engine {
     stop: Mutex<Option<Arc<AtomicBool>>>,
     /// Access units of the running session, taken by the decoder's source.
     frames: Mutex<Option<Receiver<Vec<u8>>>>,
+    /// Touches, keys and buttons into the running session.
+    input: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Input>>>,
     watching: AtomicBool,
 }
 
@@ -68,9 +73,25 @@ static IN_USE: AtomicBool = AtomicBool::new(false);
 /// From the backend's state: the device picked in the list, and Wi-Fi (wireless) vs USB.
 static PICKED: Mutex<Option<String>> = Mutex::new(None);
 static WIRELESS: AtomicBool = AtomicBool::new(false);
+/// The last Start went to the backend's Hybrid session (iOS 17-26).
+static HYBRID: AtomicBool = AtomicBool::new(false);
+/// Settings > unlock the device again when it locks while mirroring.
+static UNLOCK_ON_LOCK: AtomicBool = AtomicBool::new(false);
 
+pub fn set_unlock_on_lock(on: bool) {
+    UNLOCK_ON_LOCK.store(on, Relaxed);
+}
+
+/// What the session's HID task runs, in order.
+enum Input {
+    Hid(hid::Cmd),
+    /// SpringBoard reported a lock.
+    Locked,
+}
+
+/// Apple Driver mode and the Rust engine (not Hybrid) serves it: input and video go here.
 pub fn in_use() -> bool {
-    IN_USE.load(Relaxed)
+    IN_USE.load(Relaxed) && !HYBRID.load(Relaxed)
 }
 
 /// Lays the engine's state over the backend's while the mode is Apple Driver.
@@ -89,7 +110,7 @@ pub fn overlay(st: &mut Value) {
     if IN_USE.swap(apple, Relaxed) && !apple {
         engine().stop(); // the mode changed away from Apple Driver
     }
-    if !apple {
+    if !apple || HYBRID.load(Relaxed) {
         return;
     }
     if let (Some(dst), Value::Object(src)) = (st.as_object_mut(), engine().snapshot()) {
@@ -97,10 +118,26 @@ pub fn overlay(st: &mut Value) {
     }
 }
 
-/// Start in the Apple workspace (the window's Start button).
-pub fn start() {
+/// Start in the Apple workspace (the window's Start button). `false`: the backend starts it
+/// (not Apple Driver mode, or an iOS 17-26 device for Hybrid).
+pub fn start() -> bool {
+    HYBRID.store(false, Relaxed);
+    if !IN_USE.load(Relaxed) {
+        return false;
+    }
     let picked = PICKED.lock().unwrap().clone();
-    engine().start(picked, WIRELESS.load(Relaxed));
+    let handled = engine().start(picked, WIRELESS.load(Relaxed));
+    HYBRID.store(!handled, Relaxed);
+    handled
+}
+
+/// iOS major version 17-26: no screen service, Hybrid runs in the backend.
+fn hybrid_version(version: &str) -> bool {
+    version
+        .split('.')
+        .next()
+        .and_then(|m| m.parse::<u32>().ok())
+        .is_some_and(|m| m < 27)
 }
 
 pub fn engine() -> &'static Arc<Engine> {
@@ -120,6 +157,7 @@ pub fn engine() -> &'static Arc<Engine> {
             }),
             stop: Mutex::new(None),
             frames: Mutex::new(None),
+            input: Mutex::new(None),
             watching: AtomicBool::new(false),
         })
     })
@@ -175,10 +213,8 @@ fn save_info(all: &HashMap<String, link::Info>) {
 }
 
 /// A name the user gave the device in ZenLink (the backend's devices.json).
-/// shortcut: reads %LOCALAPPDATA%\ZenLink-Next only, not a portable build's folder; move the
-/// rename feature to Rust in stage 3.
 fn custom_name(udid: &str) -> Option<String> {
-    let p = zenlink_core::local_data_dir()?.join("devices.json");
+    let p = crate::backend_data_dir()?.join("devices.json");
     let v: Value = serde_json::from_slice(&std::fs::read(p).ok()?).ok()?;
     v.get(udid.replace('-', ""))
         .and_then(Value::as_str)
@@ -186,7 +222,48 @@ fn custom_name(udid: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The saved passcode (the backend's secrets.json, sealed with DPAPI for this Windows user).
+fn passcode() -> String {
+    use base64::Engine as _;
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{
+        CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+    };
+    let Some(sealed) = crate::backend_data_dir()
+        .and_then(|d| std::fs::read(d.join("secrets.json")).ok())
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v.get("passcode")?.as_str().map(str::to_string))
+        .and_then(|s| base64::engine::general_purpose::STANDARD.decode(s).ok())
+    else {
+        return String::new();
+    };
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: sealed.len() as u32,
+        pbData: sealed.as_ptr() as *mut u8,
+    };
+    let mut out = CRYPT_INTEGER_BLOB::default();
+    // SAFETY: `input` points at `sealed`, alive for the call; `out` is freed with LocalFree.
+    unsafe {
+        if CryptUnprotectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut out)
+            .is_err()
+        {
+            return String::new();
+        }
+        let code = String::from_utf8_lossy(std::slice::from_raw_parts(out.pbData, out.cbData as usize))
+            .into_owned();
+        let _ = LocalFree(Some(HLOCAL(out.pbData.cast())));
+        code
+    }
+}
+
 impl Engine {
+    /// A touch, key or button for the running session (dropped when none runs).
+    pub fn send(&self, c: hid::Cmd) {
+        if let Some(tx) = self.input.lock().unwrap().as_ref() {
+            let _ = tx.send(Input::Hid(c));
+        }
+    }
+
     fn set(&self, phase: &'static str, detail: &str, error: Option<String>) {
         let mut s = self.state.lock().unwrap();
         s.phase = phase;
@@ -306,8 +383,8 @@ impl Engine {
     }
 
     /// Starts the picked device (when listed), else the first ready one; USB before Wi-Fi
-    /// unless `wireless`.
-    pub fn start(self: &Arc<Self>, picked: Option<String>, wireless: bool) {
+    /// unless `wireless`. `false`: the device runs iOS 17-26, left to the backend's Hybrid.
+    pub fn start(self: &Arc<Self>, picked: Option<String>, wireless: bool) -> bool {
         self.stop();
         let devs = self.devices.lock().unwrap().clone();
         let ready = |d: &&Dev| d.paired;
@@ -330,8 +407,12 @@ impl Engine {
                 "Unlock the device and tap Trust, then press Start again."
             };
             self.set("error", "", Some(msg.into()));
-            return;
+            return true;
         };
+        let version = self.info.lock().unwrap().get(&dev.udid).map(|i| i.version.clone());
+        if version.is_some_and(|v| hybrid_version(&v)) {
+            return false;
+        }
         let name = self
             .entry(&dev)
             .get("deviceName")
@@ -379,6 +460,7 @@ impl Engine {
         if let Err(e) = spawned {
             self.set("error", "", Some(format!("thread: {e}")));
         }
+        true
     }
 
     async fn session(
@@ -416,9 +498,51 @@ impl Engine {
         let watch_rot = zenlink_apple::watch::orientation(l.adapter.clone(), l.rsd.clone(), |r| {
             self.state.lock().unwrap().rotation = r;
         });
-        let watch_lock = zenlink_apple::watch::lock(l.adapter.clone(), l.rsd.clone(), || {
+        let (itx, mut irx) = tokio::sync::mpsc::unbounded_channel();
+        *self.input.lock().unwrap() = Some(itx.clone());
+        let watch_lock = zenlink_apple::watch::lock(l.adapter.clone(), l.rsd.clone(), move || {
             log::info!("apple: device locked");
+            let _ = itx.send(Input::Locked);
         });
+        let ipad = self
+            .info
+            .lock()
+            .unwrap()
+            .get(&dev.udid)
+            .is_some_and(|i| i.device_class == "iPad");
+        let mut hid = hid::Hid::new(l.adapter.clone(), l.rsd.clone(), ipad);
+        let input = async {
+            let mut unlocked_at: Option<Instant> = None;
+            while let Some(i) = irx.recv().await {
+                let cmd = match i {
+                    Input::Hid(hid::Cmd::Action { name, .. }) if name == "wake" => {
+                        hid::Cmd::Action { name, text: passcode() }
+                    }
+                    Input::Hid(c) => c,
+                    // Wake and type the saved passcode. Locks while an unlock runs, or within
+                    // 3 s after it, are ignored, so a wrong passcode cannot loop.
+                    Input::Locked => {
+                        if !UNLOCK_ON_LOCK.load(Relaxed)
+                            || self.state.lock().unwrap().phase != "streaming"
+                            || unlocked_at.is_some_and(|t| t.elapsed() < Duration::from_secs(3))
+                        {
+                            continue;
+                        }
+                        tokio::time::sleep(Duration::from_millis(800)).await; // let the lock finish
+                        hid::Cmd::Action { name: "wake".into(), text: passcode() }
+                    }
+                };
+                let wake = matches!(&cmd, hid::Cmd::Action { name, .. } if name == "wake");
+                match hid.run(cmd).await {
+                    Ok(note) if !note.is_empty() => log::info!("apple input: {note}"),
+                    Ok(_) => {}
+                    Err(e) => log::warn!("apple input: {e}"),
+                }
+                if wake {
+                    unlocked_at = Some(Instant::now());
+                }
+            }
+        };
         let mut first = true;
         let stream = mirror::stream(&mut l, |au| {
             if stop.load(Relaxed) {
@@ -437,6 +561,7 @@ impl Engine {
             r = stream => r,
             _ = watch_rot => Ok(()),
             _ = watch_lock => Ok(()),
+            _ = input => Ok(()),
         }
     }
 
@@ -445,6 +570,7 @@ impl Engine {
             s.store(true, Relaxed);
         }
         *self.frames.lock().unwrap() = None;
+        *self.input.lock().unwrap() = None;
         let mut st = self.state.lock().unwrap();
         st.phase = "idle";
         st.detail.clear();
@@ -600,5 +726,11 @@ mod tests {
         assert!(!key);
         assert!(codec_info(&nal(1, &[1, 2])).is_none());
         assert!(frame(&nal(32, &[1, 2])).is_none());
+    }
+
+    #[test]
+    fn ios_17_to_26_go_to_hybrid() {
+        assert!(hybrid_version("17.0") && hybrid_version("26.1"));
+        assert!(!hybrid_version("27.0") && !hybrid_version("28") && !hybrid_version(""));
     }
 }

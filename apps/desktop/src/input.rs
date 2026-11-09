@@ -1,12 +1,61 @@
-//! Input worker: posts touches, strokes and buttons to the backend in order,
-//! off the UI thread. Consecutive moves are coalesced (only the newest is sent).
+//! Input worker: sends touches, strokes and buttons in order, off the UI thread, to the Rust
+//! Apple engine in Apple Driver mode, else to the backend. Consecutive moves are coalesced
+//! (only the newest is sent).
 
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
+use zenlink_apple::hid;
 use zenlink_core::api::{device_point, Api, TouchKind};
+
+use crate::apple;
+
+/// Where input goes: the Rust Apple engine in Apple Driver mode, else the backend.
+struct Out(Api);
+
+impl Out {
+    fn touch(&self, kind: TouchKind, x: u16, y: u16) {
+        if apple::in_use() {
+            let contact = matches!(kind, TouchKind::Contact);
+            apple::engine().send(hid::Cmd::Touch { contact, x, y });
+        } else {
+            self.0.touch(kind, x, y);
+        }
+    }
+
+    fn home(&self) {
+        if apple::in_use() {
+            apple::engine().send(hid::Cmd::Button("home"));
+        } else {
+            self.0.button("home");
+        }
+    }
+
+    fn action(&self, name: &str, text: &str) {
+        if apple::in_use() {
+            apple::engine().send(hid::Cmd::Action {
+                name: name.into(),
+                text: text.into(),
+            });
+        } else if text.is_empty() {
+            self.0.keyboard_action(name);
+        } else {
+            let _ = self.0.keyboard_text(name, text);
+        }
+    }
+
+    fn tap(&self, usages: Vec<u8>) {
+        if apple::in_use() {
+            apple::engine().send(hid::Cmd::Keys(usages));
+            apple::engine().send(hid::Cmd::Keys(Vec::new()));
+        } else {
+            self.0.key(&serde_json::json!({ "usages": usages }));
+            self.0.key(&serde_json::json!({ "usages": [] }));
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Cmd {
@@ -48,6 +97,7 @@ impl Input {
 }
 
 fn worker(api: Api, rx: Receiver<Cmd>, rot: Arc<AtomicU32>) {
+    let api = Out(api);
     let pt = |u: f32, v: f32| device_point(u, v, rot.load(Relaxed));
     let mut next: Option<Cmd> = None;
     loop {
@@ -98,17 +148,12 @@ fn worker(api: Api, rx: Receiver<Cmd>, rot: Arc<AtomicU32>) {
                     if i > 0 {
                         std::thread::sleep(Duration::from_millis(120));
                     }
-                    api.button("home");
+                    api.home();
                 }
             }
-            Cmd::Action(a) => api.keyboard_action(a),
-            Cmd::Keys(usages) => {
-                api.key(&serde_json::json!({ "usages": usages }));
-                api.key(&serde_json::json!({ "usages": [] }));
-            }
-            Cmd::TypeText(text) => {
-                let _ = api.keyboard_text("paste-pc", &text);
-            }
+            Cmd::Action(a) => api.action(a, ""),
+            Cmd::Keys(usages) => api.tap(usages),
+            Cmd::TypeText(text) => api.action("paste-pc", &text),
         }
     }
 }

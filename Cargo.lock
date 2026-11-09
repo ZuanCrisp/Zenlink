@@ -6465,6 +6465,7 @@ dependencies = [
 name = "zenlink-app"
 version = "2.5.11"
 dependencies = [
+ "base64 0.22.1",
  "log",
  "miniz_oxide 0.9.1",
  "qrcodegen",

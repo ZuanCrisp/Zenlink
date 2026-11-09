@@ -481,11 +481,8 @@ fn push_audio(api: &Api, p: &Prefs, muted: bool) {
     let to_pc = p.audio_out.as_str() != "device";
     let body = json!({ "enabled": to_pc, "route": p.audio_out.as_str(), "volume": p.volume / 100.0, "muted": muted });
     android::set_audio(to_pc, p.volume / 100.0, muted);
-    let relock = json!({ "enabled": p.unlock_on_lock });
-    std::thread::spawn(move || {
-        api.audio(&body);
-        let _ = api.post("/api/unlock-on-lock", &relock);
-    });
+    apple::set_unlock_on_lock(p.unlock_on_lock);
+    std::thread::spawn(move || api.audio(&body));
 }
 
 fn str_of<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
@@ -651,9 +648,7 @@ fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
 
 /// Apple Driver mode runs in Rust (apple.rs); ZenLink Studio still in the backend.
 fn cast_start(api: &Api) {
-    if apple::in_use() {
-        apple::start();
-    } else {
+    if !apple::start() {
         api.start_cast();
     }
 }
@@ -1113,13 +1108,11 @@ fn widen_for_sheet(ui: &AppWindow) {
     }
 }
 
-/// True when the backend's settings.json remembers a connection mode
-/// (source checkout: <repo>\data; portable: next to the exe; installed:
-/// %LOCALAPPDATA%\ZenLink-Next).
-fn mode_remembered() -> bool {
-    let mut files = Vec::new();
-    // Source checkout started by Start ZenLink.bat: ZENLINK_SOURCE names it, and
-    // ZENLINK_DATA_DIR may move its data folder (the same rule as paths.py).
+/// The backend's data folder (paths.py `DATA_DIR`): a source checkout uses <repo>\data (or
+/// ZENLINK_DATA_DIR), a portable folder its own folder, an installed build
+/// %LOCALAPPDATA%\ZenLink-Next.
+pub fn backend_data_dir() -> Option<std::path::PathBuf> {
+    // Source checkout started by Start ZenLink.bat: ZENLINK_SOURCE names it.
     let source = std::env::var_os("ZENLINK_SOURCE")
         .filter(|s| !s.is_empty())
         .map(std::path::PathBuf::from);
@@ -1131,7 +1124,6 @@ fn mode_remembered() -> bool {
             .into_iter()
             .chain(exe.ancestors().skip(1).map(|d| d.to_path_buf()));
         for dir in dirs {
-            let dir = dir.as_path();
             if dir
                 .join("apps")
                 .join("desktop")
@@ -1140,28 +1132,22 @@ fn mode_remembered() -> bool {
                 .join("connection.py")
                 .exists()
             {
-                let data = data.clone().unwrap_or_else(|| dir.join("data"));
-                files.push(data.join("settings.json"));
-                break;
+                return Some(data.unwrap_or_else(|| dir.join("data")));
             }
             if dir.join("portable.txt").exists() {
-                files.push(dir.join("settings.json"));
-                break;
+                return Some(dir);
             }
         }
     }
-    // Installed and portable builds keep settings in %LOCALAPPDATA%\ZenLink-Next;
-    // a source checkout or portable folder only uses its own file.
-    if files.is_empty() {
-        if let Some(d) = zenlink_core::local_data_dir() {
-            files.push(d.join("settings.json"));
-        }
-    }
-    files
-        .iter()
-        .filter_map(|f| std::fs::read(f).ok())
-        .filter_map(|b| serde_json::from_slice::<Value>(&b).ok())
-        .any(|v| {
+    zenlink_core::local_data_dir()
+}
+
+/// True when the backend's settings.json remembers a connection mode.
+fn mode_remembered() -> bool {
+    backend_data_dir()
+        .and_then(|d| std::fs::read(d.join("settings.json")).ok())
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|v| {
             v.get("rememberConnectionMode")
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
@@ -3915,8 +3901,9 @@ fn main() -> Result<(), slint::PlatformError> {
             std::thread::spawn(move || {
                 if apple::in_use() {
                     apple::engine().stop();
-                    apple::start();
-                    return;
+                    if apple::start() {
+                        return;
+                    }
                 }
                 a.stop_cast();
                 // The backend ignores Start while the old session is still
