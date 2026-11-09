@@ -1,0 +1,226 @@
+//! An open RSD link to a device: the USB tunnel (CoreDeviceProxy) or the Wi-Fi tunnel
+//! (RemotePairing), both into idevice's in-process TCP stack, plus the Developer Disk Image.
+
+use idevice::{
+    core_device_proxy::CoreDeviceProxy,
+    cryptexd::{install_ddi, installed_ddi, Cryptex1Assets},
+    lockdown::LockdownClient,
+    mobile_image_mounter::ImageMounter,
+    provider::{IdeviceProvider as _, UsbmuxdProvider},
+    remote_pairing::{RemotePairingClient, RpPairingSocket},
+    rsd::RsdHandshake,
+    tcp::handle::AdapterHandle,
+    usbmuxd::{UsbmuxdAddr, UsbmuxdConnection},
+    IdeviceService,
+};
+use tokio::net::TcpStream;
+
+use crate::ddi::{self, Kind};
+use crate::wifi;
+
+pub const DISPLAY_SERVICE: &str = "com.apple.coredevice.displayservice";
+
+/// What lockdown says about a device (USB only).
+#[derive(Clone, Debug, Default)]
+pub struct Info {
+    pub name: String,
+    pub product_type: String,
+    pub version: String,
+    pub device_class: String,
+}
+
+pub struct Link {
+    pub adapter: AdapterHandle,
+    pub rsd: RsdHandshake,
+    rsd_port: u16,
+    pub wifi: bool,
+    /// USB: the usbmuxd provider (the image mounter needs lockdown).
+    provider: Option<UsbmuxdProvider>,
+    /// Wi-Fi: the RemotePairing connection; the device drops the tunnel when it closes.
+    _control: Option<RemotePairingClient<RpPairingSocket<TcpStream>>>,
+}
+
+fn err(what: &str) -> impl Fn(idevice::IdeviceError) -> String + '_ {
+    move |e| format!("{what}: {e:?}")
+}
+
+pub async fn usbmux() -> Result<UsbmuxdConnection, String> {
+    UsbmuxdConnection::default()
+        .await
+        .map_err(|e| format!("Apple Mobile Device Service: {e:?}"))
+}
+
+/// The device's names and iOS version over lockdown. Needs Trust (a pair record).
+pub async fn info(udid: &str) -> Result<Info, String> {
+    let provider = provider(udid).await?;
+    let mut lockdown = LockdownClient::connect(&provider)
+        .await
+        .map_err(err("lockdown"))?;
+    let pairing = provider
+        .get_pairing_file()
+        .await
+        .map_err(err("pair record (Trust this computer)"))?;
+    lockdown
+        .start_session(&pairing)
+        .await
+        .map_err(err("lockdown session"))?;
+    let mut get = async |k: &str| -> String {
+        lockdown
+            .get_value(Some(k), None)
+            .await
+            .ok()
+            .and_then(|v| v.as_string().map(str::to_owned))
+            .unwrap_or_default()
+    };
+    Ok(Info {
+        name: get("DeviceName").await,
+        product_type: get("ProductType").await,
+        version: get("ProductVersion").await,
+        device_class: get("DeviceClass").await,
+    })
+}
+
+async fn provider(udid: &str) -> Result<UsbmuxdProvider, String> {
+    let mut mux = usbmux().await?;
+    let dev = mux.get_device(udid).await.map_err(err("device"))?;
+    let addr = UsbmuxdAddr::from_env_var().map_err(|e| format!("usbmuxd address: {e}"))?;
+    Ok(dev.to_provider(addr, "zenlink"))
+}
+
+impl Link {
+    pub async fn usb(udid: &str) -> Result<Self, String> {
+        let provider = provider(udid).await?;
+        let proxy = CoreDeviceProxy::connect(&provider)
+            .await
+            .map_err(err("CoreDeviceProxy (iOS 17.4 or later?)"))?;
+        let rsd_port = proxy.tunnel_info().server_rsd_port;
+        let adapter = proxy
+            .create_software_tunnel()
+            .map_err(err("tunnel"))?
+            .to_async_handle();
+        Self::finish(adapter, rsd_port, false, Some(provider), None).await
+    }
+
+    pub async fn wifi(addr: std::net::SocketAddr, record: &wifi::Record) -> Result<Self, String> {
+        let t = wifi::connect(addr, record).await?;
+        Self::finish(
+            t.adapter.to_async_handle(),
+            t.rsd_port,
+            true,
+            None,
+            Some(t.control),
+        )
+        .await
+    }
+
+    async fn finish(
+        mut adapter: AdapterHandle,
+        rsd_port: u16,
+        wifi: bool,
+        provider: Option<UsbmuxdProvider>,
+        control: Option<RemotePairingClient<RpPairingSocket<TcpStream>>>,
+    ) -> Result<Self, String> {
+        let s = adapter
+            .connect(rsd_port)
+            .await
+            .map_err(|e| format!("RSD connect: {e:?}"))?;
+        let rsd = RsdHandshake::new(s).await.map_err(err("RSD handshake"))?;
+        Ok(Self {
+            adapter,
+            rsd,
+            rsd_port,
+            wifi,
+            provider,
+            _control: control,
+        })
+    }
+
+    pub fn display_offered(&self) -> bool {
+        self.rsd.services.contains_key(DISPLAY_SERVICE)
+    }
+
+    /// Makes sure the Developer Disk Image is there (pymobiledevice3's order: already there?
+    /// then Apple's TSS). `progress` gets a short note before a download-sized step.
+    /// Installing needs USB; over Wi-Fi a missing DDI is an error.
+    pub async fn ensure_ddi(
+        &mut self,
+        version: &str,
+        mut progress: impl FnMut(&str),
+    ) -> Result<(), String> {
+        if self.display_offered() {
+            return Ok(());
+        }
+        let kind = Kind::for_version(version).ok_or("iOS 17 or later is needed")?;
+        if kind == Kind::Cryptex
+            && installed_ddi(&mut self.adapter, &mut self.rsd)
+                .await
+                .map_err(err("cryptexd"))?
+                .is_some()
+        {
+            return Ok(());
+        }
+        let Some(provider) = self.provider.as_ref() else {
+            return Err("Developer Disk Image missing: connect the cable once".into());
+        };
+        let dirs = ddi::search_dirs(kind);
+        let dir = ddi::find(kind, &dirs).ok_or("Developer Disk Image files not found")?;
+        progress("Preparing the device (first time)");
+        let f = ddi::read(kind, &dir).map_err(|e| format!("read DDI: {e}"))?;
+        match kind {
+            Kind::Cryptex => {
+                let manifest: plist::Dictionary = plist::from_bytes(&f.build_manifest)
+                    .map_err(|e| format!("BuildManifest: {e}"))?;
+                let identity = idevice::tss::select_cryptex_build_identity(&manifest)
+                    .map_err(err("build identity"))?
+                    .clone();
+                let assets = Cryptex1Assets::from_parts(
+                    f.image,
+                    f.trustcache,
+                    f.cryptex_info,
+                    f.root_hash,
+                    identity,
+                );
+                install_ddi(&mut self.adapter, &mut self.rsd, &assets)
+                    .await
+                    .map_err(err("cryptex install"))?;
+            }
+            Kind::Personalized => {
+                let mut mounter = ImageMounter::connect(provider)
+                    .await
+                    .map_err(err("image mounter"))?;
+                let mut lockdown = LockdownClient::connect(provider)
+                    .await
+                    .map_err(err("lockdown"))?;
+                let ecid = lockdown
+                    .get_value(Some("UniqueChipID"), None)
+                    .await
+                    .ok()
+                    .and_then(|v| v.as_unsigned_integer())
+                    .ok_or("UniqueChipID")?;
+                mounter
+                    .mount_personalized(
+                        provider,
+                        f.image,
+                        f.trustcache,
+                        &f.build_manifest,
+                        None,
+                        ecid,
+                    )
+                    .await
+                    .map_err(err("personalized mount"))?;
+            }
+        }
+        // The display service appears in a fresh RSD handshake after the install.
+        let s = self
+            .adapter
+            .connect(self.rsd_port)
+            .await
+            .map_err(|e| format!("RSD reconnect: {e:?}"))?;
+        self.rsd = RsdHandshake::new(s).await.map_err(err("RSD handshake"))?;
+        if self.display_offered() {
+            Ok(())
+        } else {
+            Err("the screen service is still missing after the Developer Disk Image".into())
+        }
+    }
+}
