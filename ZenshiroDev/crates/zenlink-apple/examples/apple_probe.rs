@@ -1,10 +1,12 @@
 //! Apple Driver prototype on idevice: checks one iPhone / iPad end to end.
 //!
-//! cargo run -p zenlink-apple --example apple_probe -- [--udid X] [--mount] [--stream SECONDS] [--out FILE]
+//! cargo run -p zenlink-apple --example apple_probe -- [--udid X] [--wifi] [--mount] [--stream SECONDS] [--out FILE]
 //!
 //! Read-only by default: device, iOS, Developer Mode, DDI state, USB tunnel, display service.
 //! --mount installs the Developer Disk Image when missing (same order as pymobiledevice3:
 //! already there? then Apple's TSS). --stream receives the screen for SECONDS and reports fps.
+//! --wifi finds the device over Wi-Fi (RemotePairing, no cable) instead of USB; the DDI is not
+//! installed over Wi-Fi.
 //! The screen-stream offer follows idevice's tools/src/coredevice_stream.rs (MIT, Jackson Coxson).
 
 use std::time::{Duration, Instant};
@@ -32,6 +34,7 @@ const CLIENT_SUPPORTED_FEATURES: u64 = 140;
 
 struct Args {
     udid: Option<String>,
+    wifi: bool,
     mount: bool,
     stream: Option<u64>,
     out: Option<String>,
@@ -40,6 +43,7 @@ struct Args {
 fn args() -> Args {
     let mut a = Args {
         udid: None,
+        wifi: false,
         mount: false,
         stream: None,
         out: None,
@@ -48,6 +52,7 @@ fn args() -> Args {
     while let Some(s) = it.next() {
         match s.as_str() {
             "--udid" => a.udid = it.next(),
+            "--wifi" => a.wifi = true,
             "--mount" => a.mount = true,
             "--stream" => a.stream = it.next().and_then(|v| v.parse().ok()),
             "--out" => a.out = it.next(),
@@ -75,6 +80,9 @@ async fn main() {
 }
 
 async fn run(a: Args) -> Result<(), String> {
+    if a.wifi {
+        return run_wifi(a).await;
+    }
     // 1. Device over Apple's usbmuxd (Apple Mobile Device Service).
     let mut mux = UsbmuxdConnection::default()
         .await
@@ -234,8 +242,72 @@ async fn run(a: Args) -> Result<(), String> {
     }
 
     // 6. Screen stream: HEVC over RTP through the tunnel.
-    let Some(secs) = a.stream else { return Ok(()) };
-    let mut client = DisplayServiceClient::connect_rsd(&mut adapter, &mut handshake)
+    match a.stream {
+        Some(secs) => stream_screen(&mut adapter, &mut handshake, secs, a.out.as_deref()).await,
+        None => Ok(()),
+    }
+}
+
+/// Wi-Fi: RemotePairing advert, pair-verify with the stored record, TLS-PSK tunnel, RSD.
+async fn run_wifi(a: Args) -> Result<(), String> {
+    use zenlink_apple::wifi;
+    let dir = wifi::record_dir().ok_or("no USERPROFILE")?;
+    let records: Vec<_> = wifi::records(&dir)
+        .into_iter()
+        .filter(|r| a.udid.as_ref().is_none_or(|u| u == &r.udid))
+        .collect();
+    step!(
+        "{} remote pair record(s) in {}",
+        records.len(),
+        dir.display()
+    );
+    let found = wifi::browse(&records, Duration::from_secs(4)).await?;
+    for f in &found {
+        step!("Wi-Fi: {} at {}", f.udid, f.addr);
+    }
+    let f = found
+        .first()
+        .ok_or("no paired device advertises RemotePairing (screen on, same Wi-Fi?)")?;
+    let record = records.iter().find(|r| r.udid == f.udid).ok_or("record")?;
+    let tunnel = wifi::connect(f.addr, record).await?;
+    let _control = tunnel.control; // the device drops the tunnel when this connection closes
+    let rsd_port = tunnel.rsd_port;
+    let mut adapter = tunnel.adapter.to_async_handle();
+    let s = adapter
+        .connect(rsd_port)
+        .await
+        .map_err(|e| format!("RSD connect: {e:?}"))?;
+    let mut handshake = RsdHandshake::new(s)
+        .await
+        .map_err(|e| format!("RSD handshake: {e:?}"))?;
+    let version = handshake
+        .properties
+        .get("ProductVersion")
+        .and_then(|v| v.as_string())
+        .unwrap_or("?")
+        .to_owned();
+    step!(
+        "tunnel up over Wi-Fi: {} RSD services, iOS {version}",
+        handshake.services.len()
+    );
+    if !handshake.services.contains_key(DISPLAY_SERVICE) {
+        return Err("display service not offered: connect USB once to install the DDI".into());
+    }
+    step!("display service offered");
+    match a.stream {
+        Some(secs) => stream_screen(&mut adapter, &mut handshake, secs, a.out.as_deref()).await,
+        None => Ok(()),
+    }
+}
+
+async fn stream_screen(
+    adapter: &mut idevice::tcp::handle::AdapterHandle,
+    handshake: &mut RsdHandshake,
+    secs: u64,
+    out: Option<&str>,
+) -> Result<(), String> {
+    let adapter = &mut *adapter;
+    let mut client = DisplayServiceClient::connect_rsd(adapter, handshake)
         .await
         .map_err(|e| format!("display service: {e:?}"))?;
     let audio_udp = adapter
@@ -294,10 +366,7 @@ async fn run(a: Args) -> Result<(), String> {
         .map_err(|e| format!("start video: {e:?}"))?;
     step!("streaming for {secs}s (move something on the screen)");
 
-    let mut out = a
-        .out
-        .as_ref()
-        .map(|p| std::fs::File::create(p).expect("create --out"));
+    let mut out = out.map(|p| std::fs::File::create(p).expect("create --out"));
     let mut depack = HevcDepacketizer::new();
     let (mut packets, mut frames, mut bytes) = (0usize, 0usize, 0usize);
     let mut first_frame: Option<Instant> = None;

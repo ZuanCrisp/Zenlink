@@ -7,6 +7,8 @@ authors.workspace = true
 description = "Apple Driver mode in Rust on idevice: device list, Developer Disk Image, tunnel, screen stream."
 
 [dependencies]
+base64 = "0.22"
+gethostname = "1.1"
 # Pinned: idevice breaks its API at every point release until 0.2.
 idevice = { version = "=0.1.68", default-features = false, features = [
     "ring",
@@ -18,7 +20,9 @@ idevice = { version = "=0.1.68", default-features = false, features = [
     "mobile_image_mounter",
     "tss",
     "cryptexd",
+    "remote_pairing",
 ] }
+mdns-sd = "0.21.7"
 plist = "1.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "fs", "net"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v3", "v4"] }
