@@ -7,5 +7,6 @@ pub mod hid;
 pub mod link;
 pub mod mirror;
 pub mod models;
+pub mod usbdirect;
 pub mod watch;
 pub mod wifi;

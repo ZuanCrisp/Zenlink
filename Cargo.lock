@@ -6578,6 +6578,7 @@ dependencies = [
  "base64 0.22.1",
  "gethostname",
  "idevice",
+ "libloading",
  "log",
  "mdns-sd",
  "plist",
