@@ -19,6 +19,7 @@ mod prefs;
 mod shortcuts;
 mod tray;
 mod updater;
+mod usbdirect;
 mod usbphones;
 
 use std::cell::RefCell;
@@ -654,15 +655,15 @@ fn apple_rows(ui: &AppWindow, st: &Value, current: &str) -> Vec<AppleDev> {
     rows
 }
 
-/// Apple Driver mode runs in Rust (apple.rs); ZenLink Studio still in the backend.
+/// Apple Driver mode (apple.rs) and ZenLink Studio (airplay.rs, usbdirect.rs) run in Rust.
 fn cast_start(api: &Api) {
-    if !airplay::start() && !apple::start() {
+    if !airplay::start() && !usbdirect::start() && !apple::start() {
         api.start_cast();
     }
 }
 
 fn cast_stop(api: &Api) {
-    if airplay::stop() {
+    if airplay::stop() || usbdirect::stop() {
         return;
     }
     if apple::in_use() {
@@ -675,6 +676,8 @@ fn cast_stop(api: &Api) {
 fn start_apple_video(v: &mut VideoView, api: &Api) {
     if airplay::running() {
         v.start_source(Box::new(airplay::AirSource));
+    } else if usbdirect::running() {
+        v.start_source(Box::new(usbdirect::UsbSource));
     } else if apple::in_use() {
         v.start_source(apple::engine().source());
     } else {
@@ -3811,6 +3814,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 if let Some(mut st) = api.state() {
                     apple::overlay(&mut st);
                     airplay::overlay(&mut st);
+                    usbdirect::overlay(&mut st);
                     let w = weak.clone();
                     let a = api.clone();
                     if slint::invoke_from_event_loop(move || {
@@ -3965,6 +3969,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     if apple::start() {
                         return;
                     }
+                }
+                if usbdirect::stop() {
+                    usbdirect::start();
+                    return;
                 }
                 a.stop_cast();
                 // The backend ignores Start while the old session is still

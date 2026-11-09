@@ -140,7 +140,7 @@ impl Sink for Feed {
 /// Drops SEI and reports whether the access unit holds an IDR / IRAP picture.
 /// shortcut: no H.264 SPS low-latency rewrite (h264.py); the decoder sets MF_LOW_LATENCY. Add it
 /// if AirPlay shows a delay the backend's receiver did not.
-fn clean(au: &[u8], hevc: bool) -> (Vec<u8>, bool) {
+pub(crate) fn clean(au: &[u8], hevc: bool) -> (Vec<u8>, bool) {
     let mut out = Vec::with_capacity(au.len());
     let mut key = false;
     let mut i = 0;

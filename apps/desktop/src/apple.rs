@@ -139,6 +139,16 @@ pub fn set_audio(to_pc: bool, volume: f32, muted: bool) {
     }
 }
 
+/// Settings > Audio: sound on the PC (not "device only").
+pub fn audio_to_pc() -> bool {
+    AUDIO_TO_PC.load(Relaxed)
+}
+
+/// Settings > Audio: volume 0..1 and mute.
+pub fn audio_level() -> (f32, bool) {
+    (f32::from_bits(AUDIO_VOLUME.load(Relaxed)), AUDIO_MUTED.load(Relaxed))
+}
+
 /// The button that turns the volume `down` (or up). iPadOS swaps the two at rotation 270
 /// (verified in ZenLink 2.5.x).
 fn volume_button(down: bool, ipad: bool, rotation: u32) -> &'static str {
