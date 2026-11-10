@@ -14,8 +14,10 @@ Lokalize, or a plain text editor).
    - Keep `{placeholders}` such as `{device}` or `{n}` exactly as they are;
      ZenLink fills them in. A test checks that `id.po` keeps them.
    - An empty `msgstr`, or an entry marked `#, fuzzy`, shows the English text.
-4. Try it without building ZenLink: put the file in a `lang` folder next to
-   `ZenLink.exe`, or in `%LOCALAPPDATA%\ZenLink-Next\lang`, then restart ZenLink
+4. Try it without building ZenLink: put the file in
+   `%LOCALAPPDATA%\ZenLink-Next\lang` (works for Setup, Portable and source, and
+   survives updates) or in the `lang` folder next to `ZenLink.exe` (for Setup:
+   `C:\Program Files\ZenLink\lang`, which also holds `zenlink.pot`). Restart ZenLink
    and pick the language in Settings. A file there also overrides the built-in
    `id.po`, so you can test fixes the same way.
 5. Send the file as a pull request to this folder. To build it into ZenLink, add

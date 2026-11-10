@@ -76,7 +76,7 @@
 | **🌑 Stealth dim, wake & lock** | `Alt+D` dims the device to 0% while the picture stays bright; `Alt+U` wakes and types your passcode (DPAPI-encrypted); `Alt+L` locks. |
 | **🛠️ Safe driver manager** | Install / restore drivers only after you confirm, with UAC, a backup and automatic rollback. Never stacks a libusb0 filter on Apple's driver. |
 | **📥 Closing, tray & start with Windows** | The close button asks whether to keep ZenLink in the notification area (the session keeps running) or quit, with "Remember my choice"; Settings › Startup & closing changes it later. Start with Windows is off by default and follows Task Manager › Startup apps. Quitting also stops the `adb` server ZenLink started. One ZenLink at a time: opening it again brings the window back. |
-| **🇮🇩 / 🇬🇧 Bilingual UI** | Bahasa Indonesia by default, English with one click. Liquid Glass Dark by default; Light and System too. |
+| **🌐 Languages as files** | Bahasa Indonesia and English built in, following your Windows language. Anyone can add a language with one `.po` file, no build needed ([how](#-add-a-language-tambah-bahasa)). Liquid Glass Dark by default; Light and System too. |
 
 ---
 
@@ -175,6 +175,23 @@ To build the release files yourself: `powershell -ExecutionPolicy Bypass -File .
 Dev outputs go to ignored folders in the checkout: `target/` (Rust), `data/` (settings of a source run) and `out/` (release build). To keep them outside, put a `Start ZenLink.local.bat` next to `Start ZenLink.bat` or in its parent folder that sets `CARGO_TARGET_DIR`, `ZENLINK_DATA_DIR` and `ZENLINK_OUT_DIR`. Installed and portable copies never write into the checkout.
 
 ---
+
+## 🌐 Add a language (Tambah bahasa)
+
+Each language is one text file (`<code>.po`, for example `ja.po`). No programming and no build are needed.
+
+**With the installer or Portable (easiest):**
+1. Get the template `zenlink.pot`: in the install folder (`C:\Program Files\ZenLink\lang\`), or [download it](https://raw.githubusercontent.com/zenvyzenshiro/zenlink/main/ZenshiroDev/resources/lang/zenlink.pot) (right-click → Save link as).
+2. Open it in [Poedit](https://poedit.net/) (free): **File → New from POT/PO file…**, pick your language, save as `<code>.po`.
+3. Put your language's own name in the header: `"Language-Name: 日本語
+"`.
+4. Translate each text. Keep `{placeholders}` such as `{device}` exactly, and keep names (ZenLink, AirPlay, iPhone, USB, Wi-Fi…) in English. An empty translation shows English, so you can do it bit by bit.
+5. Put the file in `%LOCALAPPDATA%\ZenLink-Next\lang\` (create the `lang` folder; it survives updates), restart ZenLink, and pick the language in **Settings → Language**.
+6. Share it: open an issue and attach the file (zip it if GitHub refuses `.po`), or send a pull request.
+
+**From the repository (source):** add `ZenshiroDev/resources/lang/<code>.po` (copied from `zenlink.pot`), test it as in step 5 or with `Start ZenLink.bat`, and open a pull request. To build it into `ZenLink.exe`, also add it to `BUILT_IN` in `apps/desktop/src/i18n.rs`. After changing texts in the code, `python ZenshiroDev/tooling/dev/extract_texts.py` updates the template and every `.po` file.
+
+Full guide, including right-to-left languages: [`ZenshiroDev/resources/lang/README.md`](ZenshiroDev/resources/lang/README.md).
 
 ## 🔌 Connection Modes
 
