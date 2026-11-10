@@ -447,7 +447,7 @@ component Placeholder inherits Rectangle {
         : need == "package" ? I18n.t("Install the iOS driver of TikTok LIVE Studio or libusb-win32 once, then press Check drivers. Or use Apple Driver mode.")
         : need == "removefilter" ? I18n.t("A libusb0 filter is stacked on the Apple driver. It can crash Windows.")
         : need == "mode" ? I18n.t("Pick Apple Driver or ZenLink Studio to continue.")
-        : need == "wifi" ? I18n.t("Plug in the cable once, then press Set up Wi-Fi in Settings. Or choose Cable.")
+        : need == "wifi" ? I18n.t("Plug in the cable once, then press Set up Wi-Fi in Settings. Or choose Wired.")
         : I18n.t("Unlock the device, tap Trust if it asks, then try again.");
     property <[[string]]> texts: flow-kind == "usbdirect" ? [
             [I18n.t("Detect device"), I18n.t("Found on USB through the libusb0 driver")],
@@ -645,7 +645,7 @@ component Placeholder inherits Rectangle {
                 width: 190px;
                 height: 32px;
                 options: ["wired", "wireless"];
-                labels: [I18n.t("Cable (USB)"), "Wi-Fi"];
+                labels: [I18n.t("Wired (USB)"), "Wi-Fi"];
                 value: root.link;
                 changed(v) => { root.set-link(v); }
             }
@@ -1008,7 +1008,7 @@ component ModeChooser inherits Rectangle {
                         { ok: true, text: I18n.t("Up to 60 fps, HEVC (device-limited bitrate, about 4–6 Mbps)") },
                         { ok: true, text: I18n.t("Mouse touch, keyboard, gestures and buttons") },
                         { ok: true, text: I18n.t("Apple's own driver, nothing to install") },
-                        { ok: true, text: I18n.t("Cable or Wi-Fi (after a one-time setup with the cable)") },
+                        { ok: true, text: I18n.t("Wired or Wi-Fi (after a one-time setup with the cable)") },
                         { ok: true, text: I18n.t("iOS 17–26: Hybrid Control (experimental)") },
                         { ok: false, text: I18n.t("iOS 16 or older: use ZenLink Studio") },
                     ];
@@ -1023,7 +1023,7 @@ component ModeChooser inherits Rectangle {
                     desc: I18n.t("Best quality for streaming: high bitrate (measured 12–30 Mbps), up to 60 fps, very low latency. Needs the libusb0 driver.");
                     points: [
                         { ok: true, text: I18n.t("Up to 60 fps, full native resolution over the cable, high-bitrate H.264") },
-                        { ok: true, text: I18n.t("Cable (USB) or Wi-Fi (AirPlay, no driver)") },
+                        { ok: true, text: I18n.t("Wired (USB) or Wi-Fi (AirPlay, no driver)") },
                         { ok: false, text: I18n.t("Picture and sound only: no touch, keyboard or gestures") },
                         { ok: false, text: I18n.t("Apple apps can't see the device until you switch back") },
                     ];
@@ -1036,7 +1036,7 @@ component ModeChooser inherits Rectangle {
                     Seg {
                         width: 240px;
                         options: ["wired", "wireless"];
-                        labels: [I18n.t("Cable"), "Wi-Fi"];
+                        labels: [I18n.t("Wired"), "Wi-Fi"];
                         value: root.link-pick;
                         changed(v) => { root.link-pick = v; }
                     }
@@ -1187,11 +1187,11 @@ component PlatformSelector inherits Rectangle {
     property <string> android-desc: I18n.t("High-performance Android mirroring and control over USB or Wi-Fi.");
     property <[string]> apple-points: [
         I18n.t("Apple Driver or ZenLink Studio"),
-        I18n.t("Cable or Wi-Fi"),
+        I18n.t("Wired or Wi-Fi"),
     ];
     property <[string]> android-points: [
         I18n.t("Through ADB and scrcpy, no app on the phone"),
-        I18n.t("Cable or Wi-Fi, any Android brand"),
+        I18n.t("Wired or Wi-Fi, any Android brand"),
     ];
     // Inside the stage (v2.6 HOME): no dimmed backdrop, the stage glass shows.
     in property <bool> inline;
@@ -2423,15 +2423,15 @@ component SettingsPanel inherits Glass {
                         Seg {
                             width: 170px;
                             options: ["wired", "wireless"];
-                            labels: [I18n.t("Cable (USB)"), "Wi-Fi"];
+                            labels: [I18n.t("Wired (USB)"), "Wi-Fi"];
                             value: root.link;
                             changed(v) => { root.set-link(v); }
                         }
                     }
                     Text {
                         text: root.mode == "usbdirect"
-                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pick ZenLinkStudio in Screen Mirroring on the device.") : I18n.t("Cable: through the libusb0 driver, high bitrate."))
-                            : (root.link == "wireless" ? I18n.t("Wi-Fi: press Set up Wi-Fi once with the cable in. A plugged-in device still works over the cable.") : I18n.t("Cable: through Apple's driver."));
+                            ? (root.link == "wireless" ? I18n.t("Wi-Fi: pick ZenLinkStudio in Screen Mirroring on the device.") : I18n.t("Wired: through the libusb0 driver, high bitrate."))
+                            : (root.link == "wireless" ? I18n.t("Wi-Fi: press Set up Wi-Fi once with the cable in. A plugged-in device still works over the cable.") : I18n.t("Wired: through Apple's driver."));
                         font-size: 11px;
                         color: Theme.text-3;
                         wrap: word-wrap;
