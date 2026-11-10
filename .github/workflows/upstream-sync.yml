@@ -1,0 +1,1260 @@
+name: "Sync Upstream: Branches, Releases, Deployments & Packages"
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 * * * *"
+  # A narrowly-scoped push trigger registers/runs GitSync after installation.
+  # It does not run when ordinary upstream source files change.
+  push:
+    paths:
+      - ".github/workflows/upstream-sync.yml"
+
+# Updated by the installer in a dedicated registration commit.
+# GitHub sees that commit as a change to this workflow and queues the first run.
+# GitSync registration marker: 2026-11-09T12:44:17Z-ead9cc9462c148c683fbf38ca4620618
+
+permissions:
+  contents: write
+  deployments: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-upstream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      UPSTREAM_GIT_URL: "https://github.com/zenvyzenshiro/zenlink"
+      UPSTREAM_API_URL: "https://api.github.com/repos/zenvyzenshiro/zenlink"
+      UPSTREAM_DEFAULT_BRANCH_HINT: "main"
+      UPSTREAM_BRANCH_MODE: "DEFAULT"
+      UPSTREAM_BRANCH_SELECTION_ENABLED: "false"
+      UPSTREAM_BRANCH_SELECTION: "branch1,branch2"
+      UPSTREAM_API_PROVIDER: "github"
+      UPSTREAM_WEB_BASE: "https://github.com"
+      UPSTREAM_REPO_WEB_URL: "https://github.com/zenvyzenshiro/zenlink"
+      UPSTREAM_PROJECT_ID: "zenvyzenshiro%2Fzenlink"
+      UPSTREAM_WORKFLOW_FILE: ".github/workflows/upstream-sync.yml"
+      PACKAGE_ARCHIVE_BRANCH: "upstream-packages"
+      PACKAGE_MAX_FILE_MB: 90
+      # GitHub upstreams reuse GH_SYNC_TOKEN when UPSTREAM_API_TOKEN is not separately set.
+      # Non-GitHub providers never receive the destination GitHub token as a fallback.
+      UPSTREAM_API_TOKEN: ${{ secrets.UPSTREAM_API_TOKEN || secrets.GH_SYNC_TOKEN }}
+      UPSTREAM_GIT_TOKEN: ${{ secrets.UPSTREAM_GIT_TOKEN }}
+      UPSTREAM_SYNC_ADMIN_TOKEN: ${{ secrets.UPSTREAM_SYNC_ADMIN_TOKEN }}
+      GH_SYNC_TOKEN: ${{ secrets.GH_SYNC_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_SYNC_TOKEN || github.token }}
+      DESTINATION_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Checkout destination repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_SYNC_TOKEN || github.token }}
+          persist-credentials: true
+          fetch-depth: 0
+          lfs: true
+
+      - name: Sync selected source branches, all tags and Git LFS objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${GH_SYNC_TOKEN:-}" ]]; then
+            echo "::error::Missing GH_SYNC_TOKEN. Add a fine-grained GitHub PAT with Contents: write, Workflows: write, and Deployments: write. GITHUB_TOKEN cannot update the generated GitSync workflow file."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_GIT_URL" || git remote set-url upstream "$UPSTREAM_GIT_URL"
+
+          # Optional credential for private upstream Git repositories.
+          if [[ -n "${UPSTREAM_GIT_TOKEN:-}" ]]; then
+            UPSTREAM_HOST=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).netloc)' "$UPSTREAM_GIT_URL")
+            case "$UPSTREAM_API_PROVIDER" in
+              github) UPSTREAM_GIT_USER="x-access-token" ;;
+              gitlab) UPSTREAM_GIT_USER="oauth2" ;;
+              *) UPSTREAM_GIT_USER="git" ;;
+            esac
+            BASIC_AUTH=$(printf '%s:%s' "$UPSTREAM_GIT_USER" "$UPSTREAM_GIT_TOKEN" | base64 -w0)
+            git config "http.https://${UPSTREAM_HOST}/.extraheader" "AUTHORIZATION: basic ${BASIC_AUTH}"
+          fi
+
+          # Resolve the source default branch and enumerate the available branch names on every run.
+          # This follows upstream default-branch renames without fetching every branch's objects.
+          DETECTED_DEFAULT=$(git ls-remote --symref upstream HEAD | awk '$1 == "ref:" && $3 == "HEAD" { sub("refs/heads/", "", $2); print $2; exit }')
+          if [[ -n "$DETECTED_DEFAULT" ]]; then
+            UPSTREAM_DEFAULT_BRANCH="$DETECTED_DEFAULT"
+          else
+            UPSTREAM_DEFAULT_BRANCH="$UPSTREAM_DEFAULT_BRANCH_HINT"
+            echo "::warning::Could not detect upstream HEAD; using configured hint ${UPSTREAM_DEFAULT_BRANCH}."
+          fi
+          echo "Source default branch: ${UPSTREAM_DEFAULT_BRANCH}"
+
+          ALL_SOURCE_BRANCHES=$(git ls-remote --heads upstream | awk '$2 ~ /^refs\/heads\// {sub(/^refs\/heads\//, "", $2); print $2}')
+          if [[ -z "$ALL_SOURCE_BRANCHES" ]]; then
+            echo "::error::The upstream repository did not return any source branches."
+            exit 1
+          fi
+
+          declare -a SELECTED_BRANCHES=()
+          declare -A SELECTED_BRANCH_MAP=()
+          add_selected_branch() {
+            local CANDIDATE="$1"
+            [[ -z "$CANDIDATE" ]] && return 0
+            if ! git check-ref-format --branch "$CANDIDATE" >/dev/null 2>&1; then
+              echo "::error::Invalid source branch name in branch selection: ${CANDIDATE}"
+              exit 1
+            fi
+            if ! grep -Fxq -- "$CANDIDATE" <<< "$ALL_SOURCE_BRANCHES"; then
+              echo "::error::Selected source branch does not exist upstream: ${CANDIDATE}"
+              exit 1
+            fi
+            if [[ -z "${SELECTED_BRANCH_MAP[$CANDIDATE]+x}" ]]; then
+              SELECTED_BRANCH_MAP["$CANDIDATE"]=1
+              SELECTED_BRANCHES+=("$CANDIDATE")
+            fi
+          }
+
+          case "${UPSTREAM_BRANCH_MODE^^}" in
+            ALL)
+              while IFS= read -r SOURCE_BRANCH; do
+                [[ -z "$SOURCE_BRANCH" ]] && continue
+                add_selected_branch "$SOURCE_BRANCH"
+              done <<< "$ALL_SOURCE_BRANCHES"
+              if [[ "${UPSTREAM_BRANCH_SELECTION_ENABLED,,}" == "true" ]]; then
+                echo "Branch mode ALL includes every source branch; the manual branch list is ignored."
+              fi
+              ;;
+            DEFAULT)
+              add_selected_branch "$UPSTREAM_DEFAULT_BRANCH"
+              if [[ "${UPSTREAM_BRANCH_SELECTION_ENABLED,,}" == "true" ]]; then
+                IFS=',' read -r -a MANUAL_BRANCHES <<< "${UPSTREAM_BRANCH_SELECTION:-}"
+                MANUAL_COUNT=0
+                for MANUAL_BRANCH in "${MANUAL_BRANCHES[@]}"; do
+                  MANUAL_BRANCH="$(printf '%s' "$MANUAL_BRANCH" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+                  [[ -z "$MANUAL_BRANCH" ]] && continue
+                  add_selected_branch "$MANUAL_BRANCH"
+                  MANUAL_COUNT=$((MANUAL_COUNT + 1))
+                done
+                if (( MANUAL_COUNT == 0 )); then
+                  echo "::error::Branch selection is enabled, but UPSTREAM_BRANCH_SELECTION is empty."
+                  exit 1
+                fi
+              fi
+              ;;
+            *)
+              echo "::error::Invalid UPSTREAM_BRANCH_MODE '${UPSTREAM_BRANCH_MODE}'. Use ALL or DEFAULT."
+              exit 1
+              ;;
+          esac
+
+          if (( ${#SELECTED_BRANCHES[@]} == 0 )); then
+            echo "::error::Branch selection resolved to zero branches."
+            exit 1
+          fi
+          printf 'Selected source branches: %s\n' "${SELECTED_BRANCHES[*]}"
+
+          # Back up the workflow before resetting the default branch to source.
+          WORKFLOW_BACKUP="$RUNNER_TEMP/upstream-sync-workflow.yml"
+          mkdir -p "$(dirname "$WORKFLOW_BACKUP")"
+          if [[ ! -f "$UPSTREAM_WORKFLOW_FILE" ]]; then
+            echo "::error::The generated sync workflow '$UPSTREAM_WORKFLOW_FILE' is missing from the destination default branch. Re-run GitSync-v4.5.ps1 to reinstall it."
+            exit 1
+          fi
+          cp "$UPSTREAM_WORKFLOW_FILE" "$WORKFLOW_BACKUP"
+
+          # Remove stale refs from a reused workspace so previous branch selections
+          # cannot leak into the current branch set or Git LFS --all operation.
+          while IFS= read -r STALE_REF; do
+            [[ "$STALE_REF" == "refs/remotes/upstream/HEAD" ]] && continue
+            git update-ref -d "$STALE_REF"
+          done < <(git for-each-ref --format='%(refname)' refs/remotes/upstream)
+
+          # Fetch only the selected source branches; tags remain fully mirrored.
+          FETCH_REFSPECS=()
+          for SOURCE_BRANCH in "${SELECTED_BRANCHES[@]}"; do
+            FETCH_REFSPECS+=("+refs/heads/${SOURCE_BRANCH}:refs/remotes/upstream/${SOURCE_BRANCH}")
+          done
+          git fetch --prune --force upstream "${FETCH_REFSPECS[@]}" '+refs/tags/*:refs/tags/*'
+
+          # Archive every upstream workflow file outside .github/workflows.
+          # The YAML remains in source control, but GitHub Actions cannot auto-run it.
+          archive_upstream_workflows() {
+            local repo_root="${1:-.}"
+            local workflow_root="$repo_root/.github/workflows"
+            [[ -d "$workflow_root" ]] || return 0
+            local archive_root="$repo_root/.upstream-archive/workflows"
+            local file relative destination
+            while IFS= read -r -d '' file; do
+              relative="${file#"$workflow_root"/}"
+              destination="$archive_root/$relative"
+              mkdir -p "$(dirname "$destination")"
+              mv -f -- "$file" "$destination"
+            done < <(find "$workflow_root" \( -type f -o -type l \) -print0)
+            find "$workflow_root" -depth -type d -empty -delete || true
+            rmdir "$workflow_root" 2>/dev/null || true
+          }
+
+          # Push every selected non-default source branch after archiving its workflows.
+          # Force-update is deliberate: the upstream source remains authoritative for selected branches.
+          for BRANCH in "${SELECTED_BRANCHES[@]}"; do
+            [[ "$BRANCH" == "$UPSTREAM_DEFAULT_BRANCH" ]] && continue
+            REF="refs/remotes/upstream/${BRANCH}"
+            echo "Mirroring selected source branch and archiving its workflows: $BRANCH"
+            SOURCE_BRANCH_COMMIT_DATE=$(git show -s --format=%cI "$REF")
+            git checkout -B "$BRANCH" "$REF"
+            archive_upstream_workflows
+            git add -A
+            if ! git diff --cached --quiet; then
+              GIT_AUTHOR_DATE="$SOURCE_BRANCH_COMMIT_DATE" GIT_COMMITTER_DATE="$SOURCE_BRANCH_COMMIT_DATE" \
+                git commit -m "Archive upstream workflows for manual activation"
+            fi
+            git push --force origin "HEAD:refs/heads/${BRANCH}"
+          done
+
+          # Keep destination's default branch name aligned to upstream's default.
+          # Preserve our generated GitSync workflow, but archive every upstream
+          # workflow file (including any source file with the same filename).
+          SOURCE_DEFAULT_COMMIT_DATE=$(git show -s --format=%cI "refs/remotes/upstream/${UPSTREAM_DEFAULT_BRANCH}")
+          git checkout -B "$UPSTREAM_DEFAULT_BRANCH" "refs/remotes/upstream/${UPSTREAM_DEFAULT_BRANCH}"
+          archive_upstream_workflows
+          mkdir -p "$(dirname "$UPSTREAM_WORKFLOW_FILE")"
+          cp "$WORKFLOW_BACKUP" "$UPSTREAM_WORKFLOW_FILE"
+          git add -A
+          if ! git diff --cached --quiet; then
+            GIT_AUTHOR_DATE="$SOURCE_DEFAULT_COMMIT_DATE" GIT_COMMITTER_DATE="$SOURCE_DEFAULT_COMMIT_DATE" \
+              git commit -m "Archive upstream workflows and preserve GitSync automation [skip ci]"
+          fi
+          git push --force origin "HEAD:refs/heads/${UPSTREAM_DEFAULT_BRANCH}"
+
+          # Tags can also trigger workflows. If a tagged commit contains upstream
+          # workflow files, create a sanitized child commit and point the same tag
+          # name at it. The original tagged commit remains its parent; original
+          # annotated-tag metadata is saved under .upstream-archive/tag-metadata/.
+          TAGS_PROCESSED=0
+          TAGS_SANITIZED=0
+          while IFS= read -r TAG_NAME; do
+            [[ -z "$TAG_NAME" ]] && continue
+            TAG_REF="refs/tags/${TAG_NAME}"
+            SOURCE_TAG_OBJECT=$(git rev-parse "$TAG_REF")
+            SOURCE_TAG_TYPE=$(git cat-file -t "$TAG_REF")
+            if ! SOURCE_TAG_COMMIT=$(git rev-parse --verify "${TAG_REF}^{commit}" 2>/dev/null); then
+              git push --force origin "${TAG_REF}:refs/tags/${TAG_NAME}"
+              TAGS_PROCESSED=$((TAGS_PROCESSED + 1))
+              continue
+            fi
+
+            if ! git ls-tree -r --name-only "$SOURCE_TAG_COMMIT" -- .github/workflows | grep -q .; then
+              # No workflow directory in this tagged tree: preserve the exact tag object.
+              git push --force origin "${TAG_REF}:refs/tags/${TAG_NAME}"
+              TAGS_PROCESSED=$((TAGS_PROCESSED + 1))
+              continue
+            fi
+
+            echo "Sanitizing workflow files in tag: ${TAG_NAME}"
+            TAG_WORKTREE=$(mktemp -d)
+            git worktree add --detach "$TAG_WORKTREE" "$SOURCE_TAG_COMMIT"
+            git -C "$TAG_WORKTREE" config user.name "github-actions[bot]"
+            git -C "$TAG_WORKTREE" config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            archive_upstream_workflows "$TAG_WORKTREE"
+
+            TAG_METADATA_ID=$(printf '%s' "$TAG_NAME" | sha256sum | awk '{print $1}')
+            TAG_METADATA_FILE="$TAG_WORKTREE/.upstream-archive/tag-metadata/${TAG_METADATA_ID}.txt"
+            mkdir -p "$(dirname "$TAG_METADATA_FILE")"
+            {
+              printf 'Original tag name: %s\n' "$TAG_NAME"
+              printf 'Original tag object: %s\n' "$SOURCE_TAG_OBJECT"
+              printf 'Original target commit: %s\n' "$SOURCE_TAG_COMMIT"
+              printf 'Original object type: %s\n\n' "$SOURCE_TAG_TYPE"
+              if [[ "$SOURCE_TAG_TYPE" == "tag" ]]; then
+                printf '%s\n' '--- Original annotated tag object body ---'
+                git cat-file -p "$TAG_REF"
+              else
+                printf '%s\n' 'Lightweight tag; the original target commit is recorded above.'
+              fi
+            } > "$TAG_METADATA_FILE"
+
+            TAG_SOURCE_COMMIT_DATE=$(git show -s --format=%cI "$SOURCE_TAG_COMMIT")
+            git -C "$TAG_WORKTREE" add -A
+            GIT_AUTHOR_DATE="$TAG_SOURCE_COMMIT_DATE" GIT_COMMITTER_DATE="$TAG_SOURCE_COMMIT_DATE" \
+              git -C "$TAG_WORKTREE" commit -m "Archive upstream workflows for tag ${TAG_NAME}"
+            SANITIZED_TAG_COMMIT=$(git -C "$TAG_WORKTREE" rev-parse HEAD)
+            git push --force origin "${SANITIZED_TAG_COMMIT}:refs/tags/${TAG_NAME}"
+            git worktree remove --force "$TAG_WORKTREE"
+            TAGS_PROCESSED=$((TAGS_PROCESSED + 1))
+            TAGS_SANITIZED=$((TAGS_SANITIZED + 1))
+          done < <(git for-each-ref --format='%(refname:strip=2)' refs/tags)
+          echo "Tags processed: ${TAGS_PROCESSED}; tags retargeted to sanitized archive commits: ${TAGS_SANITIZED}."
+
+          # Changing the repository setting requires an admin-capable token.
+          DEST_API="https://api.github.com/repos/${DESTINATION_REPO}"
+          CURRENT_DEST_DEFAULT=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$DEST_API" | jq -r '.default_branch // empty')
+          if [[ "$CURRENT_DEST_DEFAULT" != "$UPSTREAM_DEFAULT_BRANCH" ]]; then
+            if [[ -n "${UPSTREAM_SYNC_ADMIN_TOKEN:-}" ]]; then
+              DEFAULT_BODY=$(jq -cn --arg branch "$UPSTREAM_DEFAULT_BRANCH" '{default_branch:$branch}')
+              curl -fsSL -X PATCH -H "Authorization: Bearer ${UPSTREAM_SYNC_ADMIN_TOKEN}" \
+                -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+                -H "Content-Type: application/json" -d "$DEFAULT_BODY" "$DEST_API" >/dev/null
+              echo "Updated GitHub default branch to ${UPSTREAM_DEFAULT_BRANCH}."
+            else
+              echo "::warning::Source default branch is ${UPSTREAM_DEFAULT_BRANCH}, but GitHub default branch is ${CURRENT_DEST_DEFAULT}. Add UPSTREAM_SYNC_ADMIN_TOKEN with Administration: write to update it automatically."
+            fi
+          fi
+
+          # Mirror Git LFS objects reachable from the selected source branches and fetched tags when Git LFS is present.
+          if git lfs version >/dev/null 2>&1; then
+            git lfs fetch upstream --all
+            git lfs push --all origin
+          else
+            echo "::warning::Git LFS is not installed; LFS objects may not be mirrored."
+          fi
+
+          echo "Selected source branches mirrored: ${#SELECTED_BRANCHES[@]}; all source tags and available LFS objects processed."
+
+      - name: Collect all upstream releases
+        id: releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$UPSTREAM_API_PROVIDER" == "git" ]]; then
+            echo "Git-only upstream: no supported release API; skipping release sync (branches, tags and LFS were mirrored)."
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RELEASES_FILE="$RUNNER_TEMP/upstream-releases.jsonl"
+          PAGE_FILE="$RUNNER_TEMP/upstream-release-page.json"
+          : > "$RELEASES_FILE"
+
+          api_curl() {
+            local URL="$1"
+            local BODY_FILE HEADER_FILE HTTP_CODE CURL_EXIT
+            local ATTEMPT=1 MAX_ATTEMPTS=4 DELAY RETRY_AFTER RESET_AT REMAINING
+            local RATE_LIMITED
+            local -a AUTH_ARGS=()
+            BODY_FILE=$(mktemp)
+            HEADER_FILE=$(mktemp)
+
+            if [[ -n "${UPSTREAM_API_TOKEN:-}" ]]; then
+              case "$UPSTREAM_API_PROVIDER" in
+                gitlab) AUTH_ARGS=(-H "PRIVATE-TOKEN: ${UPSTREAM_API_TOKEN}") ;;
+                github) AUTH_ARGS=(-H "Authorization: Bearer ${UPSTREAM_API_TOKEN}") ;;
+                *) AUTH_ARGS=(-H "Authorization: token ${UPSTREAM_API_TOKEN}") ;;
+              esac
+            fi
+
+            while (( ATTEMPT <= MAX_ATTEMPTS )); do
+              : > "$BODY_FILE"
+              : > "$HEADER_FILE"
+              if HTTP_CODE=$(curl -sS -L --connect-timeout 20 --max-time 180 \
+                -D "$HEADER_FILE" -o "$BODY_FILE" -w '%{http_code}' \
+                -H "Accept: application/json" \
+                -H "User-Agent: GitHub-Actions-Upstream-Sync" \
+                "${AUTH_ARGS[@]}" "$URL"); then
+                CURL_EXIT=0
+              else
+                CURL_EXIT=$?
+              fi
+
+              if (( CURL_EXIT != 0 )) || [[ "$HTTP_CODE" == "000" || -z "$HTTP_CODE" ]]; then
+                if (( ATTEMPT < MAX_ATTEMPTS )); then
+                  DELAY=$((1 << (ATTEMPT - 1)))
+                  echo "WARNING: Upstream API transport error (attempt ${ATTEMPT}/${MAX_ATTEMPTS}); retrying in ${DELAY}s." >&2
+                  sleep "$DELAY"
+                  ATTEMPT=$((ATTEMPT + 1))
+                  continue
+                fi
+                echo "::error::Upstream API request failed after ${MAX_ATTEMPTS} attempts (curl exit ${CURL_EXIT})." >&2
+                rm -f "$BODY_FILE" "$HEADER_FILE"
+                return 1
+              fi
+
+              if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+                # Small serial pacing reduces bursts when many API pages are fetched.
+                sleep 0.2
+                cat "$BODY_FILE"
+                rm -f "$BODY_FILE" "$HEADER_FILE"
+                return 0
+              fi
+
+              RETRY_AFTER=$(awk 'tolower($1)=="retry-after:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              RESET_AT=$(awk 'tolower($1)=="x-ratelimit-reset:" || tolower($1)=="ratelimit-reset:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              REMAINING=$(awk 'tolower($1)=="x-ratelimit-remaining:" || tolower($1)=="ratelimit-remaining:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              RATE_LIMITED=false
+              if [[ "$HTTP_CODE" == "429" ]] || \
+                 { [[ "$HTTP_CODE" == "403" ]] && { [[ "$REMAINING" == "0" ]] || [[ -n "$RETRY_AFTER" ]] || grep -Eiq 'rate.?limit|too many requests|secondary rate limit|abuse detection' "$BODY_FILE"; }; }; then
+                RATE_LIMITED=true
+              fi
+
+              if [[ "$HTTP_CODE" == "401" ]] || { [[ "$HTTP_CODE" == "403" ]] && [[ "$RATE_LIMITED" != true ]]; }; then
+                echo "::error::Upstream API authentication/permission denied (HTTP ${HTTP_CODE}). Check UPSTREAM_API_TOKEN and its access to the source repository." >&2
+                [[ ! -s "$BODY_FILE" ]] || head -c 1000 "$BODY_FILE" >&2
+                echo >&2
+                rm -f "$BODY_FILE" "$HEADER_FILE"
+                return 1
+              fi
+
+              if [[ "$RATE_LIMITED" == true ]] || [[ "$HTTP_CODE" =~ ^5[0-9][0-9]$ ]]; then
+                if (( ATTEMPT >= MAX_ATTEMPTS )); then
+                  echo "::error::Upstream API still unavailable after ${MAX_ATTEMPTS} attempts (HTTP ${HTTP_CODE})." >&2
+                  [[ ! -s "$BODY_FILE" ]] || head -c 1000 "$BODY_FILE" >&2
+                  echo >&2
+                  rm -f "$BODY_FILE" "$HEADER_FILE"
+                  return 1
+                fi
+
+                if [[ "$RATE_LIMITED" == true ]]; then
+                  if [[ "$RETRY_AFTER" =~ ^[0-9]+$ ]]; then
+                    DELAY="$RETRY_AFTER"
+                    (( DELAY < 1 )) && DELAY=1
+                  elif [[ "$REMAINING" == "0" && "$RESET_AT" =~ ^[0-9]+$ ]]; then
+                    DELAY=$((RESET_AT - $(date +%s)))
+                    (( DELAY < 1 )) && DELAY=1
+                  else
+                    # GitHub recommends at least 60 seconds for secondary limits without headers.
+                    DELAY=$((60 * (1 << (ATTEMPT - 1))))
+                  fi
+                  echo "WARNING: Upstream API rate limit (HTTP ${HTTP_CODE}); retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+                else
+                  DELAY=$((1 << (ATTEMPT - 1)))
+                  echo "WARNING: Upstream API server error (HTTP ${HTTP_CODE}); retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+                fi
+                sleep "$DELAY"
+                ATTEMPT=$((ATTEMPT + 1))
+                continue
+              fi
+
+              echo "::error::Upstream API returned HTTP ${HTTP_CODE}; not retrying this response." >&2
+              [[ ! -s "$BODY_FILE" ]] || head -c 1000 "$BODY_FILE" >&2
+              echo >&2
+              rm -f "$BODY_FILE" "$HEADER_FILE"
+              return 1
+            done
+
+            rm -f "$BODY_FILE" "$HEADER_FILE"
+            return 1
+          }
+
+          PAGE=1
+          while true; do
+            case "$UPSTREAM_API_PROVIDER" in
+              gitea|forgejo) PAGE_URL="${UPSTREAM_API_URL}/releases?limit=50&page=${PAGE}" ;;
+              *) PAGE_URL="${UPSTREAM_API_URL}/releases?per_page=100&page=${PAGE}" ;;
+            esac
+
+            echo "Fetching upstream release page ${PAGE}..."
+            api_curl "$PAGE_URL" > "$PAGE_FILE"
+            if ! jq -e 'type == "array"' "$PAGE_FILE" >/dev/null; then
+              echo "Upstream release API did not return a JSON array."
+              cat "$PAGE_FILE"
+              exit 1
+            fi
+
+            COUNT=$(jq 'length' "$PAGE_FILE")
+            (( COUNT == 0 )) && break
+            jq -c '.[] | select(.draft != true)' "$PAGE_FILE" >> "$RELEASES_FILE"
+            PAGE=$((PAGE + 1))
+            (( PAGE > 1000 )) && { echo "Safety stop: over 1000 release pages."; exit 1; }
+          done
+
+          RELEASE_COUNT=$(wc -l < "$RELEASES_FILE" | tr -d ' ')
+          echo "count=$RELEASE_COUNT" >> "$GITHUB_OUTPUT"
+          echo "Found ${RELEASE_COUNT} published releases/pre-releases."
+
+      - name: Download and publish every release and its assets
+        if: steps.releases.outputs.count != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASES_FILE="$RUNNER_TEMP/upstream-releases.jsonl"
+          TOTAL=$(wc -l < "$RELEASES_FILE" | tr -d ' ')
+          CURRENT=0
+          TOTAL_ASSETS=0
+
+          source_curl() {
+            local URL="$1"
+            local -a AUTH_ARGS=()
+            local ASSET_HOST
+            ASSET_HOST=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).netloc.lower())' "$URL")
+            UPSTREAM_HOST=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).netloc.lower())' "$UPSTREAM_WEB_BASE")
+            if [[ -n "${UPSTREAM_API_TOKEN:-}" && "$ASSET_HOST" == "$UPSTREAM_HOST" ]]; then
+              case "$UPSTREAM_API_PROVIDER" in
+                gitlab) AUTH_ARGS=(-H "PRIVATE-TOKEN: ${UPSTREAM_API_TOKEN}") ;;
+                github) AUTH_ARGS=(-H "Authorization: Bearer ${UPSTREAM_API_TOKEN}") ;;
+                *) AUTH_ARGS=(-H "Authorization: token ${UPSTREAM_API_TOKEN}") ;;
+              esac
+            fi
+            curl -fL --connect-timeout 20 --max-time 900 --retry 4 --retry-all-errors --retry-delay 2 "${AUTH_ARGS[@]}" "$URL" -o "$2"
+            [[ -s "$2" ]] || { echo "Downloaded release asset is empty: $SAFE_NAME" >&2; return 1; }
+          }
+
+          while IFS= read -r RELEASE_JSON; do
+            [[ -z "$RELEASE_JSON" ]] && continue
+            CURRENT=$((CURRENT + 1))
+            TAG=$(jq -r '.tag_name // empty' <<< "$RELEASE_JSON")
+            TITLE=$(jq -r '.name // .tag_name // "Untitled release"' <<< "$RELEASE_JSON")
+            PRERELEASE=$(jq -r 'if .prerelease == true then "true" else "false" end' <<< "$RELEASE_JSON")
+            [[ -z "$TAG" ]] && { echo "Skipping release without a tag."; continue; }
+
+            echo "=================================================="
+            echo "Release ${CURRENT}/${TOTAL}: ${TAG}"
+            TEMP_DIR=$(mktemp -d)
+            ASSET_DIR="$TEMP_DIR/assets"
+            mkdir -p "$ASSET_DIR"
+            jq -r '.body // .description // "Synced from upstream release."' <<< "$RELEASE_JSON" > "$TEMP_DIR/release-notes.md"
+
+            ASSET_LIST="$TEMP_DIR/assets.jsonl"
+            : > "$ASSET_LIST"
+
+            # GitHub, GitLab, Gitea and Forgejo expose differently shaped asset arrays.
+            jq -c '
+              if (.assets | type) == "array" then .assets[]?
+              elif (.assets.attachments | type) == "array" then .assets.attachments[]?
+              elif (.assets.links | type) == "array" then .assets.links[]?
+              else empty end
+              | {name:(.name // .label // .file_name // ""), url:(.browser_download_url // .direct_asset_url // .url // "")}
+              | select(.name != "" and .url != "")
+            ' <<< "$RELEASE_JSON" >> "$ASSET_LIST"
+
+            # GitLab Markdown uploads changed to project-ID-based URLs in GitLab 17.2.
+            # Resolve the numeric project ID from the API, then normalize legacy /uploads links
+            # in both the release API asset list and Markdown release notes.
+            if [[ "$UPSTREAM_API_PROVIDER" == "gitlab" ]]; then
+              PROJECT_AUTH_ARGS=()
+              if [[ -n "${UPSTREAM_API_TOKEN:-}" ]]; then
+                PROJECT_AUTH_ARGS=(-H "PRIVATE-TOKEN: ${UPSTREAM_API_TOKEN}")
+              fi
+              GITLAB_PROJECT_JSON=$(curl -fsSL --retry 3 --retry-all-errors \
+                -H "Accept: application/json" \
+                -H "User-Agent: GitHub-Actions-Upstream-Sync" \
+                "${PROJECT_AUTH_ARGS[@]}" "$UPSTREAM_API_URL")
+              GITLAB_PROJECT_NUMERIC_ID=$(jq -r '.id // empty' <<< "$GITLAB_PROJECT_JSON")
+              if [[ ! "$GITLAB_PROJECT_NUMERIC_ID" =~ ^[0-9]+$ ]]; then
+                echo "::error::GitLab project API did not return a numeric project ID. Cannot normalize Markdown upload URLs safely."
+                echo "$GITLAB_PROJECT_JSON" | jq '{message, error, error_description}' 2>/dev/null || true
+                rm -rf "$TEMP_DIR"
+                exit 1
+              fi
+              echo "GitLab project numeric ID: ${GITLAB_PROJECT_NUMERIC_ID}"
+
+              python3 - "$TEMP_DIR/release-notes.md" "$ASSET_LIST" "$UPSTREAM_REPO_WEB_URL" "$UPSTREAM_API_URL" "$GITLAB_PROJECT_NUMERIC_ID" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          from urllib.parse import unquote, urljoin, urlparse, urlunparse
+
+          body_path, asset_path, repo_url, api_url, project_id = sys.argv[1:]
+          repo = urlparse(repo_url)
+          api = urlparse(api_url)
+          source_host = repo.netloc.lower()
+
+          # Support GitLab installed below a URL prefix, for example /gitlab/api/v4/...
+          api_path = api.path or ""
+          api_match = re.search(r"(?i)/api/v4/projects(?:/|$)", api_path)
+          instance_prefix = api_path[:api_match.start()].rstrip("/") if api_match else ""
+
+          def normalize_gitlab_upload(raw_url):
+              candidate = urljoin(repo_url.rstrip("/") + "/", raw_url.strip().strip("<>"))
+              parsed = urlparse(candidate)
+              if parsed.netloc.lower() != source_host:
+                  return candidate
+
+              path = parsed.path or ""
+              # Already in the modern GitLab URL format; preserve it as-is.
+              if re.search(r"/-/project/[0-9]+/uploads/", path, re.I):
+                  return candidate
+
+              # Legacy Markdown upload links use /uploads/<secret>/<filename>.
+              # Some older notes may contain a project-relative uploads/ path instead.
+              marker = "/uploads/"
+              marker_index = path.lower().find(marker)
+              if marker_index < 0:
+                  return candidate
+
+              suffix = path[marker_index + len(marker):].lstrip("/")
+              if not suffix:
+                  return candidate
+
+              modern_path = f"{instance_prefix}/-/project/{project_id}/uploads/{suffix}"
+              return urlunparse(parsed._replace(path=modern_path))
+
+          def is_downloadable_markdown_link(url):
+              parsed = urlparse(url)
+              if parsed.netloc.lower() != source_host:
+                  return False
+              path = parsed.path.lower()
+              is_upload = f"/-/project/{project_id}/uploads/" in path or "/uploads/" in path
+              has_binary_extension = bool(re.search(
+                  r"\.(zip|7z|rar|tar|tgz|gz|bz2|xz|zst|exe|msi|appimage|deb|rpm|bin|iso|dmg|apk|jar|war|dll|so)(?:$|[?#])",
+                  path,
+                  re.I,
+              ))
+              return is_upload or has_binary_extension
+
+          # Normalize URLs already returned by the GitLab Release API.
+          normalized = []
+          seen = set()
+          if os.path.exists(asset_path):
+              with open(asset_path, encoding="utf-8") as source:
+                  for line in source:
+                      try:
+                          item = json.loads(line)
+                          url = item.get("url", "")
+                          if url:
+                              item["url"] = normalize_gitlab_upload(url)
+                          key = item.get("url", "")
+                          if key and key not in seen:
+                              normalized.append(item)
+                              seen.add(key)
+                      except (json.JSONDecodeError, TypeError):
+                          continue
+
+          # GitLab projects sometimes publish binaries only as Markdown links in release notes.
+          body = open(body_path, encoding="utf-8", errors="replace").read()
+          for label, href in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", body):
+              href = href.strip().strip("<>")
+              if not href or href.startswith(("mailto:", "#", "javascript:")):
+                  continue
+              url = normalize_gitlab_upload(href)
+              if not is_downloadable_markdown_link(url) or url in seen:
+                  continue
+              parsed = urlparse(url)
+              name = unquote(os.path.basename(parsed.path)) or label.strip() or "release-asset"
+              normalized.append({"name": name, "url": url})
+              seen.add(url)
+
+          with open(asset_path, "w", encoding="utf-8") as output:
+              for item in normalized:
+                  output.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+          print(f"Normalized GitLab release assets: {len(normalized)} candidate(s)")
+          PY
+            fi
+
+            # Assets already attached to the destination release are skipped (no re-download/re-upload).
+            EXISTING_ASSETS=$(gh release view "$TAG" --repo "$DESTINATION_REPO" --json assets -q '.assets[].name' 2>/dev/null || true)
+            ASSET_COUNT=0
+            SKIPPED_ASSETS=0
+            INDEX=0
+            while IFS= read -r ASSET_JSON; do
+              [[ -z "$ASSET_JSON" ]] && continue
+              INDEX=$((INDEX + 1))
+              ASSET_NAME=$(jq -r '.name' <<< "$ASSET_JSON")
+              ASSET_URL=$(jq -r '.url' <<< "$ASSET_JSON")
+              SAFE_NAME=$(basename "$ASSET_NAME")
+              [[ -z "$SAFE_NAME" || "$SAFE_NAME" == "." || "$SAFE_NAME" == ".." ]] && SAFE_NAME="asset-${INDEX}"
+              if [[ -n "$EXISTING_ASSETS" ]] && grep -Fxq -- "$SAFE_NAME" <<< "$EXISTING_ASSETS"; then
+                echo "Skip (already on destination): $SAFE_NAME"
+                SKIPPED_ASSETS=$((SKIPPED_ASSETS + 1))
+                continue
+              fi
+              DEST_ASSET="$ASSET_DIR/$SAFE_NAME"
+              if [[ -e "$DEST_ASSET" ]]; then
+                DEST_ASSET="$ASSET_DIR/${INDEX}-${SAFE_NAME}"
+              fi
+              echo "Downloading/updating upstream asset: $SAFE_NAME"
+              source_curl "$ASSET_URL" "$DEST_ASSET"
+              if [[ ! -s "$DEST_ASSET" ]]; then
+                echo "::error::Downloaded asset is empty: ${SAFE_NAME} (${ASSET_URL})"
+                rm -rf "$TEMP_DIR"
+                exit 1
+              fi
+              ASSET_COUNT=$((ASSET_COUNT + 1))
+              TOTAL_ASSETS=$((TOTAL_ASSETS + 1))
+            done < "$ASSET_LIST"
+
+            # Generate the checksum file only for a fresh release so a partial list never overwrites a complete one.
+            if (( ASSET_COUNT > 0 )) && [[ -z "$EXISTING_ASSETS" ]]; then
+              CHECKSUM_NAME="SHA256SUMS-upstream.txt"
+              (
+                cd "$ASSET_DIR"
+                find . -maxdepth 1 -type f ! -name "$CHECKSUM_NAME" -print0 | sort -z | xargs -0 -r sha256sum
+              ) > "$ASSET_DIR/$CHECKSUM_NAME"
+            fi
+
+            if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+              echo "Tag ${TAG} is not on destination; cannot safely publish release."
+              rm -rf "$TEMP_DIR"
+              exit 1
+            fi
+
+            if gh release view "$TAG" --repo "$DESTINATION_REPO" >/dev/null 2>&1; then
+              gh release edit "$TAG" --repo "$DESTINATION_REPO" --title "$TITLE" --notes-file "$TEMP_DIR/release-notes.md"
+            else
+              if [[ "$PRERELEASE" == "true" ]]; then
+                gh release create "$TAG" --repo "$DESTINATION_REPO" --title "$TITLE" --notes-file "$TEMP_DIR/release-notes.md" --prerelease --verify-tag
+              else
+                gh release create "$TAG" --repo "$DESTINATION_REPO" --title "$TITLE" --notes-file "$TEMP_DIR/release-notes.md" --verify-tag
+              fi
+            fi
+            # GitHub recommends spacing mutative API requests to reduce secondary-rate-limit risk.
+            sleep 1
+
+            shopt -s nullglob
+            ASSETS=("$ASSET_DIR"/*)
+            if (( ${#ASSETS[@]} > 0 )); then
+              gh release upload "$TAG" "${ASSETS[@]}" --repo "$DESTINATION_REPO" --clobber
+              sleep 1
+            fi
+            rm -rf "$TEMP_DIR"
+            echo "Completed release: ${TAG} (assets downloaded: ${ASSET_COUNT}, skipped: ${SKIPPED_ASSETS})"
+          done < "$RELEASES_FILE"
+
+          echo "Release sync finished. Releases: ${CURRENT}; assets: ${TOTAL_ASSETS}."
+
+      - name: Mirror upstream deployment records
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$UPSTREAM_API_PROVIDER" in
+            github|gitlab) ;;
+            *) echo "Deployment API mirroring is not implemented for ${UPSTREAM_API_PROVIDER}; skipping."; exit 0 ;;
+          esac
+
+          # Source API requests use explicit status handling:
+          # - 401 / permission-related 403: no retry; skip this optional step.
+          # - 429 / confirmed rate-limit 403: retry using Retry-After or reset headers.
+          # - 5xx / transport errors: bounded exponential retry.
+          # Destination GitHub API failures remain fatal because they indicate a destination/token problem.
+          API_TMP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$API_TMP_DIR"' EXIT
+
+          api_get() {
+            local URL="$1"
+            local BODY_FILE="$API_TMP_DIR/response.body"
+            local HEADER_FILE="$API_TMP_DIR/response.headers"
+            local HTTP_CODE=""
+            local CURL_EXIT=0
+            local ATTEMPT=1
+            local MAX_ATTEMPTS=4
+            local DELAY=1
+            local RETRY_AFTER=""
+            local RESET_AT=""
+            local REMAINING=""
+            local RATE_LIMITED="false"
+            local -a AUTH_ARGS=()
+
+            if [[ -n "${UPSTREAM_API_TOKEN:-}" ]]; then
+              if [[ "$UPSTREAM_API_PROVIDER" == "gitlab" ]]; then
+                AUTH_ARGS=(-H "PRIVATE-TOKEN: ${UPSTREAM_API_TOKEN}")
+              else
+                AUTH_ARGS=(-H "Authorization: Bearer ${UPSTREAM_API_TOKEN}")
+              fi
+            fi
+
+            while (( ATTEMPT <= MAX_ATTEMPTS )); do
+              : > "$BODY_FILE"
+              : > "$HEADER_FILE"
+              if HTTP_CODE=$(curl -sS -L \
+                --connect-timeout 20 --max-time 120 \
+                -D "$HEADER_FILE" -o "$BODY_FILE" -w '%{http_code}' \
+                -H "Accept: application/json" "${AUTH_ARGS[@]}" "$URL"); then
+                CURL_EXIT=0
+              else
+                CURL_EXIT=$?
+              fi
+
+              if (( CURL_EXIT != 0 )) || [[ "$HTTP_CODE" == "000" || -z "$HTTP_CODE" ]]; then
+                if (( ATTEMPT < MAX_ATTEMPTS )); then
+                  DELAY=$((1 << (ATTEMPT - 1)))
+                  echo "WARNING: Source API transport error (attempt ${ATTEMPT}/${MAX_ATTEMPTS}); retrying in ${DELAY}s." >&2
+                  sleep "$DELAY"
+                  ATTEMPT=$((ATTEMPT + 1))
+                  continue
+                fi
+                echo "WARNING: Source deployment API transport failed after ${MAX_ATTEMPTS} attempts. Skipping optional deployment sync." >&2
+                return 10
+              fi
+
+              if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+                sleep 0.2
+                cat "$BODY_FILE"
+                return 0
+              fi
+
+              RETRY_AFTER="$(awk 'tolower($1)=="retry-after:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")"
+              RESET_AT="$(awk 'tolower($1)=="ratelimit-reset:" || tolower($1)=="x-ratelimit-reset:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")"
+              REMAINING="$(awk 'tolower($1)=="ratelimit-remaining:" || tolower($1)=="x-ratelimit-remaining:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")"
+              RATE_LIMITED="false"
+              if [[ "$HTTP_CODE" == "429" ]] || \
+                 { [[ "$HTTP_CODE" == "403" ]] && { [[ "$REMAINING" == "0" ]] || [[ -n "$RETRY_AFTER" ]] || grep -Eiq 'rate.?limit|too many requests|secondary rate limit' "$BODY_FILE"; }; }; then
+                RATE_LIMITED="true"
+              fi
+
+              if [[ "$HTTP_CODE" == "401" ]] || { [[ "$HTTP_CODE" == "403" ]] && [[ "$RATE_LIMITED" != "true" ]]; }; then
+                echo "WARNING: Upstream deployment API denied access (HTTP ${HTTP_CODE})." >&2
+                echo "WARNING: No retry will be attempted. Deployment synchronization is optional, so this step will be skipped." >&2
+                return 10
+              fi
+
+              if [[ "$RATE_LIMITED" == "true" ]] || [[ "$HTTP_CODE" =~ ^5[0-9][0-9]$ ]]; then
+                if (( ATTEMPT >= MAX_ATTEMPTS )); then
+                  echo "WARNING: Optional deployment API remained unavailable after ${MAX_ATTEMPTS} attempts (HTTP ${HTTP_CODE}). Skipping deployment sync; later workflow steps will continue." >&2
+                  return 10
+                fi
+
+                if [[ "$RATE_LIMITED" == "true" ]]; then
+                  if [[ "$RETRY_AFTER" =~ ^[0-9]+$ ]]; then
+                    DELAY="$RETRY_AFTER"
+                    (( DELAY < 1 )) && DELAY=1
+                  elif [[ "$REMAINING" == "0" && "$RESET_AT" =~ ^[0-9]+$ ]]; then
+                    DELAY=$((RESET_AT - $(date +%s)))
+                    (( DELAY < 1 )) && DELAY=1
+                  else
+                    # GitHub recommends at least 60 seconds before retrying an un-timed secondary limit.
+                    DELAY=$((60 * (1 << (ATTEMPT - 1))))
+                  fi
+                  echo "WARNING: Upstream API rate limit (HTTP ${HTTP_CODE}); retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+                else
+                  DELAY=$((1 << (ATTEMPT - 1)))
+                  echo "WARNING: Upstream API server error (HTTP ${HTTP_CODE}); retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+                fi
+                sleep "$DELAY"
+                ATTEMPT=$((ATTEMPT + 1))
+                continue
+              fi
+
+              echo "WARNING: Optional deployment API returned HTTP ${HTTP_CODE}; skipping deployment sync." >&2
+              if [[ -s "$BODY_FILE" ]]; then
+                head -c 1000 "$BODY_FILE" >&2 || true
+                echo >&2
+              fi
+              return 10
+            done
+            return 1
+          }
+
+          dest_api_get() {
+            local URL="$1"
+            local BODY_FILE HEADER_FILE HTTP_CODE CURL_EXIT
+            local ATTEMPT=1 MAX_ATTEMPTS=4 DELAY RETRY_AFTER RESET_AT REMAINING RATE_LIMITED
+            BODY_FILE=$(mktemp)
+            HEADER_FILE=$(mktemp)
+            while (( ATTEMPT <= MAX_ATTEMPTS )); do
+              : > "$BODY_FILE"; : > "$HEADER_FILE"
+              if HTTP_CODE=$(curl -sS -L --connect-timeout 20 --max-time 120 \
+                -D "$HEADER_FILE" -o "$BODY_FILE" -w '%{http_code}' \
+                -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" "$URL"); then CURL_EXIT=0; else CURL_EXIT=$?; fi
+              if (( CURL_EXIT != 0 )) || [[ "$HTTP_CODE" == 000 || -z "$HTTP_CODE" ]]; then
+                if (( ATTEMPT < MAX_ATTEMPTS )); then DELAY=$((1 << (ATTEMPT - 1))); sleep "$DELAY"; ATTEMPT=$((ATTEMPT + 1)); continue; fi
+                echo "ERROR: Destination GitHub API transport failure after ${MAX_ATTEMPTS} attempts." >&2
+                rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+              fi
+              if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+                sleep 0.2; cat "$BODY_FILE"; rm -f "$BODY_FILE" "$HEADER_FILE"; return 0
+              fi
+              RETRY_AFTER=$(awk 'tolower($1)=="retry-after:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              RESET_AT=$(awk 'tolower($1)=="x-ratelimit-reset:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              REMAINING=$(awk 'tolower($1)=="x-ratelimit-remaining:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              RATE_LIMITED=false
+              if [[ "$HTTP_CODE" == 429 ]] || { [[ "$HTTP_CODE" == 403 ]] && { [[ "$REMAINING" == 0 ]] || [[ -n "$RETRY_AFTER" ]] || grep -Eiq 'rate.?limit|too many requests|secondary rate limit|abuse detection' "$BODY_FILE"; }; }; then RATE_LIMITED=true; fi
+              if [[ "$RATE_LIMITED" == true ]] || [[ "$HTTP_CODE" =~ ^5[0-9][0-9]$ ]]; then
+                if (( ATTEMPT >= MAX_ATTEMPTS )); then
+                  echo "ERROR: Destination GitHub API unavailable after ${MAX_ATTEMPTS} attempts (HTTP ${HTTP_CODE})." >&2
+                  [[ ! -s "$BODY_FILE" ]] || head -c 1000 "$BODY_FILE" >&2
+                  echo >&2; rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+                fi
+                if [[ "$RATE_LIMITED" == true ]]; then
+                  if [[ "$RETRY_AFTER" =~ ^[0-9]+$ ]]; then DELAY="$RETRY_AFTER"; (( DELAY < 1 )) && DELAY=1
+                  elif [[ "$REMAINING" == 0 && "$RESET_AT" =~ ^[0-9]+$ ]]; then DELAY=$((RESET_AT - $(date +%s))); (( DELAY < 1 )) && DELAY=1
+                  else DELAY=$((60 * (1 << (ATTEMPT - 1)))); fi
+                  echo "WARNING: Destination GitHub API rate limited; retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+                else DELAY=$((1 << (ATTEMPT - 1))); echo "WARNING: Destination GitHub API server error; retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2; fi
+                sleep "$DELAY"; ATTEMPT=$((ATTEMPT + 1)); continue
+              fi
+              echo "ERROR: Destination GitHub API returned HTTP ${HTTP_CODE}; this is not classified as rate limiting." >&2
+              [[ ! -s "$BODY_FILE" ]] || head -c 1000 "$BODY_FILE" >&2
+              echo >&2; rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+            done
+            rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+          }
+
+          DEST_API="https://api.github.com/repos/${DESTINATION_REPO}"
+          DEST_DEPLOYMENTS="$RUNNER_TEMP/destination-deployments.jsonl"
+          : > "$DEST_DEPLOYMENTS"
+          PAGE=1
+          while true; do
+            if PAGE_JSON=$(dest_api_get "$DEST_API/deployments?per_page=100&page=${PAGE}"); then
+              :
+            else
+              echo "WARNING: Destination deployment listing unavailable. Skipping optional deployment synchronization."
+              exit 0
+            fi
+            COUNT=$(jq 'length' <<< "$PAGE_JSON")
+            (( COUNT == 0 )) && break
+            jq -c '.[]' <<< "$PAGE_JSON" >> "$DEST_DEPLOYMENTS"
+            (( COUNT < 100 )) && break
+            PAGE=$((PAGE + 1))
+          done
+
+          SOURCE_DEPLOYMENTS="$RUNNER_TEMP/source-deployments.jsonl"
+          : > "$SOURCE_DEPLOYMENTS"
+          PAGE=1
+          while true; do
+            PAGE_URL="${UPSTREAM_API_URL}/deployments?per_page=100&page=${PAGE}"
+            if PAGE_JSON=$(api_get "$PAGE_URL"); then
+              :
+            else
+              API_RC=$?
+              if (( API_RC == 10 )); then
+                echo "Deployment sync skipped: upstream API access is unavailable. Other sync steps will continue."
+                exit 0
+              fi
+              exit "$API_RC"
+            fi
+            COUNT=$(jq 'length' <<< "$PAGE_JSON")
+            (( COUNT == 0 )) && break
+            jq -c '.[]' <<< "$PAGE_JSON" >> "$SOURCE_DEPLOYMENTS"
+            (( COUNT < 100 )) && break
+            PAGE=$((PAGE + 1))
+            (( PAGE > 1000 )) && { echo "Too many deployment pages; stopping."; exit 1; }
+          done
+
+          # Pre-fetch GitHub deployment statuses before writing anything to the destination.
+          # This avoids a partially mirrored result if the source status API is not accessible.
+          if [[ "$UPSTREAM_API_PROVIDER" == "github" ]]; then
+            ENRICHED_DEPLOYMENTS="$RUNNER_TEMP/source-deployments-enriched.jsonl"
+            : > "$ENRICHED_DEPLOYMENTS"
+            while IFS= read -r DEPLOYMENT_JSON; do
+              [[ -z "$DEPLOYMENT_JSON" ]] && continue
+              STATUS_URL=$(jq -r '.statuses_url // empty' <<< "$DEPLOYMENT_JSON")
+              SOURCE_STATUS="pending"
+              if [[ -n "$STATUS_URL" ]]; then
+                if [[ "$STATUS_URL" == *\?* ]]; then STATUS_QUERY="${STATUS_URL}&per_page=1"; else STATUS_QUERY="${STATUS_URL}?per_page=1"; fi
+                if STATUS_JSON=$(api_get "$STATUS_QUERY"); then
+                  SOURCE_STATUS=$(jq -r '.[0].state // "pending"' <<< "$STATUS_JSON")
+                else
+                  API_RC=$?
+                  if (( API_RC == 10 )); then
+                    echo "Deployment sync skipped: upstream deployment status API denied access. No destination deployments were changed."
+                    exit 0
+                  fi
+                  exit "$API_RC"
+                fi
+              fi
+              jq -c --arg source_status "$SOURCE_STATUS" '. + {_upstream_sync_source_status:$source_status}' <<< "$DEPLOYMENT_JSON" >> "$ENRICHED_DEPLOYMENTS"
+            done < "$SOURCE_DEPLOYMENTS"
+            SOURCE_DEPLOYMENTS="$ENRICHED_DEPLOYMENTS"
+          fi
+
+          map_status() {
+            case "${1,,}" in
+              success) echo success ;;
+              failed|failure|error) echo failure ;;
+              running|in_progress) echo in_progress ;;
+              created|pending|blocked|queued) echo queued ;;
+              canceled|cancelled|skipped|inactive) echo inactive ;;
+              *) echo pending ;;
+            esac
+          }
+
+          CREATED=0
+          UPDATED=0
+          while IFS= read -r DEPLOYMENT_JSON; do
+            [[ -z "$DEPLOYMENT_JSON" ]] && continue
+            if [[ "$UPSTREAM_API_PROVIDER" == "gitlab" ]]; then
+              SOURCE_ID=$(jq -r '.id // empty' <<< "$DEPLOYMENT_JSON")
+              REF=$(jq -r '.ref // empty' <<< "$DEPLOYMENT_JSON")
+              SHA=$(jq -r '.sha // empty' <<< "$DEPLOYMENT_JSON")
+              ENVIRONMENT=$(jq -r '.environment.name // "production"' <<< "$DEPLOYMENT_JSON")
+              SOURCE_STATUS=$(jq -r '.status // "created"' <<< "$DEPLOYMENT_JSON")
+              SOURCE_CREATED=$(jq -r '.created_at // empty' <<< "$DEPLOYMENT_JSON")
+            else
+              SOURCE_ID=$(jq -r '.id // empty' <<< "$DEPLOYMENT_JSON")
+              REF=$(jq -r '.ref // empty' <<< "$DEPLOYMENT_JSON")
+              SHA=$(jq -r '.sha // empty' <<< "$DEPLOYMENT_JSON")
+              ENVIRONMENT=$(jq -r '.environment // "production"' <<< "$DEPLOYMENT_JSON")
+              SOURCE_CREATED=$(jq -r '.created_at // empty' <<< "$DEPLOYMENT_JSON")
+              SOURCE_STATUS=$(jq -r '._upstream_sync_source_status // "pending"' <<< "$DEPLOYMENT_JSON")
+            fi
+
+            [[ -z "$SOURCE_ID" ]] && continue
+            [[ -z "$SHA" ]] && SHA="$REF"
+            if [[ -z "$SHA" ]] || ! git cat-file -e "${SHA}^{commit}" 2>/dev/null; then
+              echo "Skipping deployment ${SOURCE_ID}: commit/ref is not present in mirrored Git refs."
+              continue
+            fi
+
+            STATE=$(map_status "$SOURCE_STATUS")
+            DESCRIPTION="Mirrored from ${UPSTREAM_API_PROVIDER} deployment #${SOURCE_ID} (source status: ${SOURCE_STATUS})"
+            EXISTING=$(jq -s -c --arg provider "$UPSTREAM_API_PROVIDER" --arg id "$SOURCE_ID" '[.[] | select((.payload._upstream_sync.provider // "") == $provider and (.payload._upstream_sync.source_id // "") == $id)] | first // empty' "$DEST_DEPLOYMENTS")
+
+            if [[ -z "$EXISTING" ]]; then
+              BODY=$(jq -cn \
+                --arg ref "$SHA" --arg environment "$ENVIRONMENT" --arg description "$DESCRIPTION" \
+                --arg provider "$UPSTREAM_API_PROVIDER" --arg source_id "$SOURCE_ID" \
+                --arg source_ref "$REF" --arg source_sha "$SHA" --arg source_status "$SOURCE_STATUS" \
+                --arg source_created_at "$SOURCE_CREATED" \
+                '{ref:$ref,task:"deploy",auto_merge:false,required_contexts:[],environment:$environment,description:$description,transient_environment:false,production_environment:($environment|ascii_downcase=="production"),payload:{_upstream_sync:{provider:$provider,source_id:$source_id,source_ref:$source_ref,source_sha:$source_sha,source_status:$source_status,source_created_at:$source_created_at}}}')
+              if CREATED_DEPLOYMENT=$(curl -fsSL -X POST \
+                -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                -H "Content-Type: application/json" \
+                -d "$BODY" "$DEST_API/deployments"); then
+                :
+              else
+                echo "WARNING: Could not create destination deployment. Skipping optional deployment synchronization."
+                exit 0
+              fi
+              DEST_ID=$(jq -r '.id' <<< "$CREATED_DEPLOYMENT")
+              sleep 1
+              echo "$CREATED_DEPLOYMENT" >> "$DEST_DEPLOYMENTS"
+              CREATED=$((CREATED + 1))
+            else
+              DEST_ID=$(jq -r '.id' <<< "$EXISTING")
+            fi
+
+            if CURRENT_STATUS_JSON=$(dest_api_get "$DEST_API/deployments/${DEST_ID}/statuses?per_page=1"); then
+              :
+            else
+              echo "WARNING: Destination deployment status lookup failed. Skipping optional deployment synchronization."
+              exit 0
+            fi
+            CURRENT_STATE=$(jq -r '.[0].state // empty' <<< "$CURRENT_STATUS_JSON")
+            if [[ "$CURRENT_STATE" != "$STATE" ]]; then
+              STATUS_BODY=$(jq -cn --arg state "$STATE" --arg description "$DESCRIPTION" '{state:$state,description:$description,auto_inactive:false}')
+              if ! curl -fsSL -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+                -H "Content-Type: application/json" -d "$STATUS_BODY" \
+                "$DEST_API/deployments/${DEST_ID}/statuses" >/dev/null; then
+                echo "WARNING: Could not update destination deployment status. Skipping remaining optional deployment synchronization."
+                exit 0
+              fi
+              sleep 1
+              UPDATED=$((UPDATED + 1))
+            fi
+          done < "$SOURCE_DEPLOYMENTS"
+
+          echo "Deployment mirror finished. Created: ${CREATED}; status updates: ${UPDATED}."
+
+      - name: Archive GitLab package registry files
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$UPSTREAM_API_PROVIDER" != "gitlab" ]]; then
+            echo "Binary package archival is currently implemented for GitLab package registries. ${UPSTREAM_API_PROVIDER} package registries require ecosystem-specific export; no binary packages copied."
+            exit 0
+          fi
+
+          api_get() {
+            local URL="$1"
+            local BODY_FILE HEADER_FILE HTTP_CODE CURL_EXIT
+            local ATTEMPT=1 MAX_ATTEMPTS=4 DELAY RETRY_AFTER RESET_AT REMAINING RATE_LIMITED
+            local -a AUTH_ARGS=()
+            BODY_FILE=$(mktemp)
+            HEADER_FILE=$(mktemp)
+            if [[ -n "${UPSTREAM_API_TOKEN:-}" ]]; then AUTH_ARGS=(-H "PRIVATE-TOKEN: ${UPSTREAM_API_TOKEN}"); fi
+
+            while (( ATTEMPT <= MAX_ATTEMPTS )); do
+              : > "$BODY_FILE"; : > "$HEADER_FILE"
+              if HTTP_CODE=$(curl -sS -L --connect-timeout 20 --max-time 180 -D "$HEADER_FILE" -o "$BODY_FILE" -w '%{http_code}' \
+                -H "Accept: application/json" -H "User-Agent: GitHub-Actions-Upstream-Sync" "${AUTH_ARGS[@]}" "$URL"); then
+                CURL_EXIT=0
+              else
+                CURL_EXIT=$?
+              fi
+              if (( CURL_EXIT != 0 )) || [[ "$HTTP_CODE" == 000 || -z "$HTTP_CODE" ]]; then
+                if (( ATTEMPT < MAX_ATTEMPTS )); then
+                  DELAY=$((1 << (ATTEMPT - 1)))
+                  echo "WARNING: GitLab package API transport error; retrying in ${DELAY}s." >&2
+                  sleep "$DELAY"; ATTEMPT=$((ATTEMPT + 1)); continue
+                fi
+                echo "ERROR: GitLab package API transport failed after ${MAX_ATTEMPTS} attempts." >&2
+                rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+              fi
+              if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+                sleep 0.2
+                cat "$BODY_FILE"
+                rm -f "$BODY_FILE" "$HEADER_FILE"; return 0
+              fi
+              RETRY_AFTER=$(awk 'tolower($1)=="retry-after:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              RESET_AT=$(awk 'tolower($1)=="x-ratelimit-reset:" || tolower($1)=="ratelimit-reset:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              REMAINING=$(awk 'tolower($1)=="x-ratelimit-remaining:" || tolower($1)=="ratelimit-remaining:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              RATE_LIMITED=false
+              if [[ "$HTTP_CODE" == 429 ]] || { [[ "$HTTP_CODE" == 403 ]] && { [[ "$REMAINING" == 0 ]] || [[ -n "$RETRY_AFTER" ]] || grep -Eiq 'rate.?limit|too many requests|secondary rate limit' "$BODY_FILE"; }; }; then RATE_LIMITED=true; fi
+              if [[ "$HTTP_CODE" == 401 ]] || { [[ "$HTTP_CODE" == 403 ]] && [[ "$RATE_LIMITED" != true ]]; }; then
+                echo "ERROR: GitLab Package Registry API denied access (HTTP ${HTTP_CODE}). Check UPSTREAM_API_TOKEN." >&2
+                [[ ! -s "$BODY_FILE" ]] || head -c 1000 "$BODY_FILE" >&2
+                echo >&2; rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+              fi
+              if [[ "$RATE_LIMITED" == true ]] || [[ "$HTTP_CODE" =~ ^5[0-9][0-9]$ ]]; then
+                if (( ATTEMPT >= MAX_ATTEMPTS )); then
+                  echo "ERROR: GitLab package API remained unavailable after ${MAX_ATTEMPTS} attempts (HTTP ${HTTP_CODE})." >&2
+                  rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+                fi
+                if [[ "$RATE_LIMITED" == true ]]; then
+                  if [[ "$RETRY_AFTER" =~ ^[0-9]+$ ]]; then DELAY="$RETRY_AFTER"; (( DELAY < 1 )) && DELAY=1
+                  elif [[ "$REMAINING" == 0 && "$RESET_AT" =~ ^[0-9]+$ ]]; then DELAY=$((RESET_AT - $(date +%s))); (( DELAY < 1 )) && DELAY=1
+                  else DELAY=$((60 * (1 << (ATTEMPT - 1)))); fi
+                  echo "WARNING: GitLab package API rate limit (HTTP ${HTTP_CODE}); retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+                else
+                  DELAY=$((1 << (ATTEMPT - 1)))
+                  echo "WARNING: GitLab package API server error (HTTP ${HTTP_CODE}); retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+                fi
+                sleep "$DELAY"; ATTEMPT=$((ATTEMPT + 1)); continue
+              fi
+              echo "ERROR: GitLab package API returned HTTP ${HTTP_CODE}; not retrying." >&2
+              [[ ! -s "$BODY_FILE" ]] || head -c 1000 "$BODY_FILE" >&2
+              echo >&2; rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+            done
+            rm -f "$BODY_FILE" "$HEADER_FILE"; return 1
+          }
+
+          download_package_file() {
+            local URL="$1"; local OUT="$2"
+            local HEADER_FILE BODY_CODE CURL_EXIT ATTEMPT=1 MAX_ATTEMPTS=4 DELAY RETRY_AFTER RESET_AT REMAINING RATE_LIMITED
+            local -a AUTH_ARGS=()
+            HEADER_FILE=$(mktemp)
+            if [[ -n "${UPSTREAM_API_TOKEN:-}" ]]; then AUTH_ARGS=(-H "PRIVATE-TOKEN: ${UPSTREAM_API_TOKEN}"); fi
+            while (( ATTEMPT <= MAX_ATTEMPTS )); do
+              : > "$HEADER_FILE"
+              if BODY_CODE=$(curl -sS -L --connect-timeout 20 --max-time 900 -D "$HEADER_FILE" -o "$OUT" -w '%{http_code}' "${AUTH_ARGS[@]}" "$URL"); then CURL_EXIT=0; else CURL_EXIT=$?; fi
+              if (( CURL_EXIT == 0 )) && [[ "$BODY_CODE" =~ ^2[0-9][0-9]$ ]] && [[ -s "$OUT" ]]; then
+                rm -f "$HEADER_FILE"; return 0
+              fi
+              RETRY_AFTER=$(awk 'tolower($1)=="retry-after:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              RESET_AT=$(awk 'tolower($1)=="x-ratelimit-reset:" || tolower($1)=="ratelimit-reset:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              REMAINING=$(awk 'tolower($1)=="x-ratelimit-remaining:" || tolower($1)=="ratelimit-remaining:" {gsub("\r", "", $2); value=$2} END{print value}' "$HEADER_FILE")
+              RATE_LIMITED=false
+              if [[ "$BODY_CODE" == 429 ]] || { [[ "$BODY_CODE" == 403 ]] && { [[ "$REMAINING" == 0 ]] || [[ -n "$RETRY_AFTER" ]]; }; }; then RATE_LIMITED=true; fi
+              if [[ "$BODY_CODE" == 401 ]] || { [[ "$BODY_CODE" == 403 ]] && [[ "$RATE_LIMITED" != true ]]; }; then
+                echo "ERROR: GitLab package download denied (HTTP ${BODY_CODE})." >&2; rm -f "$HEADER_FILE" "$OUT"; return 1
+              fi
+              if [[ "$BODY_CODE" =~ ^4[0-9][0-9]$ ]] && [[ "$RATE_LIMITED" != true ]]; then
+                echo "ERROR: GitLab package download returned non-retryable HTTP ${BODY_CODE}." >&2
+                rm -f "$HEADER_FILE" "$OUT"; return 1
+              fi
+              if (( ATTEMPT >= MAX_ATTEMPTS )); then
+                echo "ERROR: Package download failed after ${MAX_ATTEMPTS} attempts (HTTP ${BODY_CODE}, curl ${CURL_EXIT})." >&2
+                rm -f "$HEADER_FILE" "$OUT"; return 1
+              fi
+              if [[ "$RATE_LIMITED" == true ]]; then
+                if [[ "$RETRY_AFTER" =~ ^[0-9]+$ ]]; then DELAY="$RETRY_AFTER"; (( DELAY < 1 )) && DELAY=1
+                elif [[ "$REMAINING" == 0 && "$RESET_AT" =~ ^[0-9]+$ ]]; then DELAY=$((RESET_AT - $(date +%s))); (( DELAY < 1 )) && DELAY=1
+                else DELAY=$((60 * (1 << (ATTEMPT - 1)))); fi
+                echo "WARNING: GitLab package download rate limited; retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+              else
+                DELAY=$((1 << (ATTEMPT - 1)))
+                echo "WARNING: Package download failed; retry ${ATTEMPT}/${MAX_ATTEMPTS} in ${DELAY}s." >&2
+              fi
+              sleep "$DELAY"; ATTEMPT=$((ATTEMPT + 1))
+            done
+            rm -f "$HEADER_FILE" "$OUT"; return 1
+          }
+
+          # Keep older archived package files; this branch is an accumulating archive.
+          if git ls-remote --exit-code --heads origin "$PACKAGE_ARCHIVE_BRANCH" >/dev/null 2>&1; then
+            git fetch origin "refs/heads/${PACKAGE_ARCHIVE_BRANCH}:refs/remotes/origin/${PACKAGE_ARCHIVE_BRANCH}"
+            git checkout -B "$PACKAGE_ARCHIVE_BRANCH" "refs/remotes/origin/${PACKAGE_ARCHIVE_BRANCH}"
+          else
+            git checkout --orphan "$PACKAGE_ARCHIVE_BRANCH"
+            git rm -rf -q --ignore-unmatch . || true
+          fi
+
+          mkdir -p packages metadata
+          INDEX_FILE="metadata/package-archive-index.jsonl"
+          SKIPPED_FILE="metadata/package-files-skipped.jsonl"
+          touch "$INDEX_FILE" "$SKIPPED_FILE"
+
+          PACKAGE_PAGE=1
+          PACKAGE_TOTAL=0
+          FILE_TOTAL=0
+          SKIPPED_TOTAL=0
+          while true; do
+            PACKAGE_URL="${UPSTREAM_API_URL}/packages?per_page=100&page=${PACKAGE_PAGE}"
+            PACKAGE_PAGE_JSON=$(api_get "$PACKAGE_URL")
+            PACKAGE_COUNT=$(jq 'length' <<< "$PACKAGE_PAGE_JSON")
+            (( PACKAGE_COUNT == 0 )) && break
+            while IFS= read -r PACKAGE_JSON; do
+              [[ -z "$PACKAGE_JSON" ]] && continue
+              PACKAGE_TOTAL=$((PACKAGE_TOTAL + 1))
+              PACKAGE_ID=$(jq -r '.id' <<< "$PACKAGE_JSON")
+              PACKAGE_TYPE=$(jq -r '.package_type // "unknown"' <<< "$PACKAGE_JSON")
+              PACKAGE_NAME=$(jq -r '.name // "unnamed"' <<< "$PACKAGE_JSON")
+              PACKAGE_VERSION=$(jq -r '.version // "versionless"' <<< "$PACKAGE_JSON")
+              SAFE_TYPE=$(printf '%s' "$PACKAGE_TYPE" | tr -c 'A-Za-z0-9._-' '_')
+              SAFE_NAME=$(printf '%s' "$PACKAGE_NAME" | tr -c 'A-Za-z0-9._-' '_')
+              SAFE_VERSION=$(printf '%s' "$PACKAGE_VERSION" | tr -c 'A-Za-z0-9._-' '_')
+              mkdir -p "metadata/packages" "packages/${SAFE_TYPE}/${SAFE_NAME}__${PACKAGE_ID}/${SAFE_VERSION}"
+              printf '%s\n' "$PACKAGE_JSON" > "metadata/packages/${PACKAGE_ID}.json"
+
+              FILE_PAGE=1
+              while true; do
+                FILES_URL="${UPSTREAM_API_URL}/packages/${PACKAGE_ID}/package_files?per_page=100&page=${FILE_PAGE}"
+                FILES_JSON=$(api_get "$FILES_URL")
+                FILE_COUNT=$(jq 'length' <<< "$FILES_JSON")
+                (( FILE_COUNT == 0 )) && break
+                while IFS= read -r FILE_JSON; do
+                  [[ -z "$FILE_JSON" ]] && continue
+                  FILE_ID=$(jq -r '.id' <<< "$FILE_JSON")
+                  FILE_NAME=$(jq -r '.file_name // "package-file.bin"' <<< "$FILE_JSON")
+                  FILE_SIZE=$(jq -r '.size // 0' <<< "$FILE_JSON")
+                  SAFE_FILE=$(basename "$FILE_NAME" | tr -c 'A-Za-z0-9._-' '_')
+                  ARCHIVE_REL="packages/${SAFE_TYPE}/${SAFE_NAME}__${PACKAGE_ID}/${SAFE_VERSION}/${FILE_ID}__${SAFE_FILE}"
+                  if (( FILE_SIZE > PACKAGE_MAX_FILE_MB * 1024 * 1024 )); then
+                    if ! grep -Fq "\"file_id\":${FILE_ID}," "$SKIPPED_FILE"; then
+                      jq -cn --argjson package "$PACKAGE_JSON" --argjson file "$FILE_JSON" --arg reason "File exceeds ${PACKAGE_MAX_FILE_MB} MB safety limit" '{package_id:$package.id,package_type:$package.package_type,package_name:$package.name,package_version:$package.version,file_id:$file.id,file_name:$file.file_name,size:$file.size,reason:$reason}' >> "$SKIPPED_FILE"
+                    fi
+                    SKIPPED_TOTAL=$((SKIPPED_TOTAL + 1))
+                    continue
+                  fi
+
+                  mkdir -p "$(dirname "$ARCHIVE_REL")"
+                  if [[ -f "$ARCHIVE_REL" ]] && grep -Fq "\"file_id\":${FILE_ID}," "$INDEX_FILE"; then
+                    continue
+                  fi
+                  DOWNLOAD_URL="${UPSTREAM_API_URL}/packages/${PACKAGE_ID}/package_files/${FILE_ID}/download"
+                  download_package_file "$DOWNLOAD_URL" "$ARCHIVE_REL"
+                  ACTUAL_SIZE=$(stat -c '%s' "$ARCHIVE_REL")
+                  if (( ACTUAL_SIZE > PACKAGE_MAX_FILE_MB * 1024 * 1024 )); then
+                    rm -f "$ARCHIVE_REL"
+                    if ! grep -Fq "\"file_id\":${FILE_ID}," "$SKIPPED_FILE"; then
+                      jq -cn --argjson package "$PACKAGE_JSON" --argjson file "$FILE_JSON" --arg reason "Downloaded file exceeds ${PACKAGE_MAX_FILE_MB} MB safety limit" '{package_id:$package.id,package_type:$package.package_type,package_name:$package.name,package_version:$package.version,file_id:$file.id,file_name:$file.file_name,size:$file.size,reason:$reason}' >> "$SKIPPED_FILE"
+                    fi
+                    SKIPPED_TOTAL=$((SKIPPED_TOTAL + 1))
+                    continue
+                  fi
+                  SHA256=$(sha256sum "$ARCHIVE_REL" | awk '{print $1}')
+                  if ! grep -Fq "\"file_id\":${FILE_ID}," "$INDEX_FILE"; then
+                    jq -cn --argjson package "$PACKAGE_JSON" --argjson file "$FILE_JSON" --arg path "$ARCHIVE_REL" --arg sha256 "$SHA256" '{package_id:$package.id,package_type:$package.package_type,package_name:$package.name,package_version:$package.version,file_id:$file.id,file_name:$file.file_name,size:$file.size,archive_path:$path,sha256:$sha256}' >> "$INDEX_FILE"
+                  fi
+                  FILE_TOTAL=$((FILE_TOTAL + 1))
+                done < <(jq -c '.[]' <<< "$FILES_JSON")
+                (( FILE_COUNT < 100 )) && break
+                FILE_PAGE=$((FILE_PAGE + 1))
+              done
+            done < <(jq -c '.[]' <<< "$PACKAGE_PAGE_JSON")
+            (( PACKAGE_COUNT < 100 )) && break
+            PACKAGE_PAGE=$((PACKAGE_PAGE + 1))
+            (( PACKAGE_PAGE > 1000 )) && { echo "Too many package pages; stopping."; exit 1; }
+          done
+
+          cat > README.md <<'README'
+          # Upstream package archive
+
+          This branch stores package files downloaded from the upstream GitLab project's Package Registry.
+          The original package metadata is stored in `metadata/packages/` and the file index/checksums are in `metadata/package-archive-index.jsonl`.
+          Files larger than the configured safety limit are listed in `metadata/package-files-skipped.jsonl` and are not stored in this branch.
+
+          This is a binary archive, not a re-published GitHub Packages registry. To install a package through a native registry, it must be republished using the ecosystem-specific client (npm, Maven, NuGet, PyPI, container, and so on).
+          README
+
+          git add -- packages metadata README.md
+          if ! git diff --cached --quiet; then
+            git commit -m "Archive upstream GitLab packages [skip ci]"
+            git push origin "HEAD:refs/heads/${PACKAGE_ARCHIVE_BRANCH}"
+          else
+            echo "No new or changed package archive files."
+          fi
+          echo "Package archive processed. Package records: ${PACKAGE_TOTAL}; files downloaded: ${FILE_TOTAL}; skipped oversized files: ${SKIPPED_TOTAL}."
+
+      - name: Sync summary
+        if: always()
+        run: |
+          echo "Upstream sync workflow finished. Check preceding steps for provider-specific skips or warnings."
