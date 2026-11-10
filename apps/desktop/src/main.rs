@@ -104,6 +104,11 @@ fn init_log_named(name: &str) {
         let l: &'static FileLog = Box::leak(Box::new(FileLog(Mutex::new(f), Instant::now())));
         let _ = log::set_logger(l).map(|()| log::set_max_level(log::LevelFilter::Info));
     }
+    // panic = "abort" ends the process without a word: put the reason in the log first.
+    std::panic::set_hook(Box::new(|p| {
+        let t = std::thread::current();
+        log::error!("crash: thread '{}' panicked: {p}", t.name().unwrap_or("?"));
+    }));
 }
 
 /// "Windows build 26200.1234 (25H2)" from the registry, for bug reports.

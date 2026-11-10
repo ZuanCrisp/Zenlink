@@ -7,6 +7,7 @@ authors.workspace = true
 description = "AirPlay 1 screen-mirroring receiver (ZenLink Studio over Wi-Fi, Hybrid picture)."
 
 [dependencies]
+zenlink-core = { path = "../zenlink-core" }
 log = { workspace = true }
 serde_json = { workspace = true }
 aes = "0.8"

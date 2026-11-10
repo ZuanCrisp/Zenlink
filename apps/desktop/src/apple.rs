@@ -688,7 +688,9 @@ impl Engine {
                         .ok_or("no Wi-Fi pairing record")?;
                     link::Link::wifi(addr, &r).await?.info().await
                 };
-                match rt.block_on(tokio::time::timeout(Duration::from_secs(20), ask)) {
+                // The timer must be made inside the runtime: built outside it, it panics
+                // ("no reactor running") and, with panic = abort, ends ZenLink.
+                match rt.block_on(async { tokio::time::timeout(Duration::from_secs(20), ask).await }) {
                     Ok(Ok(i)) if !i.product_type.is_empty() => {
                         log::info!("apple: learned {} ({}) over Wi-Fi", i.name, i.product_type);
                         let mut all = me.info.lock().unwrap();

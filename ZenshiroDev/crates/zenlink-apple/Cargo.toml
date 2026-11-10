@@ -7,6 +7,7 @@ authors.workspace = true
 description = "Apple Driver mode in Rust on idevice: device list, Developer Disk Image, tunnel, screen stream."
 
 [dependencies]
+zenlink-core = { path = "../zenlink-core" }
 log = { workspace = true }
 base64 = "0.22"
 gethostname = "1.1"

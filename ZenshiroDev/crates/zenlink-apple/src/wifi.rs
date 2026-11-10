@@ -154,6 +154,8 @@ pub async fn connect(addr: SocketAddr, record: &Record) -> Result<Tunnel, String
     let data = TcpStream::connect(SocketAddr::new(addr.ip(), port))
         .await
         .map_err(|e| format!("connect tunnel port {port}: {e}"))?;
+    zenlink_core::quick_ack(&data);
+    let _ = data.set_nodelay(true); // touches and keys go out at once
     let tunnel = connect_tls_psk_tunnel_native(data, control.encryption_key())
         .await
         .map_err(|e| format!("TLS-PSK tunnel: {e:?}"))?;

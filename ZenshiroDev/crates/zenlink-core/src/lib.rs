@@ -57,3 +57,34 @@ mod isolation_tests {
         assert_ne!(data_dir_in(base), base.join("ZenLink"));
     }
 }
+
+/// Asks Windows to ACK every TCP segment at once on a socket that receives video.
+/// Windows holds ACKs up to 200 ms; a sender with Nagle on (iOS) then holds its next small
+/// frame until the ACK arrives, so a still or slow-moving screen comes in bursts with gaps of
+/// several hundred ms and looks choppy although the frame rate is fine.
+#[cfg(windows)]
+pub fn quick_ack(s: &impl std::os::windows::io::AsRawSocket) {
+    use windows::Win32::Networking::WinSock::{WSAIoctl, SIO_TCP_SET_ACK_FREQUENCY, SOCKET};
+    let freq: u32 = 1;
+    let mut n = 0u32;
+    // SAFETY: a valid socket handle and a 4-byte input buffer that outlives the call.
+    let r = unsafe {
+        WSAIoctl(
+            SOCKET(s.as_raw_socket() as usize),
+            SIO_TCP_SET_ACK_FREQUENCY,
+            Some(&freq as *const u32 as _),
+            4,
+            None,
+            0,
+            &mut n,
+            None,
+            None,
+        )
+    };
+    if r != 0 {
+        log::info!("quick ACK not available on this socket");
+    }
+}
+
+#[cfg(not(windows))]
+pub fn quick_ack<T>(_: &T) {}

@@ -12,3 +12,7 @@ serde_json = { workspace = true }
 base64 = { workspace = true }
 log = { workspace = true }
 
+
+[target.'cfg(windows)'.dependencies.windows]
+workspace = true
+features = ["Win32_Networking_WinSock", "Win32_System_IO"]

@@ -11,6 +11,10 @@ Full notes for each version are on the [Releases](https://github.com/zenvyzenshi
 - **Installer in Indonesian and English:** a language page opens first and follows the Windows display language (Indonesian on an Indonesian Windows, English otherwise). The last page has a **Support / Donate** button.
 - **`lang` folder in the install folder** with `id.po`, the `zenlink.pot` template and a how-to. Languages you add there survive updates.
 
+### Fixed
+- **ZenLink closed by itself while idle** when an iPhone / iPad was found on Wi-Fi: reading its name started a timer outside the network runtime. A crash now also writes its reason to the log.
+- **ZenLink Studio over Wi-Fi looked choppy at a good frame rate:** Windows held TCP acknowledgements, so the iPhone sent small frames in bursts (gaps up to ~500 ms on a still or slow screen). The video connection, and the Apple Driver Wi-Fi tunnel, now acknowledge at once.
+
 ## 2.5.12
 
 ### Changed

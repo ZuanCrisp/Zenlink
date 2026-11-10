@@ -444,6 +444,7 @@ impl Inner {
             while let Ok((s, peer)) = listener.accept().await {
                 n += 1;
                 log::info!("airplay: video connection #{n} from {peer}");
+                zenlink_core::quick_ack(&s);
                 // Each video connection starts its own keystream (iOS opens it again sometimes).
                 let sink = sink.clone();
                 let t = tokio::spawn(async move { mirror::run(s, key, iv, &*sink).await });

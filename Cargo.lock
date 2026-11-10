@@ -6462,6 +6462,7 @@ dependencies = [
  "sha2",
  "tokio",
  "x25519-dalek",
+ "zenlink-core",
 ]
 
 [[package]]
@@ -6505,6 +6506,7 @@ dependencies = [
  "plist",
  "tokio",
  "uuid",
+ "zenlink-core",
 ]
 
 [[package]]
@@ -6523,6 +6525,7 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "windows",
 ]
 
 [[package]]
