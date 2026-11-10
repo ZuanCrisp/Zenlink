@@ -45,16 +45,34 @@ SetupLogging=yes
 VersionInfoCompany=Zenvy Zenshiro
 VersionInfoDescription=ZenLink Setup
 VersionInfoVersion={#AppVersionNum}
+; Language page first: Windows' display language picks the default
+; (Indonesian on an Indonesian Windows, English otherwise).
+ShowLanguageDialog=yes
+LanguageDetectionMethod=uilanguage
 
 [Languages]
+; English first: the fallback when Windows uses another language.
 Name: "english"; MessagesFile: "compiler:Default.isl"
-#if FileExists(AddBackslash(CompilerPath) + "Languages\Indonesian.isl")
-Name: "indonesian"; MessagesFile: "compiler:Languages\Indonesian.isl"
-#endif
+; Inno Setup's Indonesian translation (unofficial set), kept next to this file.
+Name: "indonesian"; MessagesFile: "Indonesian.isl"
+
+[CustomMessages]
+english.FirewallTask=Allow ZenLink on the local network (needed for AirPlay, iPhone/iPad and Android over Wi-Fi; asks for administrator permission once)
+indonesian.FirewallTask=Izinkan ZenLink di jaringan lokal (perlu untuk AirPlay, iPhone/iPad dan Android lewat Wi-Fi; minta izin administrator sekali)
+english.NetworkGroup=Network:
+indonesian.NetworkGroup=Jaringan:
+english.AppleDevices=Install Apple Devices from the Microsoft Store (needed for Apple Driver mode)
+indonesian.AppleDevices=Pasang Apple Devices dari Microsoft Store (perlu untuk mode Apple Driver)
+english.LogsName=ZenLink logs
+indonesian.LogsName=Log ZenLink
+english.UninstallName=Uninstall ZenLink
+indonesian.UninstallName=Hapus ZenLink
+english.DonateButton=Support
+indonesian.DonateButton=Donate
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
-Name: "firewall"; Description: "Allow ZenLink on the local network (needed for AirPlay, iPhone/iPad and Android over Wi-Fi; asks for administrator permission once)"; GroupDescription: "Network:"
+Name: "firewall"; Description: "{cm:FirewallTask}"; GroupDescription: "{cm:NetworkGroup}"
 
 [InstallDelete]
 ; An upgrade from v2.2.x (its libraries sit directly in {app}): remove what
@@ -86,9 +104,9 @@ Name: "{localappdata}\ZenLink-Next\logs"
 
 [Icons]
 Name: "{group}\ZenLink"; Filename: "{app}\ZenLink.exe"
-Name: "{group}\Uninstall ZenLink"; Filename: "{uninstallexe}"
+Name: "{group}\{cm:UninstallName}"; Filename: "{uninstallexe}"
 ; The log folder (window, backend, crash and setup logs) for bug reports.
-Name: "{group}\ZenLink logs"; Filename: "{localappdata}\ZenLink-Next\logs"
+Name: "{group}\{cm:LogsName}"; Filename: "{localappdata}\ZenLink-Next\logs"
 ; Also in the install folder (Program Files is read-only, so the logs live in
 ; %LOCALAPPDATA%; this shortcut leads there from where ZenLink is installed).
 Name: "{app}\Logs"; Filename: "{localappdata}\ZenLink-Next\logs"
@@ -100,7 +118,7 @@ Name: "{autodesktop}\ZenLink"; Filename: "{app}\ZenLink.exe"; Tasks: desktopicon
 ; the "ZenLink (ADB)" rule that earlier versions added.
 Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rule name=""ZenLink (AirPlay)"" program=""{app}\ZenLinkService.exe"" & netsh advfirewall firewall delete rule name=""ZenLink (AirPlay)"" program=""{app}\ZenLink.exe"" & netsh advfirewall firewall add rule name=""ZenLink (AirPlay)"" dir=in action=allow program=""{app}\ZenLink.exe"" enable=yes profile=any remoteip=localsubnet & netsh advfirewall firewall delete rule name=""ZenLink (ADB)"" program=""{app}\third_party\platform-tools\adb.exe"""; Flags: runhidden shellexec waituntilterminated; Verb: runas; Tasks: firewall
 ; Apple Driver mode needs Apple Mobile Device Service (Apple Devices or iTunes).
-Filename: "ms-windows-store://pdp/?ProductId=9NP83LWLPZ9K"; Description: "Install Apple Devices from the Microsoft Store (needed for Apple Driver mode)"; Flags: postinstall shellexec skipifsilent unchecked; Check: not AppleServiceInstalled
+Filename: "ms-windows-store://pdp/?ProductId=9NP83LWLPZ9K"; Description: "{cm:AppleDevices}"; Flags: postinstall shellexec skipifsilent unchecked; Check: not AppleServiceInstalled
 Filename: "{app}\ZenLink.exe"; Description: "{cm:LaunchProgram,ZenLink}"; Flags: nowait postinstall skipifsilent
 ; In-app update (v2.5.1): ZenLink runs this Setup with /SILENT /ZLRELAUNCH=1 and
 ; quits; start the new version when the silent install is done.
@@ -191,4 +209,36 @@ begin
   // No prerequisite check: the Rust window does not use Microsoft Edge
   // WebView2 (only the old classic window did). See B-6.
   Result := True;
+end;
+
+// Finish page: a Donate / Support button left of Finish (the Sociabuzz page
+// from README and the website). Hidden on other pages and in silent updates.
+var
+  DonateButton: TNewButton;
+
+procedure DonateClick(Sender: TObject);
+var
+  Code: Integer;
+begin
+  ShellExecAsOriginalUser('open', 'https://sociabuzz.com/zenvy/tribe', '', '', SW_SHOWNORMAL, ewNoWait, Code);
+end;
+
+procedure InitializeWizard();
+begin
+  DonateButton := TNewButton.Create(WizardForm);
+  DonateButton.Parent := WizardForm;
+  DonateButton.Caption := CustomMessage('DonateButton');
+  DonateButton.Width := ScaleX(110);
+  DonateButton.Height := WizardForm.NextButton.Height;
+  DonateButton.Top := WizardForm.NextButton.Top;
+  // Same margin from the left edge as Cancel has from the right edge.
+  DonateButton.Left := WizardForm.ClientWidth - WizardForm.CancelButton.Left - WizardForm.CancelButton.Width;
+  DonateButton.Anchors := [akLeft, akBottom];
+  DonateButton.OnClick := @DonateClick;
+  DonateButton.Visible := False;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  DonateButton.Visible := (CurPageID = wpFinished) and not WizardSilent();
 end;
