@@ -30,3 +30,10 @@ ones are dropped, translations stay.
 Texts built while ZenLink runs (backend messages, folder names) are not in the
 code as `I18n.t(...)` or `i18n::tr(...)`. They are marked `#. added by hand` in
 `id.po`; the script keeps them. Add new ones the same way.
+
+## Right-to-left languages
+
+Arabic, Hebrew, Persian and other right-to-left languages are welcome. Their text
+shows, but the layout stays left-to-right (buttons and icons are not mirrored yet).
+If you translate one, open an issue on GitHub so full right-to-left support can be
+built and tested with you.

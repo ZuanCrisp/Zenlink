@@ -2,6 +2,14 @@
 
 Full notes for each version are on the [Releases](https://github.com/zenvyzenshiro/zenlink/releases) page.
 
+## 2.5.13
+
+### Changed
+- **Android device list like iPhone / iPad:** click a phone to pick it (it is highlighted), then press the one Start button. A phone on USB and Wi-Fi at once gets a USB and a Wi-Fi Start.
+- **Start needs a picked device:** pressing Start with no device picked shows "Pick a device first" instead of doing nothing (Android and iPhone / iPad; ZenLink Studio over Wi-Fi still starts the receiver).
+- **Language list:** Indonesia first, then English, then other languages. With more than 6 languages the picker becomes a dropdown.
+- **`lang` folder in the install folder** with `id.po`, the `zenlink.pot` template and a how-to. Languages you add there survive updates.
+
 ## 2.5.12
 
 ### Changed

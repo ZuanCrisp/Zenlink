@@ -510,6 +510,7 @@ pub fn set_lang(g: &I18n, code: &str) {
         }
         .into()
     });
+    g.set_index(langs.iter().position(|(c, _)| c == code).unwrap_or(0) as i32);
     g.set_lang(code.into());
 }
 
@@ -1630,6 +1631,7 @@ fn show_android(
             });
             let on_usb = d.transports.iter().any(|t| t.connection == Connection::Usb);
             AndroidRow {
+                selected: false,
                 title: d.name.display.clone().into(),
                 sub: sub.join(" · ").into(),
                 ok: d.readiness == Readiness::Ready,
@@ -1643,6 +1645,7 @@ fn show_android(
     ui.set_android_devices(std::rc::Rc::new(slint::VecModel::from(rows)).into());
     APP.with_borrow_mut(|a| a.android_list = list.to_vec());
     rail_refresh(ui);
+    android_mark_picked(ui);
     // Test hook: show the QR pairing card (no phone needed to see it).
     static QR_TEST: AtomicBool = AtomicBool::new(false);
     if std::env::var_os("ZL_QR_TEST").is_some() && !QR_TEST.swap(true, Relaxed) {
@@ -2460,6 +2463,38 @@ fn android_wifi_qr(ui: &AppWindow) {
     });
 }
 
+/// The list row Start uses: the phone picked here or in the device menu,
+/// else the first ready one (like the Apple list).
+fn android_picked_index() -> Option<usize> {
+    use zenlink_android::discovery::Readiness;
+    APP.with_borrow(|a| {
+        let picked = a.rail_sel.as_deref().and_then(|k| k.strip_prefix("a:"));
+        picked
+            .and_then(|k| a.android_list.iter().position(|d| d.id.key == k))
+            .or_else(|| {
+                a.android_list
+                    .iter()
+                    .position(|d| d.readiness == Readiness::Ready)
+            })
+    })
+}
+
+/// Highlights the picked row.
+fn android_mark_picked(ui: &AppWindow) {
+    use slint::Model;
+    let sel = android_picked_index();
+    let model = ui.get_android_devices();
+    for i in 0..model.row_count() {
+        if let Some(mut r) = model.row_data(i) {
+            if r.selected != (sel == Some(i)) {
+                r.selected = sel == Some(i);
+                model.set_row_data(i, r);
+            }
+        }
+    }
+    ui.set_android_selected(sel.map_or(-1, |i| i as i32));
+}
+
 fn android_start(ui: &AppWindow, index: i32) {
     use zenlink_android::devices::Connection;
     use zenlink_android::discovery::Readiness;
@@ -2476,17 +2511,12 @@ fn android_start(ui: &AppWindow, index: i32) {
         let dev = APP.with_borrow(|a| {
             let ready =
                 |d: &&zenlink_android::discovery::AndroidDevice| d.readiness == Readiness::Ready;
-            if index >= 0 {
-                a.android_list.get(index as usize).filter(ready).cloned()
-            } else {
-                // The phone picked in the device menu (v2.6), else the first ready one.
-                let picked = a.rail_sel.as_deref().and_then(|k| k.strip_prefix("a:"));
-                picked
-                    .and_then(|k| a.android_list.iter().find(|d| d.id.key == k))
-                    .filter(ready)
-                    .or_else(|| a.android_list.iter().find(ready))
-                    .cloned()
-            }
+            // -1: the picked row (title-bar Start).
+            let i = usize::try_from(index).ok();
+            i.or_else(android_picked_index)
+                .and_then(|i| a.android_list.get(i))
+                .filter(ready)
+                .cloned()
         });
         // A phone on both USB and Wi-Fi: use the link the user picked.
         let via = APP.with_borrow(|a| a.android_via);
@@ -2502,7 +2532,14 @@ fn android_start(ui: &AppWindow, index: i32) {
             d
         });
         let Some(d) = dev else {
-            show_toast(ui, i18n::tr("No Android device is ready yet."));
+            let msg = if android_picked_index().is_some() {
+                i18n::tr(
+                    "The picked device is not ready yet. Follow the steps below, then press Start.",
+                )
+            } else {
+                i18n::tr("Pick a device first. Plug in the phone with USB debugging on, or connect it over Wi-Fi.")
+            };
+            show_toast(ui, msg);
             return;
         };
         let server = match scrcpy_server() {
@@ -3405,6 +3442,17 @@ fn main() -> Result<(), slint::PlatformError> {
                 // The card opens at step 0 (detect device) at once.
                 let airplay = ui.get_mode_link().as_str() == "wireless"
                     && ui.get_flow_kind().as_str() == "usbdirect";
+                let picked = ui
+                    .get_apple_devices()
+                    .iter()
+                    .any(|d| d.selected && d.state != "offline");
+                if !airplay && !picked {
+                    show_toast(
+                        &ui,
+                        i18n::tr("Pick an iPhone or iPad first. Plug it in with the cable and unlock it; it shows up in the list."),
+                    );
+                    return;
+                }
                 if !airplay {
                     ui.set_flow_failed(false);
                     ui.set_flow_step(0);
@@ -3830,6 +3878,21 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() {
                 APP.with_borrow_mut(|a| a.android_via = None);
                 android_start(&ui, i);
+            }
+        });
+        let weak = ui.as_weak();
+        ui.on_android_pick(move |i| {
+            if let Some(ui) = weak.upgrade() {
+                let key = APP.with_borrow(|a| {
+                    a.android_list
+                        .get(usize::try_from(i).ok()?)
+                        .map(|d| d.id.key.clone())
+                });
+                if let Some(key) = key {
+                    APP.with_borrow_mut(|a| a.rail_sel = Some(format!("a:{key}")));
+                    rail_refresh(&ui);
+                    android_mark_picked(&ui);
+                }
             }
         });
         let weak = ui.as_weak();

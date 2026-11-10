@@ -6447,7 +6447,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-airplay"
-version = "2.5.12"
+version = "2.5.13"
 dependencies = [
  "aes",
  "ctr",
@@ -6466,14 +6466,14 @@ dependencies = [
 
 [[package]]
 name = "zenlink-android"
-version = "2.5.12"
+version = "2.5.13"
 dependencies = [
  "log",
 ]
 
 [[package]]
 name = "zenlink-app"
-version = "2.5.12"
+version = "2.5.13"
 dependencies = [
  "base64 0.22.1",
  "log",
@@ -6494,7 +6494,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-apple"
-version = "2.5.12"
+version = "2.5.13"
 dependencies = [
  "base64 0.22.1",
  "gethostname",
@@ -6509,7 +6509,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-audio"
-version = "2.5.12"
+version = "2.5.13"
 dependencies = [
  "log",
  "windows",
@@ -6517,7 +6517,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-core"
-version = "2.5.12"
+version = "2.5.13"
 dependencies = [
  "base64 0.22.1",
  "log",
@@ -6527,7 +6527,7 @@ dependencies = [
 
 [[package]]
 name = "zenlink-video"
-version = "2.5.12"
+version = "2.5.13"
 dependencies = [
  "log",
  "windows",

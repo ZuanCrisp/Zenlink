@@ -54,6 +54,8 @@ export global I18n {
     // Languages found (code, own name) for the pickers.
     in-out property <[string]> codes: ["en"];
     in-out property <[string]> names: ["English"];
+    // Position of `lang` in `codes` (the dropdown's current row).
+    in-out property <int> index: 0;
     // (text, lang, value for a {placeholder}) -> translated text. lang is passed so
     // a language change redraws every text.
     pure callback lookup(string, string, string) -> string;

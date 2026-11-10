@@ -4,7 +4,7 @@
 
 import { ScrollView } from "std-widgets.slint";
 import { Theme, I18n } from "theme.slint";
-import { Glass, Icon, GlassButton, Seg, Toggle, GlassSlider, Row, Card, Chip, Tip, UiTest, TrafficLights } from "widgets.slint";
+import { Glass, Icon, GlassButton, Seg, LangPicker, Toggle, GlassSlider, Row, Card, Chip, Tip, UiTest, TrafficLights } from "widgets.slint";
 // v2.5.1: an Android app in its own window (ZenLink.exe --android-app).
 export { AppWin } from "appwin.slint";
 import { FilePane, Files, FileRow, PlaceRow } from "filewin.slint";
@@ -991,10 +991,8 @@ component ModeChooser inherits Rectangle {
                 if !root.inline: HorizontalLayout {
                     spacing: 10px;
                     Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
-                    Seg {
+                    LangPicker {
                         width: 190px;
-                        options: I18n.codes; // shortcut: Seg shows 6 at most, a dropdown when more languages arrive
-                        labels: I18n.names;
                         value: root.prefs.lang;
                         changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
                     }
@@ -1237,10 +1235,8 @@ component PlatformSelector inherits Rectangle {
                 HorizontalLayout {
                     spacing: 10px;
                     Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; }
-                    Seg {
+                    LangPicker {
                         width: 190px;
-                        options: I18n.codes; // shortcut: Seg shows 6 at most, a dropdown when more languages arrive
-                        labels: I18n.names;
                         value: root.prefs.lang;
                         changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
                     }
@@ -1341,6 +1337,8 @@ export struct AndroidRow {
     wifi: bool,
     // Connected over USB and Wi-Fi at once: the user picks the link.
     both: bool,
+    // The device Start uses (picked in this list or the device menu).
+    selected: bool,
 }
 
 // One installed app in the app picker.
@@ -1640,6 +1638,9 @@ component AndroidHome inherits Rectangle {
     callback back();
     callback start-device(int);
     callback start-device-via(int, string);
+    // The row Start uses (-1: none picked) and a click on a row.
+    in property <int> selected: -1;
+    callback pick-device(int);
     // Phase A6: Android over Wi-Fi.
     in property <bool> wifi-busy;
     // Current Wi-Fi step while busy ("Reading the phone's Wi-Fi address…").
@@ -1721,56 +1722,71 @@ component AndroidHome inherits Rectangle {
                         }
                     }
                 }
-                for d[i] in root.devices: HorizontalLayout {
-                    spacing: 8px;
-                    VerticalLayout {
-                        alignment: start;
-                        padding-top: 5px;
-                        Rectangle { width: 8px; height: 8px; border-radius: 4px; background: d.ok ? Theme.ok : Theme.warn; }
+                for d[i] in root.devices: Rectangle {
+                    border-radius: 12px;
+                    background: d.selected ? (Theme.dark ? #ffffff14 : #ffffffd0) : rowTa.has-hover ? (Theme.dark ? #ffffff0c : #ffffffa0) : (Theme.dark ? #ffffff06 : #ffffff70);
+                    border-width: 1px;
+                    border-color: d.selected ? Theme.accent.with-alpha(0.7) : Theme.line;
+                    animate background, border-color { duration: 160ms; }
+                    rowTa := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.pick-device(i); }
                     }
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        Text { text: d.title; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
-                        Text { text: d.sub; font-size: 11px; color: Theme.text-2; wrap: word-wrap; }
-                    }
-                    if d.wifi && root.phase != "connecting": VerticalLayout {
-                        alignment: center;
-                        GlassButton {
-                            icon: "\u{E701}";
-                            label: "Wi-Fi";
-                            enabled: !root.wifi-busy;
-                            tip: I18n.t("Switch to Wi-Fi: once connected, you can unplug the cable");
-                            clicked => { root.wifi-device(i); }
+                    HorizontalLayout {
+                        padding: 10px;
+                        padding-left: 12px;
+                        spacing: 10px;
+                        VerticalLayout {
+                            alignment: center;
+                            Rectangle { width: 8px; height: 8px; border-radius: 4px; background: d.ok ? Theme.ok : Theme.warn; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 1;
+                            Text { text: d.title; font-size: 12.5px; font-weight: 600; color: Theme.text; wrap: word-wrap; }
+                            Text { text: d.sub; font-size: 11px; color: Theme.text-2; wrap: word-wrap; }
+                        }
+                        if d.wifi && root.phase != "connecting": VerticalLayout {
+                            alignment: center;
+                            GlassButton {
+                                icon: "\u{E701}";
+                                label: "Wi-Fi";
+                                enabled: !root.wifi-busy;
+                                tip: I18n.t("Switch to Wi-Fi: once connected, you can unplug the cable");
+                                clicked => { root.wifi-device(i); }
+                            }
+                        }
+                        if d.selected: VerticalLayout {
+                            alignment: center;
+                            Text { text: "\u{E73E}"; font-family: Theme.icons; font-size: 12px; color: Theme.accent; }
                         }
                     }
-                    if d.ok && !d.both && root.phase != "connecting": VerticalLayout {
-                        alignment: center;
-                        GlassButton {
-                            primary: true;
-                            icon: "\u{E768}";
-                            label: I18n.t("Start");
-                            tip: I18n.t("Start mirroring this device");
-                            clicked => { root.start-device(i); }
-                        }
+                }
+                // One Start for the picked device; a phone on USB and Wi-Fi at once
+                // gets one Start per link.
+                if root.phase != "connecting": HorizontalLayout {
+                    alignment: end;
+                    spacing: 6px;
+                    if root.selected >= 0 && root.devices[root.selected].both: GlassButton {
+                        primary: true;
+                        icon: "\u{E768}";
+                        label: "USB";
+                        tip: I18n.t("Start over the USB cable (most stable, lowest delay)");
+                        clicked => { root.start-device-via(root.selected, "usb"); }
                     }
-                    // On USB and Wi-Fi at once: one Start per link.
-                    if d.both && root.phase != "connecting": HorizontalLayout {
-                        alignment: end;
-                        spacing: 6px;
-                        GlassButton {
-                            primary: true;
-                            icon: "\u{E768}";
-                            label: "USB";
-                            tip: I18n.t("Start over the USB cable (most stable, lowest delay)");
-                            clicked => { root.start-device-via(i, "usb"); }
-                        }
-                        GlassButton {
-                            primary: true;
-                            icon: "\u{E701}";
-                            label: "Wi-Fi";
-                            tip: I18n.t("Start over Wi-Fi (you can unplug the cable)");
-                            clicked => { root.start-device-via(i, "wifi"); }
-                        }
+                    if root.selected >= 0 && root.devices[root.selected].both: GlassButton {
+                        primary: true;
+                        icon: "\u{E701}";
+                        label: "Wi-Fi";
+                        tip: I18n.t("Start over Wi-Fi (you can unplug the cable)");
+                        clicked => { root.start-device-via(root.selected, "wifi"); }
+                    }
+                    if root.selected < 0 || !root.devices[root.selected].both: GlassButton {
+                        primary: root.selected >= 0 && root.devices[root.selected].ok;
+                        icon: "\u{E768}";
+                        label: I18n.t("Start");
+                        tip: I18n.t("Start mirroring the picked device");
+                        clicked => { root.start-device(root.selected); }
                     }
                 }
                 if root.phase == "connecting": Text {
@@ -1964,10 +1980,8 @@ component AddDevice inherits Rectangle {
                 HorizontalLayout {
                     spacing: 10px;
                     Text { text: "Bahasa / Language"; font-size: 11.5px; color: Theme.text-2; vertical-alignment: center; horizontal-stretch: 1; }
-                    Seg {
+                    LangPicker {
                         width: 190px;
-                        options: I18n.codes; // shortcut: Seg shows 6 at most, a dropdown when more languages arrive
-                        labels: I18n.names;
                         value: root.prefs.lang;
                         changed(v) => { root.prefs.lang = v; root.prefs-changed(root.prefs); }
                     }
@@ -2187,10 +2201,8 @@ component SettingsPanel inherits Glass {
                     }
                     Row {
                         label: I18n.t("Language");
-                        Seg {
+                        LangPicker {
                             width: 150px;
-                            options: I18n.codes; // shortcut: Seg shows 6 at most, a dropdown when more languages arrive
-                            labels: I18n.names;
                             value: prefs.lang;
                             changed(v) => { root.prefs.lang = v; root.changed(root.prefs); }
                         }
@@ -2791,6 +2803,8 @@ export component AppWindow inherits Window {
     in property <string> adb-error;
     callback install-adb();
     in property <[AndroidRow]> android-devices;
+    in property <int> android-selected: -1;
+    callback android-pick(int);
     // Android session (phase A3): "idle", "connecting", "streaming", "error".
     in property <string> android-phase: "idle";
     in property <string> android-device;
@@ -3114,6 +3128,8 @@ export component AppWindow inherits Window {
                             back => { root.change-platform(); }
                             start-device(i) => { root.android-start(i); }
                             start-device-via(i, v) => { root.android-start-via(i, v); }
+                            selected: root.android-selected;
+                            pick-device(i) => { root.android-pick(i); }
                             wifi-busy: root.android-wifi-busy;
                             wifi-status: root.android-wifi-status;
                             wifi-device(i) => { root.android-wifi-device(i); }

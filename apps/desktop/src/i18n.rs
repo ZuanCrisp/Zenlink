@@ -91,6 +91,13 @@ fn find() -> Vec<(String, String)> {
             add(&code.to_lowercase(), &text);
         }
     }
+    // Indonesia first, then English, then the rest by name.
+    let rank = |c: &str| match c {
+        "id" => 0,
+        "en" => 1,
+        _ => 2,
+    };
+    out.sort_by(|a, b| (rank(&a.0), &a.1).cmp(&(rank(&b.0), &b.1)));
     out
 }
 
@@ -223,7 +230,7 @@ mod tests {
     #[test]
     fn built_in_indonesian_loads() {
         let (m, name) = parse(BUILT_IN[0].1);
-        assert_eq!(name.as_deref(), Some("Bahasa Indonesia"));
+        assert_eq!(name.as_deref(), Some("Indonesia"));
         assert!(m.len() > 400);
     }
 

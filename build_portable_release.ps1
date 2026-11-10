@@ -105,6 +105,13 @@ Copy-Item "$root\ZenshiroDev\resources\windows\native\playfair\playfair.dll" $ap
 # Driver changes (Settings > Connection & Drivers): tools\usb_filter.ps1 next to drivers\.
 Copy-Item -Recurse "$root\ZenshiroDev\tooling\windows\tools" (Join-Path $app "tools")
 Copy-Item -Recurse "$root\ZenshiroDev\resources\windows\drivers" (Join-Path $app "drivers")
+# Language files: Indonesian, the template and how to add a language. ZenLink reads
+# any <code>.po here (src/i18n.rs); Indonesian is also built into ZenLink.exe.
+$langDest = Join-Path $app "lang"
+New-Item -ItemType Directory -Force $langDest | Out-Null
+foreach ($f in @("id.po", "zenlink.pot", "README.md")) {
+    Copy-Item "$root\ZenshiroDev\resources\lang\$f" $langDest
+}
 Invoke-Sign @(Get-ChildItem $app -Recurse -Include *.exe, *.dll | ForEach-Object FullName)
 
 Write-Host "[2/3] Building the portable single-file ZenLink.exe..." -ForegroundColor Magenta
@@ -125,7 +132,9 @@ $iscc = @(
 if ($iscc) {
     # Top-level entries of the install folder: the next Setup removes exactly
     # these before copying (clean update, ZenshiroDev/tooling/windows/packaging/ZenLink.iss).
-    $skip = @("Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat", "portable.txt", "install-manifest.txt")
+    # lang\ is left out: languages a user added there survive an update (Setup
+    # still overwrites the files it ships).
+    $skip = @("Start ZenLink.bat", "run.bat", "Create-Desktop-Shortcut.bat", "Uninstall-ZenLink.bat", "portable.txt", "install-manifest.txt", "lang")
     $names = @(Get-ChildItem -Force $app | Where-Object { $skip -notcontains $_.Name } | ForEach-Object { $_.Name }) + "install-manifest.txt"
     [IO.File]::WriteAllLines((Join-Path $app "install-manifest.txt"), [string[]]$names)
     & $iscc "/DAppVersion=$Version" "/DAppVersionNum=$VersionNum" "/DSourceDir=$app" "/O$release" "ZenshiroDev\tooling\windows\packaging\ZenLink.iss"
