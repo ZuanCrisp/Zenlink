@@ -183,8 +183,7 @@ Each language is one text file (`<code>.po`, for example `ja.po`). No programmin
 **With the installer or Portable (easiest):**
 1. Get the template `zenlink.pot`: in the install folder (`C:\Program Files\ZenLink\lang\`), or [download it](https://raw.githubusercontent.com/zenvyzenshiro/zenlink/main/ZenshiroDev/resources/lang/zenlink.pot) (right-click → Save link as).
 2. Open it in [Poedit](https://poedit.net/) (free): **File → New from POT/PO file…**, pick your language, save as `<code>.po`.
-3. Put your language's own name in the header: `"Language-Name: 日本語
-"`.
+3. Put your language's own name in the header: `"Language-Name: 日本語\n"`.
 4. Translate each text. Keep `{placeholders}` such as `{device}` exactly, and keep names (ZenLink, AirPlay, iPhone, USB, Wi-Fi…) in English. An empty translation shows English, so you can do it bit by bit.
 5. Put the file in `%LOCALAPPDATA%\ZenLink-Next\lang\` (create the `lang` folder; it survives updates), restart ZenLink, and pick the language in **Settings → Language**.
 6. Share it: open an issue and attach the file (zip it if GitHub refuses `.po`), or send a pull request.
