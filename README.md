@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><img src="https://img.shields.io/badge/⬇_Download-v2.5.11-FF4FA3?style=for-the-badge" alt="Download v2.5.11"></a>
+  <a href="../../releases/latest"><img src="https://img.shields.io/badge/⬇_Download-v2.5.13-FF4FA3?style=for-the-badge" alt="Download v2.5.13"></a>
   <a href="https://zenvyzenshiro.github.io/zenlink/"><img src="https://img.shields.io/badge/Website-zenlink-1f1f2e?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Website"></a>
 </p>
 
@@ -41,10 +41,10 @@
 
 ### 🌟 Author, Attribution & Open-Source Lineage
 > - **Creator & Lead Developer**: **Zenvy Zenshiro** ([GitHub `@zenvyzenshiro`](https://github.com/zenvyzenshiro) · [Sociabuzz](https://sociabuzz.com/zenvy/tribe)).
->   Designed and built ZenLink: the two-mode connection system with driver manager and safe rollback, ZenLink Studio (QuickTime capture over libusb0, and an AirPlay screen-mirroring receiver), Wi-Fi for Apple Driver mode without Bonjour, low-latency `<video>` playback with H.264 SPS rewriting, native WASAPI sound with lip sync and a Wi-Fi jitter buffer, OCR copy, stealth dim, wake & unlock, system tray, and the black + pink bilingual (ID/EN) interface.
+>   Designed and built ZenLink: the Apple connection modes with a driver manager and safe rollback, ZenLink Studio (QuickTime capture over libusb0, and an AirPlay screen-mirroring receiver), Wi-Fi for Apple Driver mode without Bonjour, the Android client, hardware-decoded low-latency playback, native WASAPI sound with lip sync and a Wi-Fi jitter buffer, OCR copy, stealth dim, wake & unlock, the system tray, and the black + pink interface in Indonesian and English (more languages as files).
 > - **Original open-source sources ZenLink builds on** (all used under their own licenses):
 >   - [**pane-iphone-mirror-windows**](https://github.com/teyboxv1/pane-iphone-mirror-windows) by **teyboxv1** (GPL-3.0) — the original Pane project: iPhone mirroring on Windows through CoreDevice.
->   - [**pymobiledevice3**](https://github.com/doronz88/pymobiledevice3) by **Doron Zavelevsky** (GPL-3.0) — RemoteXPC / RSD tunnel, CoreDevice screen stream, lockdown and pairing.
+>   - [**pymobiledevice3**](https://github.com/doronz88/pymobiledevice3) by **Doron Zavelevsky** (GPL-3.0) — RemoteXPC / RSD tunnel, CoreDevice screen stream, lockdown and pairing. Used up to 2.5.11; since 2.5.12 the Rust crate `idevice` does this work inside ZenLink.exe.
 >   - [**quicktime_video_hack**](https://github.com/danielpaulus/quicktime_video_hack) by **Daniel Paulus** (MIT) — reference for the QuickTime screen-capture USB protocol used by ZenLink Studio (cable).
 >   - [**libusb-win32**](https://sourceforge.net/projects/libusb-win32/) by **Stephan Meyer & Travis Lee Robinson** (driver GPL, library LGPL) — the libusb0 driver bundled in `drivers/libusb-win32` (unmodified, signed binaries; source at the link).
 >   - [**libwdi / Zadig**](https://github.com/pbatard/libwdi) by **Pete Batard** (LGPL / GPL) — the driver-package approach ZenLink follows; Zadig itself is not bundled.
@@ -59,14 +59,15 @@
 | Feature | Description |
 | :--- | :--- |
 | **🤖 Android (new in v2.5)** | Android 5.0+ over USB, or Wi-Fi (one click from a USB connection, or Android 11+ wireless debugging: scan a QR code shown by ZenLink, or enter a pairing code). Picture, sound (Android 11+), mouse/keyboard control, clipboard, real device names, per-device settings, video profiles and Smart Encoder Detection (H.264 by default; H.265 only when the phone and Windows both decode it, with automatic fallback). Uses Google's official `adb` (downloaded by ZenLink on first use, about 8 MB) and the official scrcpy server (bundled). |
-| **📱 Device picker (new in v2.5.1)** | The Apple screen lists every connected iPhone / iPad (USB or Wi-Fi, iOS version, status) and the ones you used before; click one to choose what Start mirrors. |
+| **🪶 One program, small download (v2.5.12+)** | Everything runs inside one `ZenLink.exe` (Rust): Apple Driver, ZenLink Studio, AirPlay, Android and the driver settings. No Python helper. Setup is 9.3 MB (it was 60.8 MB). |
+| **📱 Device picker** | Lists every connected iPhone / iPad (USB or Wi-Fi, iOS version, status) and the ones you used before; since v2.5.13 Android phones work the same way. Click a device, then press Start; with nothing picked, ZenLink asks you to pick one first. |
 | **🧩 Android apps launcher (new in v2.5.1)** | **Apps** in the dock: a searchable grid of the phone's apps. Open one on the phone's screen or, on Android 10+, in its own window. |
 | **📂 Drop files on the window (new in v2.5.1)** | Android: an `.apk` is installed, other files go to Download. iPhone / iPad (Apple Driver): files land in an app with File Sharing (VLC, Documents …). |
 | **⬆️ In-app updates (new in v2.5.1)** | Settings › Updates checks GitHub (Stable or Beta), downloads with a SHA-256 check and updates in place, keeping your settings. |
-| **🔌 Two Apple connection modes** | Choose before anything connects: **Apple Driver** (Apple's own driver, full control) or **ZenLink Studio** (for live streaming, like TikTok LIVE Studio). Each offers **Kabel** or **Nirkabel (Wi-Fi)**. "Remember my choice" skips the question next time. |
+| **🔌 Two Apple connection modes** | Choose before anything connects: **Apple Driver** (Apple's own driver, full control) or **ZenLink Studio** (for live streaming, like TikTok LIVE Studio). Each works **wired (USB)** or over **Wi-Fi**. "Remember my choice" skips the question next time. |
 | **📡 ZenLink Studio over Wi-Fi (AirPlay)** | ZenLink is an AirPlay receiver: on the iPhone/iPad open **Control Center → Screen Mirroring → ZenLinkStudio**. No driver, no cable. The device's own stream is passed through untouched (HEVC or H.264, up to its native resolution); the how-to is shown on screen. |
 | **🎥 ZenLink Studio over the cable** | QuickTime capture over USB in H.264 at the device's full native resolution and high bitrate (measured 2360×1640 on iPad 11th gen, 12–30 Mbps, up to ~56 fps). Picture and sound only. |
-| **📶 Apple Driver over Wi-Fi** | Plug the device in once in Apple mode and ZenLink sets up Wi-Fi by itself; afterwards choose **Nirkabel**. ZenLink finds the device on the network itself, even where Windows gets no Bonjour replies. |
+| **📶 Apple Driver over Wi-Fi** | Plug the device in once in Apple Driver mode and ZenLink sets up Wi-Fi by itself; afterwards choose **Wi-Fi**. ZenLink finds the device on the network itself, even where Windows gets no Bonjour replies. |
 | **📊 Live stats** | Measured decode and display FPS next to the device name (switchable in Settings). |
 | **⚡ Native window (Rust)** | Media Foundation hardware decoding (H.264 / HEVC) into a Direct3D 11 swap chain, one frame per refresh, Liquid Glass UI (Slint). No WebView2, no Visual C++ runtime needed. |
 | **🎬 OBS ready** | Game Capture of the ZenLink window stays smooth and survives rotation (Settings › Record / stream in OBS). |
@@ -142,7 +143,7 @@ Stuck? Every screen says what is missing (driver, Developer Mode, USB debugging)
 
 ### Option 1B: Portable (one .exe, no installation)
 1. Download **`ZenLink-vX.Y.Z-Portable.exe`** from [**Releases**](../../releases/latest) and put it anywhere.
-2. Double-click it. The first start takes a few seconds (it unpacks the Apple backend); data is kept in `%LOCALAPPDATA%\ZenLink-Next`.
+2. Double-click it. Nothing is installed; settings and logs are kept in `%LOCALAPPDATA%\ZenLink-Next`.
 
 ### Option 2: Manual (source code, no git)
 Download **`ZenLink-vX.Y.Z-Manual.zip`** from [**Releases**](../../releases/latest), extract it and run **`Start ZenLink.bat`** (same first-run setup as below).
@@ -194,8 +195,19 @@ Full guide, including right-to-left languages: [`ZenshiroDev/resources/lang/READ
 
 ## 🔌 Connection Modes
 
-| | **Apple Driver** (Standard) | **ZenLink Studio · Kabel** | **ZenLink Studio · Wi-Fi (AirPlay)** |
-| :--- | :--- | :--- | :--- |
+Five ways to connect. Pick one on the home screen and switch any time in **Settings → Connection & Drivers**.
+
+| Mode | Driver / tool | Video | Control | Good to know |
+| :--- | :--- | :--- | :--- | :--- |
+| **Apple Driver** (Standard) · wired or Wi-Fi | Apple's own driver, nothing to install | HEVC, about 4–6 Mbps (device limit) | Touch, keyboard, gestures, buttons | iOS 17+ with Developer Mode. Wi-Fi sets itself up once over the cable. Apple apps (iTunes, Apple Devices) keep working. |
+| **ZenLink Studio · Wired** (USB) | libusb0 as the device's driver, installed by ZenLink after you confirm | H.264 at native resolution, 12–30 Mbps, up to ~56 fps | Picture and sound only | No Developer Mode needed. Apple apps can't see the device until you restore Apple's driver. |
+| **ZenLink Studio · Wi-Fi** (AirPlay) | None | The device's own H.264 / HEVC, up to native resolution | Picture and sound only | No Developer Mode needed. On the device: Control Center → Screen Mirroring → ZenLinkStudio, on the same network as the PC. |
+| **Android · Wired** (USB) | Google's `adb`, downloaded by ZenLink once | H.264, or H.265 when both sides support it; up to 120 fps | Mouse, keyboard, clipboard, buttons | Android 5.0+ with USB debugging. Sound on Android 11+. Nothing is installed on the phone. |
+| **Android · Wi-Fi** | Google's `adb` | Same as wired | Same as wired | One click from a USB connection, or Android 11+ wireless debugging (QR code or pairing code). |
+
+Changing the Apple driver asks for administrator permission, saves a backup and rolls back on failure; unplug and reconnect the cable afterwards.
+
+--- | :--- | :--- | :--- |
 | Driver | Apple's own, nothing to install | libusb0 as the device's driver (installed by ZenLink after you confirm) | None |
 | Video | HEVC, about 4–6 Mbps (device limit) | H.264 at native resolution, 12–30 Mbps, up to ~56 fps | The device's own HEVC / H.264, up to native resolution |
 | Control | Touch, keyboard, gestures, buttons | Picture and sound only | Picture and sound only |
